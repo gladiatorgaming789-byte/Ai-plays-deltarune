@@ -1,1 +1,1 @@
-AGENT_REVISION = "run7-bounded-navigation-map-alignment-v1"
+AGENT_REVISION = "run8-screenshot-grounded-guessing-v1"
