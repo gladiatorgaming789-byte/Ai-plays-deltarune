@@ -1,4 +1,5 @@
 import argparse
+from dataclasses import replace
 import json
 import time
 from pathlib import Path
@@ -20,10 +21,16 @@ from .window import (
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="External Deltarune AI controller")
+    parser = argparse.ArgumentParser(
+        description="External Deltarune AI controller"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("run", help="run one bounded agent episode")
-    run.add_argument("--live", action="store_true", help="actually send keyboard input")
+    run.add_argument(
+        "--live",
+        action="store_true",
+        help="actually send keyboard input",
+    )
     run.add_argument("--steps", type=int, default=100)
     run.add_argument(
         "--interval",
@@ -37,7 +44,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="deltarune",
         help="part of the game window title or executable name",
     )
-    run.add_argument("--countdown", type=int, default=3, help="seconds before live input starts")
+    run.add_argument(
+        "--countdown",
+        type=int,
+        default=3,
+        help="seconds before live input starts",
+    )
     run.add_argument("--telemetry-port", type=int, default=42069)
     run.add_argument(
         "--memory",
@@ -57,14 +69,35 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("memory/window_titles.json"),
         help="known Deltarune window titles and executable names",
     )
-    run.add_argument("--no-telemetry", action="store_true", help="disable the local telemetry listener")
-    run.add_argument("--region", nargs=4, type=int, metavar=("LEFT", "TOP", "WIDTH", "HEIGHT"))
+    run.add_argument(
+        "--no-telemetry",
+        action="store_true",
+        help="disable the local telemetry listener",
+    )
+    run.add_argument(
+        "--region",
+        nargs=4,
+        type=int,
+        metavar=("LEFT", "TOP", "WIDTH", "HEIGHT"),
+    )
     run.add_argument("--stop-file", type=Path, help=argparse.SUPPRESS)
-    run.add_argument("--event-stream", action="store_true", help=argparse.SUPPRESS)
-    listen = sub.add_parser("telemetry", help="print telemetry without controlling the game")
+    run.add_argument(
+        "--event-stream",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+
+    listen = sub.add_parser(
+        "telemetry",
+        help="print telemetry without controlling the game",
+    )
     listen.add_argument("--port", type=int, default=42069)
     listen.add_argument("--seconds", type=float, default=30.0)
-    replay = sub.add_parser("replay", help="evaluate a recorded run without opening the game")
+
+    replay = sub.add_parser(
+        "replay",
+        help="evaluate a recorded run without opening the game",
+    )
     replay.add_argument("run_directory", type=Path)
     replay.add_argument(
         "--visual-memory",
@@ -72,7 +105,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("memory/visual_states.json"),
         help="visual model used to reclassify saved frames",
     )
-    replay.add_argument("--no-save", action="store_true", help="do not write metrics.json and replay.json")
+    replay.add_argument(
+        "--no-save",
+        action="store_true",
+        help="do not write metrics.json and replay.json",
+    )
     sub.add_parser("gui", help="open the desktop controller and wall-map viewer")
     return parser
 
@@ -81,14 +118,17 @@ def listen(args: argparse.Namespace) -> None:
     receiver = TelemetryReceiver(args.port)
     deadline = time.monotonic() + args.seconds
     previous = None
-    print(f"Listening on 127.0.0.1:{args.port}; press Ctrl+C to stop.")
+    print(
+        f"Listening on 127.0.0.1:{args.port}; press Ctrl+C to stop."
+    )
     try:
         while time.monotonic() < deadline:
             sample = receiver.poll()
             if sample and sample != previous:
                 player_position = (
                     f" player=({sample.player_x:.1f},{sample.player_y:.1f})"
-                    if sample.player_x is not None and sample.player_y is not None
+                    if sample.player_x is not None
+                    and sample.player_y is not None
                     else ""
                 )
                 camera = (
@@ -113,7 +153,11 @@ def listen(args: argparse.Namespace) -> None:
         receiver.close()
 
 
-def _runtime_status(event_stream: bool, status: str, message: str) -> None:
+def _runtime_status(
+    event_stream: bool,
+    status: str,
+    message: str,
+) -> None:
     if event_stream:
         print(
             "AI_GUI_EVENT\t"
@@ -132,26 +176,44 @@ def _runtime_status(event_stream: bool, status: str, message: str) -> None:
 
 
 def run(args: argparse.Namespace) -> Path:
-    if args.steps < 1 or (args.interval is not None and args.interval < 0) or args.countdown < 0:
-        raise ValueError("steps must be positive; interval and countdown must be non-negative")
+    if (
+        args.steps < 1
+        or (args.interval is not None and args.interval < 0)
+        or args.countdown < 0
+    ):
+        raise ValueError(
+            "steps must be positive; interval and countdown must be non-negative"
+        )
+
     observer = ScreenObserver(tuple(args.region) if args.region else None)
     detector = VisualStateDetector(args.visual_memory)
     cutscene_tracker = CutsceneTracker()
-    telemetry_receiver = None if args.no_telemetry else TelemetryReceiver(args.telemetry_port)
+    telemetry_receiver = (
+        None
+        if args.no_telemetry
+        else TelemetryReceiver(args.telemetry_port)
+    )
     policy = HierarchicalPolicy(args.seed, args.memory)
     if policy.memory_warning:
         print(f"Memory warning: {policy.memory_warning}")
     if detector.memory_warning:
         print(f"Visual memory warning: {detector.memory_warning}")
+
     controller = KeyboardController(args.live)
     tracker = EpisodeTracker()
-    print(f"Mode: {'LIVE' if args.live else 'DRY RUN'} | output: {tracker.directory}")
+    print(
+        f"Mode: {'LIVE' if args.live else 'DRY RUN'} | "
+        f"output: {tracker.directory}"
+    )
     print("Emergency stop: move mouse to upper-left corner or press Ctrl+C.")
+
     window = None
     if args.live:
         window = focus_window(args.game_window, args.window_memory)
         remember_window(args.window_memory, window)
-        print(f"Focused game window: {window.title} ({window.executable})")
+        print(
+            f"Focused game window: {window.title} ({window.executable})"
+        )
         for remaining in range(args.countdown, 0, -1):
             print(f"Starting controls in {remaining}...")
             time.sleep(1)
@@ -159,18 +221,24 @@ def run(args: argparse.Namespace) -> Path:
         window = find_window(args.game_window, args.window_memory)
         if window is not None:
             remember_window(args.window_memory, window)
+
     if window and not args.region:
         observer.set_window(window.hwnd, client_region(window.hwnd))
         print(f"Capturing game area: {observer.region}")
     if window is not None:
         controller.set_target_window(window.hwnd)
+
     telemetry_seen = False
     background_input = False
     try:
         for step in range(args.steps):
             if args.stop_file is not None and args.stop_file.exists():
-                print("Stop requested by GUI; ending the run safely.", flush=True)
+                print(
+                    "Stop requested by GUI; ending the run safely.",
+                    flush=True,
+                )
                 break
+
             if args.live:
                 use_background_input = not is_window_foreground(window)
                 if use_background_input != background_input:
@@ -180,45 +248,92 @@ def run(args: argparse.Namespace) -> Path:
                         _runtime_status(
                             args.event_stream,
                             "background",
-                            "Deltarune lost focus; continuing with input targeted only to its window.",
+                            "Deltarune lost focus; continuing with input "
+                            "targeted only to its window.",
                         )
                     else:
                         _runtime_status(
                             args.event_stream,
                             "running",
-                            "Deltarune is focused again; using normal foreground input.",
+                            "Deltarune is focused again; using normal "
+                            "foreground input.",
                         )
+
             observation = observer.observe(step)
             visual = detector.classify(observation.frame)
-            telemetry = telemetry_receiver.poll() if telemetry_receiver else None
+            telemetry = (
+                telemetry_receiver.poll()
+                if telemetry_receiver
+                else None
+            )
             if telemetry_receiver is not None:
-                policy.observe_room_trace(telemetry_receiver.drain_overworld_trace())
+                policy.observe_room_trace(
+                    telemetry_receiver.drain_overworld_trace()
+                )
             if telemetry is not None:
                 telemetry_seen = True
-                if observation.visual_valid:
-                    detector.learn_from_telemetry(observation.frame, telemetry.mode)
-            elif telemetry_receiver is not None and step == 15 and not telemetry_seen:
-                print("Telemetry warning: no packets received; continuing with the learned visual model.")
+            elif (
+                telemetry_receiver is not None
+                and step == 15
+                and not telemetry_seen
+            ):
+                print(
+                    "Telemetry warning: no packets received; continuing "
+                    "with the learned visual model."
+                )
+
             perception = cutscene_tracker.update(
                 fuse_perception(visual, telemetry),
                 telemetry,
                 observation.visual_valid,
             )
-            action = policy.choose(observation, perception, telemetry)
-            cutscene_tracker.note_action(action.name, policy.reason)
+            action = policy.choose(
+                observation,
+                perception,
+                telemetry,
+            )
+            observation = replace(
+                observation,
+                visual_valid=policy.last_visual_valid,
+            )
+
+            if (
+                telemetry is not None
+                and observation.visual_valid
+            ):
+                detector.learn_from_telemetry(
+                    observation.frame,
+                    telemetry.mode,
+                )
+
+            cutscene_tracker.note_action(
+                action.name,
+                policy.reason,
+            )
             map_updates = policy.drain_map_updates()
             location = (
-                f" room={telemetry.room_name or telemetry.room_id} pos=({telemetry.x:.0f},{telemetry.y:.0f})"
+                f" room={telemetry.room_name or telemetry.room_id} "
+                f"pos=({telemetry.x:.0f},{telemetry.y:.0f})"
                 if telemetry
                 else ""
             )
             if not args.event_stream:
                 print(
-                    f"{step:04d}: {perception.state.value:<9} {perception.confidence:.2f}"
-                    f" [{perception.source}] -> {action.name}{location} | {policy.reason}",
+                    f"{step:04d}: {perception.state.value:<9} "
+                    f"{perception.confidence:.2f} "
+                    f"[{perception.source}] -> {action.name}{location} "
+                    f"| {policy.reason}",
                     flush=True,
                 )
-            tracker.record(observation, perception, telemetry, action, policy.reason, args.live)
+
+            tracker.record(
+                observation,
+                perception,
+                telemetry,
+                action,
+                policy.reason,
+                args.live,
+            )
             if args.event_stream:
                 print(
                     "AI_GUI_EVENT\t"
@@ -231,15 +346,24 @@ def run(args: argparse.Namespace) -> Path:
                             "action": action.name,
                             "reason": policy.reason,
                             "visual_valid": observation.visual_valid,
-                            "telemetry": telemetry.as_dict() if telemetry else None,
+                            "telemetry": (
+                                telemetry.as_dict()
+                                if telemetry
+                                else None
+                            ),
                             "map_updates": map_updates,
                         },
                         separators=(",", ":"),
                     ),
                     flush=True,
                 )
+
             controller.execute(action)
-            time.sleep(action.cooldown if args.interval is None else args.interval)
+            time.sleep(
+                action.cooldown
+                if args.interval is None
+                else args.interval
+            )
     finally:
         controller.release_all()
         if telemetry_receiver:
