@@ -16,6 +16,12 @@ from uuid import uuid4
 
 from PIL import Image, ImageEnhance, ImageTk
 
+from .policy import (
+    CHARACTER_APPROACH_DIRECTIONS,
+    CHARACTER_SINGLE_APPROACH_MAX_TARGETS,
+    CHARACTER_SINGLE_APPROACH_MIN_INTEREST,
+    CHARACTER_SINGLE_APPROACH_MIN_VIEWS,
+)
 from .room_view import room_view_image_is_usable
 from .screen_regions import visible_region_coordinates
 from .window import (
@@ -80,12 +86,32 @@ def _decision_explanation(reason: str, state: str) -> tuple[str, str]:
             "CHOICE LEARNING",
             "Trying a remembered response pattern; outcomes that cause observed story progress will be preferred next time.",
         )
+    if "wait for choice result to settle" in reason_lower:
+        return (
+            "CHOICE CHECK",
+            "The AI already confirmed a response and is briefly waiting to see whether the menu closes or the game changes.",
+        )
+    if "choice capture stale" in reason_lower:
+        return (
+            "CHOICE CHECK",
+            "The choice is still active, but the current game image is stale, so the AI is waiting instead of moving or confirming the wrong response.",
+        )
+    if "choice patterns exhausted" in reason_lower:
+        return (
+            "CHOICE CHECK",
+            "Every safe response pattern for this menu has been tested, so the AI is waiting for the game state to change instead of cycling forever.",
+        )
     if "search room edge" in reason_lower:
         return "EXIT SEARCH", "Following an observed path continuation toward a possible room transition; it does not need to look like a door."
     if "probe possible room exit" in reason_lower:
         return "EXIT SEARCH", "Pressing through a learned map edge to test whether it changes rooms."
     if "investigate possible exit" in reason_lower:
         return "VISUAL GUESS", "Moving toward an on-screen region that might lead out of the room."
+    if "investigate possible character" in reason_lower:
+        return (
+            "VISUAL GUESS",
+            "Moving toward a compact obstruction currently visible on screen that might be a character; it remains unconfirmed until an interaction has a result.",
+        )
     if "investigate possible interactable" in reason_lower:
         return "VISUAL GUESS", "Moving toward visually distinctive scenery to test it through play."
     if "follow learned warp" in reason_lower:
@@ -311,6 +337,63 @@ class WallMapModel:
     def room(self, name: str) -> RoomMap:
         return self.rooms.setdefault(name, RoomMap())
 
+    @staticmethod
+    def _region_has_character_topology(
+        room: RoomMap,
+        region: tuple[int, int],
+        *,
+        views: int,
+        interest: float,
+    ) -> bool:
+        if not any(
+            (x // EXPLORATION_REGION_CELLS, y // EXPLORATION_REGION_CELLS)
+            == region
+            for x, y in room.cells
+        ):
+            return False
+        approaches: list[tuple[tuple[int, int], str]] = []
+        for (source_x, source_y, direction), failures in room.blocked_edges.items():
+            if failures <= 0 or direction not in DIRECTION_VECTORS:
+                continue
+            dx, dy = DIRECTION_VECTORS[direction]
+            target = (source_x + dx, source_y + dy)
+            if (
+                target[0] // EXPLORATION_REGION_CELLS,
+                target[1] // EXPLORATION_REGION_CELLS,
+            ) == region:
+                approaches.append((target, direction))
+        best_directions = 0
+        best_targets = 0
+        for target, _direction in approaches:
+            nearby = [
+                (candidate, direction)
+                for candidate, direction in approaches
+                if max(
+                    abs(candidate[0] - target[0]),
+                    abs(candidate[1] - target[1]),
+                )
+                <= 2
+            ]
+            directions = {direction for _target, direction in nearby}
+            targets = {candidate for candidate, _direction in nearby}
+            if (len(directions), -len(targets)) > (
+                best_directions,
+                -best_targets,
+            ):
+                best_directions = len(directions)
+                best_targets = len(targets)
+        if (
+            best_directions >= CHARACTER_APPROACH_DIRECTIONS
+            and best_targets <= 4
+        ):
+            return True
+        return (
+            best_directions >= 1
+            and best_targets <= CHARACTER_SINGLE_APPROACH_MAX_TARGETS
+            and views >= CHARACTER_SINGLE_APPROACH_MIN_VIEWS
+            and interest >= CHARACTER_SINGLE_APPROACH_MIN_INTEREST
+        )
+
     def load_memory(self, path: Path) -> None:
         if not path.exists():
             return
@@ -368,11 +451,23 @@ class WallMapModel:
                 hypothesis = item.get("hypothesis")
                 if hypothesis == "possible_interactable":
                     hypothesis = None
-                self.room(str(item["room"])).screen_regions[
-                    (int(item["region_x"]), int(item["region_y"]))
-                ] = {
-                    "views": int(item.get("views", 1)),
-                    "interest": float(item.get("interest", 0.0)),
+                room = self.room(str(item["room"]))
+                region = (int(item["region_x"]), int(item["region_y"]))
+                views = int(item.get("views", 1))
+                interest = float(item.get("interest", 0.0))
+                if (
+                    hypothesis == "possible_character"
+                    and not self._region_has_character_topology(
+                        room,
+                        region,
+                        views=views,
+                        interest=interest,
+                    )
+                ):
+                    hypothesis = None
+                room.screen_regions[region] = {
+                    "views": views,
+                    "interest": interest,
                     "hypothesis": hypothesis,
                     "inspections": int(item.get("inspections", 0)),
                 }
@@ -1934,7 +2029,10 @@ class AgentGUI:
             if classification == "confirmed_npc":
                 details.append("story character=confirmed by an observed choice menu")
             elif classification == "tested_nonchoice":
-                details.append("story character=unconfirmed; ordinary interaction will not be retried")
+                details.append(
+                    "story character=unconfirmed; ordinary interaction is cooled "
+                    "down unless stronger evidence appears"
+                )
             usefulness = str(interactable.get("usefulness") or "unknown")
             if usefulness == "progress":
                 details.append("story memory=useful; changed the game state")

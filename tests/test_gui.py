@@ -262,6 +262,56 @@ def test_ai_decision_output_explains_learned_choice_trial():
     assert "observed story progress" in explanation
 
 
+def test_ai_decision_output_explains_choice_settle_wait():
+    payload = _event(mode="choice")
+    payload.update(
+        {
+            "state": "menu",
+            "action": "wait",
+            "reason": "wait for choice result to settle",
+        }
+    )
+
+    category, _action, explanation = decision_parts(payload)
+
+    assert category == "CHOICE CHECK"
+    assert "already confirmed" in explanation
+
+
+def test_ai_decision_output_explains_stale_choice_wait():
+    payload = _event(mode="dialogue")
+    payload.update(
+        {
+            "state": "dialogue",
+            "action": "wait",
+            "reason": "choice capture stale; wait for a fresh menu frame",
+        }
+    )
+
+    category, _action, explanation = decision_parts(payload)
+
+    assert category == "CHOICE CHECK"
+    assert "wrong response" in explanation
+
+
+def test_ai_decision_output_explains_exhausted_choice_wait():
+    payload = _event(mode="choice")
+    payload.update(
+        {
+            "state": "menu",
+            "action": "wait",
+            "reason": (
+                "choice patterns exhausted; wait for menu state to change"
+            ),
+        }
+    )
+
+    category, _action, explanation = decision_parts(payload)
+
+    assert category == "CHOICE CHECK"
+    assert "cycling forever" in explanation
+
+
 def test_gui_tracks_current_camera_regions_and_unconfirmed_visual_guesses():
     model = WallMapModel()
     event = _event(48, 48)
@@ -423,6 +473,100 @@ def test_ai_decision_output_explains_visual_guesses_as_unconfirmed():
 
     assert category == "VISUAL GUESS"
     assert "visually distinctive scenery" in explanation
+
+
+def test_ai_decision_output_explains_current_character_guess():
+    payload = _event()
+    payload.update(
+        {
+            "state": "overworld",
+            "action": "left",
+            "reason": (
+                "investigate possible character seen on screen: "
+                "move left toward region (2, 1)"
+            ),
+        }
+    )
+
+    category, _action, explanation = decision_parts(payload)
+
+    assert category == "VISUAL GUESS"
+    assert "compact obstruction" in explanation
+    assert "unconfirmed" in explanation
+
+
+def test_gui_discards_old_character_guess_without_map_topology():
+    data = {
+        "version": 2,
+        "cell_size": 8,
+        "cells": [{"room": "room_test", "x": 1, "y": 1, "visits": 1}],
+        "screen_regions": [
+            {
+                "room": "room_test",
+                "region_x": 0,
+                "region_y": 0,
+                "views": 8,
+                "interest": 0.8,
+                "hypothesis": "possible_character",
+                "inspections": 0,
+            }
+        ],
+    }
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "navigation.json"
+        path.write_text(json.dumps(data), encoding="utf-8")
+        model = WallMapModel()
+        model.load_memory(path)
+
+    assert model.rooms["room_test"].screen_regions[(0, 0)]["hypothesis"] is None
+
+
+def test_gui_keeps_character_guess_supported_from_two_sides():
+    data = {
+        "version": 2,
+        "cell_size": 8,
+        "cells": [
+            {"room": "room_test", "x": 0, "y": 1, "visits": 1},
+            {"room": "room_test", "x": 1, "y": 0, "visits": 1},
+        ],
+        "blocked_edges": [
+            {
+                "room": "room_test",
+                "x": 0,
+                "y": 1,
+                "direction": "right",
+                "failures": 3,
+            },
+            {
+                "room": "room_test",
+                "x": 1,
+                "y": 0,
+                "direction": "down",
+                "failures": 3,
+            },
+        ],
+        "screen_regions": [
+            {
+                "room": "room_test",
+                "region_x": 0,
+                "region_y": 0,
+                "views": 3,
+                "interest": 0.2,
+                "hypothesis": "possible_character",
+                "inspections": 0,
+            }
+        ],
+    }
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "navigation.json"
+        path.write_text(json.dumps(data), encoding="utf-8")
+        model = WallMapModel()
+        model.load_memory(path)
+
+    assert (
+        model.rooms["room_test"].screen_regions[(0, 0)]["hypothesis"]
+        == "possible_character"
+    )
 
 
 def test_tentative_interaction_probe_is_not_shown_on_learned_map():

@@ -56,12 +56,10 @@ def test_repeated_room_link_increases_cooldown_backoff():
     explorer.navigation_tick = 100
     explorer.observed_room = "room_a"
 
-    class Sample:
-        room_name = "room_b"
-        room_id = 2
-
     # Test the backoff formula directly without needing a full telemetry packet.
-    multiplier = min(4, 1 + (explorer.room_link_crossings[link] + 1) // 2)
+    multiplier = explorer._room_link_backoff_multiplier(
+        explorer.room_link_crossings[link] + 1
+    )
     expires = explorer.navigation_tick + 600 * multiplier
 
     assert expires == 1300

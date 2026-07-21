@@ -189,3 +189,63 @@ def test_deliberately_started_object_dialogue_does_not_become_a_cutscene():
 
     assert result.state is GameState.DIALOGUE
     assert not tracker.cutscene_active
+
+
+def test_dialogue_packet_gap_preserves_deliberate_interaction_provenance():
+    features = VisualFeatures(0, 0, 0, 0, 0)
+    dialogue = Perception(GameState.DIALOGUE, 0.99, features, "telemetry")
+    unknown = Perception(GameState.UNKNOWN, 0.0, features, "stale-capture")
+    writer = TelemetrySample(
+        "dialogue",
+        1,
+        "room_test",
+        40,
+        121,
+        "obj_writer",
+        0,
+        player_x=100,
+        player_y=120,
+        player_controlled=False,
+    )
+    tracker = CutsceneTracker()
+    tracker.note_action("confirm", "blocked up; try interaction")
+    for _ in range(tracker.DIALOGUE_THRESHOLD + 2):
+        result = tracker.update(dialogue, writer)
+        tracker.note_action("confirm", "advance dialogue")
+
+    assert result.state is GameState.DIALOGUE
+    tracker.update(unknown, None, visual_valid=False)
+    assert tracker.in_dialogue
+    assert tracker.dialogue_started_by_interaction
+
+    resumed = tracker.update(dialogue, writer)
+
+    assert resumed.state is GameState.DIALOGUE
+    assert not tracker.cutscene_active
+
+
+def test_long_non_dialogue_gap_expires_old_interaction_provenance():
+    features = VisualFeatures(0, 0, 0, 0, 0)
+    dialogue = Perception(GameState.DIALOGUE, 0.99, features, "telemetry")
+    unknown = Perception(GameState.UNKNOWN, 0.0, features, "stale-capture")
+    writer = TelemetrySample(
+        "dialogue",
+        1,
+        "room_test",
+        40,
+        121,
+        "obj_writer",
+        0,
+        player_x=100,
+        player_y=120,
+    )
+    tracker = CutsceneTracker()
+    tracker.note_action("confirm", "blocked up; try interaction")
+    tracker.update(dialogue, writer)
+
+    for _ in range(tracker.TELEMETRY_GAP_GRACE + 1):
+        tracker.update(unknown, None, visual_valid=False)
+
+    assert not tracker.in_dialogue
+    assert not tracker.dialogue_started_by_interaction
+    assert tracker.dialogue_steps == 0

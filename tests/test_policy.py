@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 from deltarune_agent.actions import ACTIONS
 from deltarune_agent.observer import Observation
 from deltarune_agent.policy import (
+    CHOICE_PATTERNS,
     COLLISION_CONFIRM_SAMPLES,
     DIRECTION_VECTORS,
     EXIT_PROBE_COMMIT_STEPS,
@@ -710,6 +711,58 @@ def test_ordinary_dialogue_is_remembered_as_flavor_not_story_goal():
     assert not policy._story_interaction_retryable(key)
 
 
+def test_interaction_finishes_after_an_unknown_state_gap():
+    observation = Observation(Image.new("RGB", (2, 2)), step=0, visual_valid=False)
+    features = VisualFeatures(0, 0, 0, 0, 0, 0)
+    dialogue = Perception(GameState.DIALOGUE, 0.99, features, "telemetry")
+    unknown = Perception(GameState.UNKNOWN, 0.0, features, "stale-capture")
+    overworld = Perception(GameState.OVERWORLD, 0.99, features, "telemetry")
+    sample = TelemetrySample(
+        "overworld", 1, "room_test", 40, 40, "obj_mainchara", 1
+    )
+    policy = StarterPolicy()
+    policy.interaction_candidate = (
+        "room_test", 5, 5, "right", None, None, 6, 5
+    )
+
+    policy.choose(observation, dialogue, sample)
+    policy.choose(observation, unknown, None)
+
+    assert policy.active_interaction_key == ("room_test", 6, 5)
+
+    policy.choose(observation, overworld, replace(sample, received_at=2))
+
+    assert policy.active_interaction_key is None
+    assert policy.interactables[("room_test", 6, 5)]["last_outcome"] == (
+        "ordinary_dialogue"
+    )
+
+
+def test_interaction_that_starts_a_battle_is_story_progress():
+    observation = Observation(Image.new("RGB", (2, 2)), step=0, visual_valid=False)
+    features = VisualFeatures(0, 0, 0, 0, 0, 0)
+    dialogue = Perception(GameState.DIALOGUE, 0.99, features, "telemetry")
+    battle = Perception(GameState.BATTLE, 0.99, features, "telemetry")
+    overworld = Perception(GameState.OVERWORLD, 0.99, features, "telemetry")
+    sample = TelemetrySample(
+        "overworld", 1, "room_test", 40, 40, "obj_mainchara", 1
+    )
+    policy = StarterPolicy()
+    policy.interaction_candidate = (
+        "room_test", 5, 5, "right", None, None, 6, 5
+    )
+
+    policy.choose(observation, dialogue, sample)
+    policy.choose(observation, battle, replace(sample, mode="battle"))
+    policy.choose(observation, overworld, replace(sample, received_at=2))
+
+    record = policy.interactables[("room_test", 6, 5)]
+    assert record["progressions"] == 1
+    assert record["usefulness"] == "progress"
+    assert record["last_outcome"] == "battle_started"
+    assert policy.story_progress_events == 1
+
+
 def test_story_search_prefers_unresolved_choice_over_unknown_interaction():
     policy = StarterPolicy()
     room = "room_test"
@@ -858,6 +911,40 @@ def test_choice_waits_for_confirm_result_before_starting_another_trial():
     assert record["attempts"] == attempts_before
 
 
+def test_choice_menu_stops_after_all_patterns_instead_of_looping_forever():
+    observation = Observation(Image.new("RGB", (160, 120), (20, 20, 20)), step=0)
+    sample = TelemetrySample(
+        "choice",
+        1,
+        "room_test",
+        10,
+        10,
+        "obj_choicer_old",
+        0,
+        player_x=40,
+        player_y=40,
+    )
+    policy = StarterPolicy()
+    policy._choose_menu_action(observation, sample, menu_started=True)
+
+    while policy.choice_session_trials < len(CHOICE_PATTERNS):
+        policy.menu_action_queue.clear()
+        policy.choice_settle_steps = 2
+        policy._choose_menu_action(observation, sample, menu_started=False)
+
+    policy.menu_action_queue.clear()
+    policy.choice_settle_steps = 2
+    action = policy._choose_menu_action(
+        observation,
+        sample,
+        menu_started=False,
+    )
+
+    assert action.name == "wait"
+    assert "choice patterns exhausted" in policy.reason
+    assert sum(policy.active_choice_record["attempts"]) == len(CHOICE_PATTERNS)
+
+
 def test_visible_writer_choice_uses_menu_policy_despite_dialogue_telemetry():
     observation = Observation(_visible_choice_frame(), step=0)
     features = VisualFeatures(0, 0, 0, 0, 0, 0)
@@ -880,6 +967,75 @@ def test_visible_writer_choice_uses_menu_policy_despite_dialogue_telemetry():
     assert "choice trial" in policy.reason
     assert policy.interactables[key]["choice_menus"] == 1
     assert policy.interactables[key]["classification"] == "confirmed_npc"
+    assert any(
+        update.get("type") == "interaction_outcome"
+        and update.get("classification") == "confirmed_npc"
+        for update in policy.map_updates
+    )
+
+
+def test_reentered_known_npc_refreshes_live_map_to_choice_pending():
+    observation = Observation(_visible_choice_frame(), step=0)
+    sample = TelemetrySample(
+        "dialogue",
+        1,
+        "room_test",
+        29,
+        170,
+        "obj_writer",
+        0,
+        player_x=80,
+        player_y=80,
+    )
+    key = ("room_test", 10, 10)
+    policy = StarterPolicy()
+    policy.active_interaction_key = key
+    policy.interactables[key] = {
+        "choice_menus": 1,
+        "classification": "confirmed_npc",
+        "usefulness": "flavor",
+    }
+
+    policy._start_choice_trial(observation, sample)
+
+    assert policy.interactables[key]["usefulness"] == "choice_pending"
+    assert any(
+        update.get("type") == "interaction_outcome"
+        and update.get("usefulness") == "choice_pending"
+        for update in policy.map_updates
+    )
+
+
+def test_stale_writer_frame_cannot_create_or_advance_a_choice():
+    valid = Observation(_visible_choice_frame(), step=0)
+    stale = Observation(_visible_choice_frame(), step=1, visual_valid=False)
+    features = VisualFeatures(0, 0, 0, 0, 0, 0)
+    dialogue = Perception(GameState.DIALOGUE, 0.99, features, "telemetry")
+    sample = TelemetrySample(
+        "dialogue",
+        1,
+        "room_test",
+        29,
+        170,
+        "obj_writer",
+        0,
+        player_x=80,
+        player_y=80,
+    )
+    policy = StarterPolicy()
+
+    first = policy.choose(stale, dialogue, sample)
+
+    assert first.name == "confirm"
+    assert policy.active_choice_record is None
+
+    policy.choose(valid, dialogue, sample)
+    queued_actions = list(policy.menu_action_queue)
+    second = policy.choose(stale, dialogue, sample)
+
+    assert second.name == "wait"
+    assert "choice capture stale" in policy.reason
+    assert list(policy.menu_action_queue) == queued_actions
 
 
 def test_failed_choice_keeps_npc_retryable_and_selects_next_pattern():
@@ -919,7 +1075,7 @@ def test_failed_choice_keeps_npc_retryable_and_selects_next_pattern():
     assert "down" in policy.menu_action_queue
 
 
-def test_choice_reengagement_is_bounded():
+def test_choice_reengagement_allows_every_pattern_then_stops():
     policy = StarterPolicy()
     key = ("room_test", 10, 10)
     policy.interactables[key] = {
@@ -940,7 +1096,72 @@ def test_choice_reengagement_is_bounded():
         }
     )
 
+    assert policy._story_interaction_retryable(key)
+
+    policy.choice_trials[0]["attempts"] = [1] * len(CHOICE_PATTERNS)
+    policy.choice_trials[0]["failures"] = [1] * len(CHOICE_PATTERNS)
+
     assert not policy._story_interaction_retryable(key)
+
+
+def test_choice_learning_reaches_the_third_vertical_option_pattern():
+    observation = Observation(Image.new("RGB", (160, 120), (20, 20, 20)), step=0)
+    sample = TelemetrySample(
+        "choice",
+        1,
+        "room_test",
+        10,
+        10,
+        "obj_choicer_old",
+        0,
+        player_x=40,
+        player_y=40,
+    )
+    policy = StarterPolicy()
+
+    for expected_pattern in range(4):
+        policy._start_choice_trial(observation, sample)
+        assert policy.pending_choice_pattern == expected_pattern
+        if expected_pattern == 3:
+            assert list(policy.menu_action_queue).count("down") == 2
+            break
+        policy._mark_pending_choice_failed("no progress")
+
+
+def test_standalone_menu_choice_cannot_claim_later_story_progress():
+    observation = Observation(Image.new("RGB", (160, 120), (20, 20, 20)), step=0)
+    features = VisualFeatures(0, 0, 0, 0, 0, 0)
+    menu = Perception(GameState.MENU, 0.99, features, "telemetry")
+    overworld = Perception(GameState.OVERWORLD, 0.99, features, "telemetry")
+    sample = TelemetrySample(
+        "choice",
+        1,
+        "room_test",
+        40,
+        40,
+        "obj_choicer_old",
+        0,
+        player_x=40,
+        player_y=40,
+    )
+    policy = StarterPolicy()
+
+    policy.choose(observation, menu, sample)
+    record = policy.pending_choice_record
+    assert record is not None
+
+    policy.choose(
+        observation,
+        overworld,
+        replace(sample, mode="overworld", object_name="obj_mainchara"),
+    )
+
+    assert policy.pending_choice_record is None
+    assert record["failures"][0] == 1
+    assert policy.story_stall_steps < STORY_SEARCH_STEPS
+    policy._record_story_progress("unrelated later room change", sample)
+    assert record["successes"] == [0] * len(CHOICE_PATTERNS)
+    assert record["successful_pattern"] is None
 
 
 def test_legacy_long_dialogue_gets_one_visible_choice_migration_retry():

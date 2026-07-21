@@ -24,6 +24,7 @@ class VisualFreshnessGuard:
 
     def __init__(self) -> None:
         self._fingerprint: bytes | None = None
+        self._stale_fingerprint: bytes | None = None
         self._room: str | None = None
         self._position: tuple[float, float] | None = None
         self.frozen_frames = 0
@@ -67,9 +68,25 @@ class VisualFreshnessGuard:
         room, position = self._telemetry_context(telemetry)
         if fingerprint != self._fingerprint:
             self._fingerprint = fingerprint
+            self._stale_fingerprint = None
             self._room = room
             self._position = position
             return observation
+
+        if fingerprint == self._stale_fingerprint:
+            # Once telemetry proves a bitmap is frozen, do not trust the same
+            # bitmap during a later packet gap.  Only a genuinely new frame
+            # can clear the stale-capture state.
+            self.frozen_frames += 1
+            return replace(observation, visual_valid=False)
+
+        # Capture can start a few frames before the first telemetry packet.
+        # Bind that first authoritative context to the existing bitmap so a
+        # later movement can still prove that the capture froze.
+        if self._room is None and room is not None:
+            self._room = room
+        if self._position is None and position is not None:
+            self._position = position
 
         room_changed = (
             room is not None
@@ -84,6 +101,7 @@ class VisualFreshnessGuard:
             ) > self.POSITION_TOLERANCE
 
         if room_changed or moved:
+            self._stale_fingerprint = fingerprint
             self.frozen_frames += 1
             return replace(observation, visual_valid=False)
         return observation

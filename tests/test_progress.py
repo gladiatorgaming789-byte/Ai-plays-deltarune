@@ -41,4 +41,6 @@ def test_record_keeps_logging_when_frame_saving_fails(tmp_path: Path):
 
     lines = tracker.events.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1
-    assert json.loads(lines[0])["action"] == "wait"
+    event = json.loads(lines[0])
+    assert event["action"] == "wait"
+    assert event["visual_valid"] is True

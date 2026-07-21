@@ -30,16 +30,29 @@ class HierarchicalPolicy:
     def __getattr__(self, name: str):
         return getattr(self.explorer, name)
 
+    def validate_observation(
+        self,
+        observation: Observation,
+        telemetry: TelemetrySample | None = None,
+    ) -> Observation:
+        """Apply capture freshness before any visual subsystem consumes it."""
+        observation = self.visual_freshness.validate(observation, telemetry)
+        self.last_visual_valid = observation.visual_valid
+        return observation
+
     def choose(
         self,
         observation: Observation,
         perception: Perception,
         telemetry: TelemetrySample | None = None,
     ) -> Action:
-        observation = self.visual_freshness.validate(observation, telemetry)
-        self.last_visual_valid = observation.visual_valid
+        observation = self.validate_observation(observation, telemetry)
 
         if perception.state is GameState.BATTLE:
+            # The specialized controller owns the action, but the explorer
+            # still owns interaction/story memory.  Let it observe the battle
+            # transition so an NPC-started encounter is not mislabeled flavor.
+            self.explorer.choose(observation, perception, telemetry)
             soul = None
             if telemetry is not None:
                 x = telemetry.player_x if telemetry.player_x is not None else telemetry.x

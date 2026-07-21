@@ -109,6 +109,7 @@ class CutsceneTracker:
         self.control_locked_steps = 0
         self.cutscene_active = False
         self.gap_steps = 0
+        self.dialogue_gap_steps = 0
         self.in_dialogue = False
         self.dialogue_started_by_interaction = False
         self.last_action: str | None = None
@@ -128,7 +129,9 @@ class CutsceneTracker:
         # A present telemetry sender is authoritative about writer state.
         # Visual dialogue remains a fallback only during a telemetry gap.
         dialogue = mode == "dialogue" or (
-            telemetry is None and perception.state is GameState.DIALOGUE
+            telemetry is None
+            and visual_valid
+            and perception.state is GameState.DIALOGUE
         )
         player_controlled = getattr(telemetry, "player_controlled", None)
         control_locked = player_controlled is False and mode == "overworld"
@@ -137,6 +140,7 @@ class CutsceneTracker:
         elif telemetry is not None:
             self.control_locked_steps = 0
         if dialogue:
+            self.dialogue_gap_steps = 0
             if not self.in_dialogue:
                 self.dialogue_started_by_interaction = (
                     self.last_action == "confirm"
@@ -158,10 +162,25 @@ class CutsceneTracker:
                 )
             return perception
 
-        self.in_dialogue = False
-        self.dialogue_started_by_interaction = False
         if telemetry is not None:
+            # A real non-dialogue packet is authoritative evidence that the
+            # writer closed.  A packet gap is not: preserve the interaction
+            # provenance and step count until telemetry resumes so ordinary
+            # NPC dialogue cannot be reclassified as an automatic cutscene.
+            self.in_dialogue = False
+            self.dialogue_started_by_interaction = False
             self.dialogue_steps = 0
+            self.dialogue_gap_steps = 0
+        elif self.in_dialogue:
+            self.dialogue_gap_steps += 1
+            if self.dialogue_gap_steps > self.TELEMETRY_GAP_GRACE:
+                # Preserve provenance across brief packet loss, not forever.
+                # After a long visually non-dialogue gap, a future dialogue
+                # must establish its own origin and step count.
+                self.in_dialogue = False
+                self.dialogue_started_by_interaction = False
+                self.dialogue_steps = 0
+                self.dialogue_gap_steps = 0
         if self.control_locked_steps >= self.CONTROL_LOCK_THRESHOLD:
             self.cutscene_active = True
             self.gap_steps = 0

@@ -38,7 +38,6 @@ CHARACTER_SINGLE_APPROACH_MIN_VIEWS = 3
 CHARACTER_SINGLE_APPROACH_MIN_INTEREST = 0.18
 CHARACTER_PROBE_VERSION = 1
 LEGACY_CHARACTER_PROBE_FAILURES = 4
-CHOICE_REENGAGEMENT_LIMIT = 3
 CHOICE_CONFIRM_SETTLE_STEPS = 2
 LEGACY_CHOICE_DIALOGUE_STEPS = 30
 STORY_USEFULNESS_RANK = {
@@ -59,6 +58,10 @@ CHOICE_PATTERNS: tuple[tuple[str, ...], ...] = (
     ("up",),
 )
 CHOICE_RESET: tuple[str, ...] = ("up", "up", "up", "left", "left", "left")
+# Give each response pattern one fair attempt before retiring an unresolved
+# choice.  Keeping this tied to the pattern table prevents newly added menu
+# strategies from becoming unreachable.
+CHOICE_REENGAGEMENT_LIMIT = len(CHOICE_PATTERNS)
 
 
 class StarterPolicy:
@@ -211,6 +214,7 @@ class StarterPolicy:
         self.active_interaction_key: tuple[str, int, int] | None = None
         self.active_interaction_dialogue_steps = 0
         self.active_interaction_cutscene_steps = 0
+        self.active_interaction_saw_battle = False
         self.menu_action_queue: deque[str] = deque()
         self.interaction_cooldowns: dict[tuple[str, int, int, str], int] = {}
         self.active_choice_record: dict[str, object] | None = None
@@ -218,6 +222,7 @@ class StarterPolicy:
         self.pending_choice_pattern: int | None = None
         self.pending_choice_epoch = self.story_epoch
         self.choice_settle_steps = 0
+        self.choice_session_trials = 0
         if any(self._story_interaction_retryable(key) for key in self.interactables):
             self.story_stall_steps = STORY_SEARCH_STEPS
 
@@ -228,9 +233,21 @@ class StarterPolicy:
         telemetry: TelemetrySample | None = None,
     ) -> Action:
         state = perception.state
-        if state is GameState.DIALOGUE and (
-            looks_like_dialogue_choice(observation.frame)
-            or (self.active_choice_record is not None and self.menu_action_queue)
+        if (
+            state is GameState.DIALOGUE
+            and (
+                (
+                    observation.visual_valid
+                    and looks_like_dialogue_choice(observation.frame)
+                )
+                or (
+                    self.active_choice_record is not None
+                    and (
+                        self.menu_action_queue
+                        or not observation.visual_valid
+                    )
+                )
+            )
         ):
             # Some Deltarune prompts are rendered by obj_writer rather than a
             # choicer object. Preserve telemetry dialogue authority while
@@ -238,7 +255,12 @@ class StarterPolicy:
             state = GameState.MENU
         menu_started = state is GameState.MENU and self.previous_state is not GameState.MENU
         interaction_was_pending = self.interaction_candidate is not None
-        if state in {GameState.DIALOGUE, GameState.CUTSCENE, GameState.MENU}:
+        if state in {
+            GameState.DIALOGUE,
+            GameState.CUTSCENE,
+            GameState.MENU,
+            GameState.BATTLE,
+        }:
             self._complete_pending_interaction()
         self._observe_story_state(state, telemetry, interaction_was_pending)
         if state is GameState.OVERWORLD and telemetry and telemetry.mode == "overworld":
@@ -256,6 +278,15 @@ class StarterPolicy:
             names = ["left", "up", "right", "down", "confirm"]
             return self._select(names[observation.step % len(names)], "battle cycle", telemetry)
         if state is GameState.MENU:
+            if (
+                not observation.visual_valid
+                and self.active_choice_record is not None
+            ):
+                return self._select(
+                    "wait",
+                    "choice capture stale; wait for a fresh menu frame",
+                    telemetry,
+                )
             return self._choose_menu_action(observation, telemetry, menu_started)
         if state is GameState.UNKNOWN:
             name = "confirm" if observation.step % 8 == 0 else "wait"
@@ -352,12 +383,42 @@ class StarterPolicy:
         if self.active_interaction_key is not None:
             interaction = self.interactables.get(self.active_interaction_key)
             if interaction is not None:
+                previous_map_state = (
+                    int(interaction.get("choice_menus", 0)),
+                    interaction.get("classification"),
+                    interaction.get("usefulness"),
+                )
                 interaction["choice_menus"] = max(
                     1,
                     int(interaction.get("choice_menus", 0)),
                 )
                 interaction["classification"] = "confirmed_npc"
                 interaction["usefulness"] = "choice_pending"
+                current_map_state = (
+                    int(interaction.get("choice_menus", 0)),
+                    interaction.get("classification"),
+                    interaction.get("usefulness"),
+                )
+                if current_map_state != previous_map_state:
+                    key = self.active_interaction_key
+                    self.map_updates.append(
+                        {
+                            "type": "interaction_outcome",
+                            "room": key[0],
+                            "cell": [key[1], key[2]],
+                            "choice_menus": int(
+                                interaction.get("choice_menus", 0)
+                            ),
+                            "classification": interaction.get(
+                                "classification"
+                            ),
+                            "usefulness": interaction.get("usefulness"),
+                            "last_outcome": interaction.get("last_outcome"),
+                            "outcome_counts": interaction.get(
+                                "outcome_counts", {}
+                            ),
+                        }
+                    )
         if (
             self.pending_choice_record is record
             and self.pending_choice_pattern is not None
@@ -376,6 +437,7 @@ class StarterPolicy:
                 key=lambda index: (attempts[index] + failures[index], attempts[index], index),
             )
         attempts[pattern_index] += 1
+        self.choice_session_trials += 1
         self.active_choice_record = record
         self.pending_choice_record = record
         self.pending_choice_pattern = pattern_index
@@ -392,6 +454,7 @@ class StarterPolicy:
     ) -> Action:
         if menu_started:
             self.choice_settle_steps = 0
+            self.choice_session_trials = 0
             self._start_choice_trial(observation, telemetry)
         elif not self.menu_action_queue:
             # A confirm can take a few frames to close the menu. Starting a
@@ -409,6 +472,22 @@ class StarterPolicy:
                     telemetry,
                 )
             self.choice_settle_steps = 0
+            successful = (
+                self.active_choice_record.get("successful_pattern")
+                if self.active_choice_record is not None
+                else None
+            )
+            session_limit = (
+                1
+                if isinstance(successful, int)
+                else CHOICE_REENGAGEMENT_LIMIT
+            )
+            if self.choice_session_trials >= session_limit:
+                return self._select(
+                    "wait",
+                    "choice patterns exhausted; wait for menu state to change",
+                    telemetry,
+                )
             self._start_choice_trial(observation, telemetry)
         action = self.menu_action_queue.popleft()
         pattern = self.pending_choice_pattern or 0
@@ -431,12 +510,24 @@ class StarterPolicy:
                 self.active_interaction_dialogue_steps += 1
             elif state is GameState.CUTSCENE:
                 self.active_interaction_cutscene_steps += 1
-            elif state is GameState.OVERWORLD and self.previous_state in {
-                GameState.DIALOGUE,
-                GameState.CUTSCENE,
-                GameState.MENU,
-            }:
+            elif state is GameState.BATTLE:
+                self.active_interaction_saw_battle = True
+            elif state is GameState.OVERWORLD:
                 self._finish_active_interaction(telemetry)
+
+        if (
+            state is GameState.OVERWORLD
+            and self.previous_state is GameState.MENU
+            and self.active_interaction_key is None
+            and self.pending_choice_record is not None
+        ):
+            # Save/configuration menus use the same telemetry mode as story
+            # choices.  Once such a menu simply returns to play, retire that
+            # trial so a later unrelated room change cannot be credited to it.
+            self._mark_pending_choice_failed(
+                "menu closed without observed story progress",
+                prioritize_retry=False,
+            )
 
         sequence_started = self.previous_state not in {
             GameState.DIALOGUE,
@@ -463,13 +554,14 @@ class StarterPolicy:
         telemetry: TelemetrySample | None,
     ) -> None:
         if self.pending_choice_record is not None and self.pending_choice_pattern is not None:
-            successes = self._choice_counts(self.pending_choice_record, "successes")
+            completed_record = self.pending_choice_record
+            successes = self._choice_counts(completed_record, "successes")
             successes[self.pending_choice_pattern] += 1
-            self.pending_choice_record["successful_pattern"] = self.pending_choice_pattern
+            completed_record["successful_pattern"] = self.pending_choice_pattern
             self.map_updates.append(
                 {
                     "type": "choice_outcome",
-                    "room": self.pending_choice_record.get("room"),
+                    "room": completed_record.get("room"),
                     "pattern": self.pending_choice_pattern + 1,
                     "successful": True,
                     "event": event,
@@ -477,6 +569,11 @@ class StarterPolicy:
             )
             self.pending_choice_record = None
             self.pending_choice_pattern = None
+            if self.active_choice_record is completed_record:
+                self.active_choice_record = None
+                self.menu_action_queue.clear()
+                self.choice_settle_steps = 0
+                self.choice_session_trials = 0
         self.story_epoch += 1
         self.story_progress_events += 1
         self.story_stall_steps = 0
@@ -490,15 +587,21 @@ class StarterPolicy:
             update["cell"] = list(self._cell(telemetry))
         self.map_updates.append(update)
 
-    def _mark_pending_choice_failed(self, event: str) -> None:
+    def _mark_pending_choice_failed(
+        self,
+        event: str,
+        *,
+        prioritize_retry: bool = True,
+    ) -> None:
         if self.pending_choice_record is None or self.pending_choice_pattern is None:
             return
-        failures = self._choice_counts(self.pending_choice_record, "failures")
+        failed_record = self.pending_choice_record
+        failures = self._choice_counts(failed_record, "failures")
         failures[self.pending_choice_pattern] += 1
         self.map_updates.append(
             {
                 "type": "choice_outcome",
-                "room": self.pending_choice_record.get("room"),
+                "room": failed_record.get("room"),
                 "pattern": self.pending_choice_pattern + 1,
                 "successful": False,
                 "event": event,
@@ -506,9 +609,18 @@ class StarterPolicy:
         )
         self.pending_choice_record = None
         self.pending_choice_pattern = None
-        # Keep the NPC as the immediate objective instead of resuming general
-        # exploration after an option had no observed story consequence.
-        self.story_stall_steps = max(self.story_stall_steps, STORY_SEARCH_STEPS)
+        if self.active_choice_record is failed_record:
+            self.active_choice_record = None
+            self.menu_action_queue.clear()
+            self.choice_settle_steps = 0
+            self.choice_session_trials = 0
+        if prioritize_retry:
+            # Keep the NPC as the immediate objective instead of resuming
+            # general exploration after an option had no observed consequence.
+            self.story_stall_steps = max(
+                self.story_stall_steps,
+                STORY_SEARCH_STEPS,
+            )
 
     @staticmethod
     def _remember_interaction_outcome(
@@ -542,20 +654,28 @@ class StarterPolicy:
             changed_room = bool(
                 telemetry is not None and self._room_key(telemetry) != key[0]
             )
-            meaningful = self.active_interaction_cutscene_steps > 0 or changed_room
+            meaningful = (
+                self.active_interaction_cutscene_steps > 0
+                or self.active_interaction_saw_battle
+                or changed_room
+            )
             if meaningful:
                 record["progressions"] = int(record.get("progressions", 0)) + 1
+                if self.active_interaction_saw_battle:
+                    outcome = "battle_started"
+                    progress_event = "interaction started a battle"
+                elif self.active_interaction_cutscene_steps:
+                    outcome = "scripted_sequence"
+                    progress_event = "interaction caused a scripted sequence"
+                else:
+                    outcome = "room_change"
+                    progress_event = "interaction changed rooms"
                 self._remember_interaction_outcome(
                     record,
-                    "scripted_sequence" if self.active_interaction_cutscene_steps else "room_change",
+                    outcome,
                     "progress",
                 )
-                self._record_story_progress(
-                    "interaction caused a scripted sequence"
-                    if self.active_interaction_cutscene_steps
-                    else "interaction changed rooms",
-                    telemetry,
-                )
+                self._record_story_progress(progress_event, telemetry)
             elif int(record.get("choice_menus", 0)) > 0:
                 self._remember_interaction_outcome(
                     record,
@@ -598,6 +718,8 @@ class StarterPolicy:
         self.menu_action_queue.clear()
         self.active_interaction_dialogue_steps = 0
         self.active_interaction_cutscene_steps = 0
+        self.active_interaction_saw_battle = False
+        self.choice_session_trials = 0
 
     @staticmethod
     def _room_key(telemetry: TelemetrySample) -> str:
@@ -1124,6 +1246,7 @@ class StarterPolicy:
         self.active_interaction_key = key
         self.active_interaction_dialogue_steps = 0
         self.active_interaction_cutscene_steps = 0
+        self.active_interaction_saw_battle = False
         self.interaction_candidate = None
 
     def _matching_interactable(

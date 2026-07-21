@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 
-from .policy import DIRECTION_VECTORS
 from .run2_explorer import ROOM_LINK_COOLDOWN_STEPS, Run2Explorer
 from .telemetry import TelemetrySample
 from .world_model import Warp
@@ -41,9 +40,8 @@ class Run3Explorer(Run2Explorer):
 
         link = frozenset((previous_room, room))
         self.room_link_crossings[link] += 1
-        multiplier = min(
-            MAX_LINK_BACKOFF_MULTIPLIER,
-            1 + self.room_link_crossings[link] // 2,
+        multiplier = self._room_link_backoff_multiplier(
+            self.room_link_crossings[link]
         )
         self.room_link_cooldowns[link] = max(
             self.room_link_cooldowns.get(link, 0),
@@ -51,6 +49,16 @@ class Run3Explorer(Run2Explorer):
         )
         self._canonicalize_link(previous_room, room)
         self._canonicalize_link(room, previous_room)
+
+    @staticmethod
+    def _room_link_backoff_multiplier(crossings: int) -> int:
+        # Escalate after each complete pair of crossings.  The previous
+        # formula jumped at crossing 2, 4, 6... and suppressed a doorway one
+        # traversal earlier than intended.
+        return min(
+            MAX_LINK_BACKOFF_MULTIPLIER,
+            max(1, (crossings + 1) // 2),
+        )
 
     def _canonicalize_all_warps(self) -> None:
         links = {(warp[0], warp[4]) for warp in self.warps}

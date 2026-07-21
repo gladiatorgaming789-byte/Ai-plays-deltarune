@@ -1,1 +1,1 @@
-AGENT_REVISION = "run4-room-completion-v1"
+AGENT_REVISION = "run4-npc-choice-stability-v2"

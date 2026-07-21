@@ -7,7 +7,13 @@ from pathlib import Path
 from .controller import KeyboardController
 from .hierarchical_policy import HierarchicalPolicy
 from .observer import ScreenObserver
-from .perception import CutsceneTracker, VisualStateDetector
+from .perception import (
+    CutsceneTracker,
+    GameState,
+    Perception,
+    VisualFeatures,
+    VisualStateDetector,
+)
 from .progress import EpisodeTracker
 from .replay import print_replay, replay_run
 from .telemetry import TelemetryReceiver, fuse_perception
@@ -260,7 +266,6 @@ def run(args: argparse.Namespace) -> Path:
                         )
 
             observation = observer.observe(step)
-            visual = detector.classify(observation.frame)
             telemetry = (
                 telemetry_receiver.poll()
                 if telemetry_receiver
@@ -280,6 +285,20 @@ def run(args: argparse.Namespace) -> Path:
                 print(
                     "Telemetry warning: no packets received; continuing "
                     "with the learned visual model."
+                )
+
+            observation = policy.validate_observation(
+                observation,
+                telemetry,
+            )
+            if observation.visual_valid:
+                visual = detector.classify(observation.frame)
+            else:
+                visual = Perception(
+                    GameState.UNKNOWN,
+                    0.0,
+                    VisualFeatures(0.0, 0.0, 0.0, 0.0, 0.0),
+                    "stale-capture",
                 )
 
             perception = cutscene_tracker.update(

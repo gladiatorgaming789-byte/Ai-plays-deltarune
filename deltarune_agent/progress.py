@@ -46,7 +46,10 @@ class EpisodeTracker:
             "confidence": perception.confidence,
             "perception_source": perception.source,
             "features": perception.features.as_dict(),
-            "visual_valid": observation.visual_valid,
+            # Older replay/test observations predate capture-freshness
+            # tracking.  Treat a missing flag as valid instead of losing the
+            # entire event log to an AttributeError.
+            "visual_valid": getattr(observation, "visual_valid", True),
             "telemetry": telemetry.as_dict() if telemetry else None,
             "action": action.name,
             "reason": reason,
