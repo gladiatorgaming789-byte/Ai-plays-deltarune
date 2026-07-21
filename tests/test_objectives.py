@@ -10,6 +10,27 @@ def test_battle_has_highest_priority():
 def test_loop_recovery_beats_normal_exploration():
     manager = ObjectiveManager()
     objective = manager.objective_for_state(
-        "overworld", "recover from repeated movement loop", "room_test"
+        "overworld",
+        "recover from repeated movement loop",
+        "room_test",
     )
     assert objective.kind is ObjectiveKind.RECOVER
+
+
+def test_changing_reason_does_not_count_as_new_objective():
+    manager = ObjectiveManager()
+
+    manager.objective_for_state(
+        "overworld",
+        "follow learned warp through doorway",
+        "room_test",
+    )
+    manager.objective_for_state(
+        "overworld",
+        "move down toward a different learned warp",
+        "room_test",
+    )
+
+    assert len(manager.history) == 1
+    assert manager.current is not None
+    assert manager.current.kind is ObjectiveKind.SEEK_EXIT
