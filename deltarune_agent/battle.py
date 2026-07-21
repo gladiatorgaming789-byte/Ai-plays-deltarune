@@ -82,12 +82,22 @@ class BattleController:
         self,
         frame: Image.Image,
     ) -> tuple[Threat, ...]:
-        arena, _offset = self._arena(frame)
+        arena, (offset_x, offset_y) = self._arena(frame)
         gray = ImageOps.grayscale(arena)
         mask = gray.point(
             lambda value: 255 if value >= 190 else 0
         )
-        threats = tuple(self._components(mask))
+        # Connected components are measured in the cropped arena. Convert them
+        # back into the same 320x240 coordinate space used by soul telemetry
+        # before comparing distances.
+        threats = tuple(
+            Threat(
+                threat.x + offset_x,
+                threat.y + offset_y,
+                threat.radius,
+            )
+            for threat in self._components(mask)
+        )
         self.previous_threats = threats
         return threats
 
