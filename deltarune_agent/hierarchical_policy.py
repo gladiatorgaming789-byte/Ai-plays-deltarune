@@ -8,7 +8,7 @@ from .dialogue import DialogueReader
 from .objectives import ObjectiveManager
 from .observer import Observation
 from .perception import GameState, Perception
-from .run4_explorer import Run4Explorer
+from .run6_explorer import Run6Explorer
 from .telemetry import TelemetrySample
 from .visual_freshness import VisualFreshnessGuard
 
@@ -17,7 +17,7 @@ class HierarchicalPolicy:
     """Specialized reflex controllers wrapped around the proven explorer."""
 
     def __init__(self, seed: int = 0, memory_path: Path | None = None):
-        self.explorer = Run4Explorer(seed, memory_path)
+        self.explorer = Run6Explorer(seed, memory_path)
         self.objectives = ObjectiveManager()
         self.dialogue = DialogueReader()
         self.battle = BattleController()
@@ -50,13 +50,21 @@ class HierarchicalPolicy:
 
         if perception.state is GameState.BATTLE:
             # The specialized controller owns the action, but the explorer
-            # still owns interaction/story memory.  Let it observe the battle
+            # still owns interaction/story memory. Let it observe the battle
             # transition so an NPC-started encounter is not mislabeled flavor.
             self.explorer.choose(observation, perception, telemetry)
             soul = None
             if telemetry is not None:
-                x = telemetry.player_x if telemetry.player_x is not None else telemetry.x
-                y = telemetry.player_y if telemetry.player_y is not None else telemetry.y
+                x = (
+                    telemetry.player_x
+                    if telemetry.player_x is not None
+                    else telemetry.x
+                )
+                y = (
+                    telemetry.player_y
+                    if telemetry.player_y is not None
+                    else telemetry.y
+                )
                 soul = (x, y)
             action = self.battle.choose(
                 observation.frame,
@@ -103,7 +111,9 @@ class HierarchicalPolicy:
     def summary(self) -> dict:
         summary = self.explorer.summary()
         summary["current_objective"] = (
-            self.objectives.current.kind.value if self.objectives.current else None
+            self.objectives.current.kind.value
+            if self.objectives.current
+            else None
         )
         summary["objective_changes"] = len(self.objectives.history)
         summary["last_dialogue_signature"] = self.last_dialogue_signature
