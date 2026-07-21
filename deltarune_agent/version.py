@@ -1,1 +1,1 @@
-AGENT_REVISION = "run6-transition-semantics-v1"
+AGENT_REVISION = "run7-bounded-navigation-map-alignment-v1"
