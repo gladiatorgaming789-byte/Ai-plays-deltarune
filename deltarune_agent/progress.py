@@ -9,20 +9,27 @@ from .telemetry import TelemetrySample
 
 
 class EpisodeTracker:
-    def __init__(self, root: Path = Path("runs"), frame_interval: int = 10):
+    def __init__(
+        self,
+        root: Path = Path("runs"),
+        frame_interval: int = 10,
+    ):
         if frame_interval < 1:
             raise ValueError("frame_interval must be positive")
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+        stamp = datetime.now(timezone.utc).strftime(
+            "%Y%m%dT%H%M%S.%fZ"
+        )
         attempt = 0
         while True:
             suffix = "" if attempt == 0 else f"-{attempt}"
             self.directory = root / f"{stamp}{suffix}"
             try:
-                self.directory.mkdir(parents=True, exist_ok=False)
+                self.directory.mkdir(
+                    parents=True,
+                    exist_ok=False,
+                )
                 break
             except FileExistsError:
-                # Separate CLI/GUI runs can start at almost the same instant.
-                # Preserve both logs instead of failing the newer run.
                 attempt += 1
         self.events = self.directory / "events.jsonl"
         self.frame_interval = frame_interval
@@ -42,7 +49,12 @@ class EpisodeTracker:
             "confidence": perception.confidence,
             "perception_source": perception.source,
             "features": perception.features.as_dict(),
-            "telemetry": telemetry.as_dict() if telemetry else None,
+            "visual_valid": observation.visual_valid,
+            "telemetry": (
+                telemetry.as_dict()
+                if telemetry
+                else None
+            ),
             "action": action.name,
             "reason": reason,
             "live": live,
@@ -51,12 +63,19 @@ class EpisodeTracker:
             stream.write(json.dumps(event) + "\n")
         if observation.step % self.frame_interval == 0:
             try:
-                self.directory.mkdir(parents=True, exist_ok=True)
-                observation.frame.save(self.directory / f"frame-{observation.step:06d}.png")
+                self.directory.mkdir(
+                    parents=True,
+                    exist_ok=True,
+                )
+                observation.frame.save(
+                    self.directory
+                    / f"frame-{observation.step:06d}.png"
+                )
             except OSError:
-                # Keep the run log intact even if the frame capture cannot be written.
                 pass
 
     def finish(self, policy_summary: dict) -> None:
-        with (self.directory / "summary.json").open("w", encoding="utf-8") as stream:
+        with (
+            self.directory / "summary.json"
+        ).open("w", encoding="utf-8") as stream:
             json.dump(policy_summary, stream, indent=2)
