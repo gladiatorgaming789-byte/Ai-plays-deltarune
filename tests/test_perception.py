@@ -1,6 +1,38 @@
 from PIL import Image, ImageDraw
 
-from deltarune_agent.perception import GameState, VisualStateDetector
+from deltarune_agent.perception import (
+    CutsceneTracker,
+    GameState,
+    Perception,
+    VisualFeatures,
+    VisualStateDetector,
+    looks_like_dialogue_choice,
+)
+from deltarune_agent.telemetry import TelemetrySample
+
+
+def _draw_option_marker(draw: ImageDraw.ImageDraw, x: int, y: int) -> None:
+    for dx, dy in (
+        (2, 0), (2, 1), (0, 2), (1, 2), (2, 2), (3, 2), (4, 2), (2, 3), (2, 4)
+    ):
+        draw.point((x + dx, y + dy), fill="white")
+
+
+def test_detects_repeated_dialogue_option_markers():
+    frame = Image.new("RGB", (320, 240), "black")
+    draw = ImageDraw.Draw(frame)
+    _draw_option_marker(draw, 28, 178)
+    _draw_option_marker(draw, 28, 205)
+
+    assert looks_like_dialogue_choice(frame)
+
+
+def test_ordinary_dialogue_marker_is_not_a_choice():
+    frame = Image.new("RGB", (320, 240), "black")
+    draw = ImageDraw.Draw(frame)
+    _draw_option_marker(draw, 28, 178)
+
+    assert not looks_like_dialogue_choice(frame)
 
 
 def test_detects_dialogue_box():
@@ -58,3 +90,102 @@ def test_bright_window_rectangle_is_not_a_battle_arena():
     result = VisualStateDetector().classify(image)
 
     assert result.state is not GameState.BATTLE
+
+
+def test_missing_player_data_alone_does_not_create_a_cutscene():
+    features = VisualFeatures(0, 0, 0, 0, 0)
+    dialogue = Perception(GameState.DIALOGUE, 0.99, features, "telemetry")
+    writer = TelemetrySample(
+        "dialogue",
+        1,
+        "room_test",
+        40,
+        121,
+        "obj_writer",
+        0,
+    )
+
+    result = CutsceneTracker().update(dialogue, writer)
+
+    assert result.state is GameState.DIALOGUE
+
+
+def test_sustained_control_lock_detects_cutscene_with_player_still_present():
+    features = VisualFeatures(0, 0, 0, 0, 0)
+    overworld = Perception(GameState.OVERWORLD, 0.80, features, "visual+telemetry")
+    player = TelemetrySample(
+        "overworld",
+        1,
+        "room_test",
+        100,
+        120,
+        "obj_mainchara",
+        0,
+        player_x=100,
+        player_y=120,
+        interaction_state=1,
+        player_controlled=False,
+    )
+    tracker = CutsceneTracker()
+    result = overworld
+    for _ in range(tracker.CONTROL_LOCK_THRESHOLD):
+        result = tracker.update(overworld, player)
+
+    assert result.state is GameState.CUTSCENE
+    assert result.source == "telemetry-control"
+
+
+def test_sustained_dialogue_and_following_packet_gap_remain_a_cutscene():
+    features = VisualFeatures(0, 0, 0, 0, 0)
+    dialogue = Perception(GameState.DIALOGUE, 0.99, features, "telemetry")
+    writer = TelemetrySample(
+        "dialogue",
+        1,
+        "room_test",
+        40,
+        121,
+        "obj_writer",
+        0,
+        player_x=100,
+        player_y=120,
+    )
+    tracker = CutsceneTracker()
+    result = dialogue
+    for _ in range(tracker.DIALOGUE_THRESHOLD):
+        result = tracker.update(dialogue, writer)
+
+    assert result.state is GameState.CUTSCENE
+    assert result.source == "automatic-dialogue-sequence"
+    continued = tracker.update(
+        Perception(GameState.OVERWORLD, 0.58, features),
+        None,
+        visual_valid=False,
+    )
+    assert continued.state is GameState.CUTSCENE
+    assert continued.source == "cutscene-continuity"
+
+
+def test_deliberately_started_object_dialogue_does_not_become_a_cutscene():
+    features = VisualFeatures(0, 0, 0, 0, 0)
+    dialogue = Perception(GameState.DIALOGUE, 0.99, features, "telemetry")
+    writer = TelemetrySample(
+        "dialogue",
+        1,
+        "room_test",
+        40,
+        121,
+        "obj_writer",
+        0,
+        player_x=100,
+        player_y=120,
+        player_controlled=False,
+    )
+    tracker = CutsceneTracker()
+    tracker.note_action("confirm", "blocked up; try interaction")
+
+    result = dialogue
+    for _ in range(tracker.DIALOGUE_THRESHOLD + 10):
+        result = tracker.update(dialogue, writer)
+
+    assert result.state is GameState.DIALOGUE
+    assert not tracker.cutscene_active

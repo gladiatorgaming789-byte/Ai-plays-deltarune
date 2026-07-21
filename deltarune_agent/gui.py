@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
 import queue
+import shutil
 import subprocess
 import sys
 import threading
@@ -12,13 +14,17 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 from uuid import uuid4
 
+from PIL import Image, ImageEnhance, ImageTk
+
+from .room_view import room_view_image_is_usable
+from .screen_regions import visible_region_coordinates
 from .window import (
     find_window,
     focus_window,
     is_window_foreground,
     remember_window,
 )
-from .world_model import CELL_SIZE
+from .world_model import CELL_SIZE, EXPLORATION_REGION_CELLS
 
 
 DIRECTION_VECTORS = {
@@ -28,6 +34,192 @@ DIRECTION_VECTORS = {
     "right": (1, 0),
 }
 EVENT_PREFIX = "AI_GUI_EVENT\t"
+WARP_CLUSTER_RADIUS = 2
+
+ACTION_LABELS = {
+    "up": "Move up",
+    "down": "Move down",
+    "left": "Move left",
+    "right": "Move right",
+    "confirm": "Press Z",
+    "cancel": "Press X",
+    "menu": "Open menu",
+    "wait": "Wait",
+}
+
+
+def _decision_explanation(reason: str, state: str) -> tuple[str, str]:
+    reason_lower = reason.casefold()
+    if "story search:" in reason_lower:
+        if "retry another response" in reason_lower:
+            return (
+                "CHOICE RETRY",
+                "The previous response produced no observed story progress, so the AI is returning to the same person to try the next untested option.",
+            )
+        if "possible character" in reason_lower:
+            return (
+                "STORY OBJECTIVE",
+                "Story progress has stalled, so the AI is routing to a learned side of a compact static character lead and will face it to interact.",
+            )
+        if "visible possible exit" in reason_lower:
+            return (
+                "STORY OBJECTIVE",
+                "Story progress has stalled, so a remembered visual passage is being tested through the learned room map.",
+            )
+        if "room edge" in reason_lower:
+            return (
+                "STORY OBJECTIVE",
+                "Story progress has stalled, so an untested edge of the learned room is being checked for a way forward.",
+            )
+        return (
+            "STORY OBJECTIVE",
+            "Story progress has stalled, so the best untested visible lead is being investigated.",
+        )
+    if "choice trial" in reason_lower:
+        return (
+            "CHOICE LEARNING",
+            "Trying a remembered response pattern; outcomes that cause observed story progress will be preferred next time.",
+        )
+    if "search room edge" in reason_lower:
+        return "EXIT SEARCH", "Following an observed path continuation toward a possible room transition; it does not need to look like a door."
+    if "probe possible room exit" in reason_lower:
+        return "EXIT SEARCH", "Pressing through a learned map edge to test whether it changes rooms."
+    if "investigate possible exit" in reason_lower:
+        return "VISUAL GUESS", "Moving toward an on-screen region that might lead out of the room."
+    if "investigate possible interactable" in reason_lower:
+        return "VISUAL GUESS", "Moving toward visually distinctive scenery to test it through play."
+    if "follow learned warp" in reason_lower:
+        destination = "another room"
+        marker = "follow learned warp to "
+        if marker in reason_lower:
+            destination = reason[len(marker) :].split(" via ", 1)[0].removeprefix("room_")
+        return "KNOWN EXIT", f"Following a previously discovered exit toward {destination}."
+    if "loop" in reason_lower and "detected" in reason_lower:
+        return "LOOP RECOVERY", "The recent movement pattern repeated, so a different route was chosen."
+    if "route to mapped frontier" in reason_lower:
+        return "EXPLORING", "Following a known path toward an unexplored part of this room."
+    if "explore new edge" in reason_lower:
+        return "EXPLORING", "Testing a new direction in this part of the room."
+    if "no reachable frontier" in reason_lower:
+        return "SEARCHING", "No useful mapped route remains, so a different local direction is being tested."
+    if "continue clear path" in reason_lower:
+        return "MOVING", "Continuing briefly along the current clear path for smoother movement."
+    if "checking blockage" in reason_lower or "await fresh telemetry" in reason_lower:
+        return "PATH CHECK", "Waiting for enough fresh position evidence before remembering a wall."
+    if "align facing" in reason_lower:
+        return "INTERACTION", "Waiting for telemetry to confirm Kris is facing the intended character side before pressing Z."
+    if "try interaction" in reason_lower:
+        return "INTERACTION", "Movement stopped, so the object ahead is being checked once."
+    if "interaction completed" in reason_lower:
+        return "INTERACTION", "The interaction finished; testing whether it opened the way forward."
+    if "blocked" in reason_lower or "learned obstacle" in reason_lower:
+        return "WALL AVOIDANCE", "A remembered obstruction is being avoided."
+    if "input not reflected" in reason_lower or "input remained frozen" in reason_lower:
+        return "INPUT CHECK", "The last key was not reflected in telemetry, so input is being retried or changed."
+    if "advance dialogue" in reason_lower:
+        return "DIALOGUE", "Advancing the current dialogue."
+    if "cutscene" in reason_lower or state == "cutscene":
+        return "CUTSCENE", "Advancing scripted dialogue while movement stays suspended."
+    if "menu" in reason_lower:
+        return "MENU", "Responding to the current menu."
+    if "battle" in reason_lower or state == "battle":
+        return "BATTLE", "Using the current deterministic battle response."
+    if "unknown state" in reason_lower or state == "unknown":
+        return "WAITING", "The game state is temporarily unclear, so movement is paused safely."
+    if "vision-only" in reason_lower:
+        return "VISION ONLY", "Telemetry is unavailable, so basic visual exploration is being used."
+    return state.upper() or "DECISION", reason or "Choosing the next action from current observations."
+
+
+def decision_parts(payload: dict[str, object]) -> tuple[str, str, str]:
+    state = str(payload.get("state") or "unknown")
+    action = str(payload.get("action") or "wait")
+    reason = str(payload.get("reason") or "")
+    category, explanation = _decision_explanation(reason, state)
+    return category, ACTION_LABELS.get(action, action.replace("_", " ").title()), explanation
+
+
+def format_ai_decision(payload: dict[str, object]) -> str:
+    category, action_label, explanation = decision_parts(payload)
+    telemetry = payload.get("telemetry")
+    location = "Unknown location"
+    if isinstance(telemetry, dict):
+        room = str(telemetry.get("room_name") or telemetry.get("room_id") or "transition")
+        room = room.removeprefix("room_")
+        if telemetry.get("mode") == "overworld":
+            x = telemetry.get("x")
+            y = telemetry.get("y")
+        else:
+            x = telemetry.get("player_x")
+            y = telemetry.get("player_y")
+        if x is not None and y is not None:
+            try:
+                location = f"{room} at ({round(float(x))}, {round(float(y))})"
+            except (TypeError, ValueError):
+                location = room
+        else:
+            location = room
+    return (
+        f"Step {int(payload.get('step') or 0):04d}  |  {category}  |  {action_label}\n"
+        f"  Why: {explanation}\n"
+        f"  Where: {location}"
+    )
+
+
+def format_telemetry_event(payload: dict[str, object]) -> str:
+    telemetry = payload.get("telemetry")
+    if not isinstance(telemetry, dict):
+        return ""
+    room = str(
+        telemetry.get("room_name")
+        or telemetry.get("room_id")
+        or "room transition"
+    ).removeprefix("room_")
+    state = str(payload.get("state") or telemetry.get("mode") or "unknown").upper()
+    if telemetry.get("mode") == "overworld":
+        x = telemetry.get("x")
+        y = telemetry.get("y")
+    else:
+        x = telemetry.get("player_x")
+        y = telemetry.get("player_y")
+    try:
+        position = f"({round(float(x))}, {round(float(y))})"
+    except (TypeError, ValueError):
+        position = "not reported"
+    direction = telemetry.get("facing_direction") or "not reported"
+    camera_values = (
+        telemetry.get("camera_x"),
+        telemetry.get("camera_y"),
+        telemetry.get("camera_width"),
+        telemetry.get("camera_height"),
+    )
+    try:
+        camera_x, camera_y, camera_width, camera_height = (
+            round(float(value)) for value in camera_values
+        )
+        camera = f"({camera_x}, {camera_y}) {camera_width}x{camera_height}"
+    except (TypeError, ValueError):
+        camera = "not reported"
+    player_controlled = telemetry.get("player_controlled")
+    control = (
+        "player"
+        if player_controlled is True
+        else "locked"
+        if player_controlled is False
+        else "not reported"
+    )
+    source = str(payload.get("source") or "unknown")
+    try:
+        confidence = f"{float(payload.get('confidence')):.0%}"
+    except (TypeError, ValueError):
+        confidence = "not reported"
+    scene = "live" if payload.get("visual_valid", True) else "last clean frame"
+    return (
+        f"Step {int(payload.get('step') or 0):04d}  |  {state}  |  {room}\n"
+        f"  Kris: {position}  |  Facing: {direction}  |  Camera: {camera}\n"
+        f"  Control gate: {control}  |  Detector: {source} ({confidence})"
+        f"  |  Scene: {scene}"
+    )
 
 THEMES = {
     "dark": {
@@ -51,6 +243,10 @@ THEMES = {
         "interactable_outline": "#8c6c10",
         "warp": "#b184f4",
         "warp_outline": "#7147a9",
+        "visible_region": "#42658f",
+        "visible_current": "#4c8dff",
+        "camera": "#8fc2ff",
+        "hypothesis": "#54d6d0",
         "player": "#55a7ff",
         "player_outline": "#d8ecff",
     },
@@ -75,6 +271,10 @@ THEMES = {
         "interactable_outline": "#765b06",
         "warp": "#8250c4",
         "warp_outline": "#4d287e",
+        "visible_region": "#91a8c4",
+        "visible_current": "#2868d8",
+        "camera": "#0e5fca",
+        "hypothesis": "#087f7a",
         "player": "#2377df",
         "player_outline": "#0d3f81",
     },
@@ -88,9 +288,15 @@ class RoomMap:
     open_edges: set[tuple[int, int, int, int]] = field(default_factory=set)
     blocked_edges: dict[tuple[int, int, str], int] = field(default_factory=dict)
     interactables: dict[tuple[int, int], dict[str, object]] = field(default_factory=dict)
-    warps: dict[tuple[int, int, str, int, int], dict[str, object]] = field(
+    screen_regions: dict[tuple[int, int], dict[str, object]] = field(
         default_factory=dict
     )
+    view_tiles: dict[tuple[int, int], dict[str, object]] = field(
+        default_factory=dict
+    )
+    # Keys are the representative source cell and destination room. Arrival
+    # coordinates are observations attached to the exit, not extra doorways.
+    warps: dict[tuple[int, int, str], dict[str, object]] = field(default_factory=dict)
 
 
 class WallMapModel:
@@ -99,6 +305,8 @@ class WallMapModel:
         self.current_room: str | None = None
         self.current_cell: tuple[int, int] | None = None
         self.current_direction: str | None = None
+        self.current_visible_regions: set[tuple[str, int, int]] = set()
+        self.current_camera: tuple[str, float, float, float, float] | None = None
 
     def room(self, name: str) -> RoomMap:
         return self.rooms.setdefault(name, RoomMap())
@@ -145,7 +353,28 @@ class WallMapModel:
                     "status": "confirmed",
                     "instance_id": item.get("instance_id"),
                     "confirmations": int(item.get("confirmations", 1)),
+                    "choice_menus": int(item.get("choice_menus", 0)),
+                    "classification": str(
+                        item.get("classification") or "unknown"
+                    ),
+                    "usefulness": str(item.get("usefulness") or "unknown"),
+                    "last_outcome": str(item.get("last_outcome") or "unknown"),
+                    "outcome_counts": dict(item.get("outcome_counts", {}))
+                    if isinstance(item.get("outcome_counts"), dict)
+                    else {},
                     "approaches": list(item.get("approaches", [])),
+                }
+            for item in data.get("screen_regions", []):
+                hypothesis = item.get("hypothesis")
+                if hypothesis == "possible_interactable":
+                    hypothesis = None
+                self.room(str(item["room"])).screen_regions[
+                    (int(item["region_x"]), int(item["region_y"]))
+                ] = {
+                    "views": int(item.get("views", 1)),
+                    "interest": float(item.get("interest", 0.0)),
+                    "hypothesis": hypothesis,
+                    "inspections": int(item.get("inspections", 0)),
                 }
             for item in data.get("warps", []):
                 source_room = str(item["from_room"])
@@ -157,6 +386,47 @@ class WallMapModel:
                 self._add_warp(source_room, source, target_room, target, action, count)
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             # The GUI remains usable with live data if old memory is malformed.
+            return
+
+    def load_room_views(self, index_path: Path) -> None:
+        if not index_path.exists():
+            return
+        try:
+            data = json.loads(index_path.read_text(encoding="utf-8"))
+            if int(data.get("version", 0)) not in {1, 2}:
+                return
+            rooms = data.get("rooms")
+            if not isinstance(rooms, dict):
+                return
+            for room_name, room_data in rooms.items():
+                if not isinstance(room_data, dict):
+                    continue
+                tiles = room_data.get("tiles")
+                if not isinstance(tiles, dict):
+                    continue
+                room = self.room(str(room_name))
+                for tile in tiles.values():
+                    if not isinstance(tile, dict):
+                        continue
+                    region = (int(tile["region_x"]), int(tile["region_y"]))
+                    path = (index_path.parent / str(tile["path"])).resolve()
+                    usable = False
+                    if path.is_file():
+                        try:
+                            with Image.open(path) as stored:
+                                usable = room_view_image_is_usable(stored)
+                        except OSError:
+                            pass
+                    if usable:
+                        room.view_tiles[region] = {
+                            "path": str(path),
+                            "coverage": float(tile.get("coverage", 1.0)),
+                            "pixels_per_world": int(
+                                tile.get("pixels_per_world", 1)
+                            ),
+                            "last_step": int(tile.get("last_step", 0)),
+                        }
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             return
 
     @staticmethod
@@ -198,6 +468,50 @@ class WallMapModel:
         if not raw_room_name or str(raw_room_name).casefold() == "unknown":
             return
         room_name = str(raw_room_name)
+        room_changed = self.current_room != room_name
+        self.current_room = room_name
+        if room_changed:
+            self.current_cell = None
+            self.current_direction = None
+            self.current_camera = None
+        room = self.room(room_name)
+
+        visible = visible_region_coordinates(
+            telemetry.get("camera_x"),
+            telemetry.get("camera_y"),
+            telemetry.get("camera_width"),
+            telemetry.get("camera_height"),
+            telemetry.get("room_width"),
+            telemetry.get("room_height"),
+        )
+        self.current_visible_regions = {
+            (room_name, region_x, region_y) for region_x, region_y in visible
+        }
+        camera_values = (
+            telemetry.get("camera_x"),
+            telemetry.get("camera_y"),
+            telemetry.get("camera_width"),
+            telemetry.get("camera_height"),
+        )
+        if all(value is not None for value in camera_values):
+            try:
+                camera_x, camera_y, camera_width, camera_height = (
+                    float(value) for value in camera_values
+                )
+                if camera_width > 0 and camera_height > 0:
+                    self.current_camera = (
+                        room_name,
+                        camera_x,
+                        camera_y,
+                        camera_width,
+                        camera_height,
+                    )
+            except (TypeError, ValueError):
+                pass
+        direction = telemetry.get("facing_direction")
+        if direction in DIRECTION_VECTORS:
+            self.current_direction = str(direction)
+
         x = telemetry.get("x")
         y = telemetry.get("y")
         if telemetry.get("mode") != "overworld":
@@ -207,16 +521,9 @@ class WallMapModel:
             return
 
         cell = (int(float(x) // CELL_SIZE), int(float(y) // CELL_SIZE))
-        room = self.room(room_name)
         room.cells.add(cell)
         room.visits[cell] = room.visits.get(cell, 0) + 1
-
-        self.current_room = room_name
         self.current_cell = cell
-        direction = telemetry.get("facing_direction")
-        self.current_direction = (
-            str(direction) if direction in DIRECTION_VECTORS else None
-        )
 
     def _apply_map_update(self, update: dict) -> None:
         update_type = str(update.get("type") or "")
@@ -256,8 +563,52 @@ class WallMapModel:
                 "status": "confirmed",
                 "instance_id": update.get("instance_id"),
                 "confirmations": int(update.get("confirmations", 1)),
+                "choice_menus": int(update.get("choice_menus", 0)),
+                "classification": str(
+                    update.get("classification") or "unknown"
+                ),
+                "usefulness": str(update.get("usefulness") or "unknown"),
+                "last_outcome": str(update.get("last_outcome") or "unknown"),
+                "outcome_counts": dict(update.get("outcome_counts", {}))
+                if isinstance(update.get("outcome_counts"), dict)
+                else {},
                 "approaches": list(update.get("approaches", [])),
             }
+        elif update_type == "interaction_outcome":
+            cell = tuple(int(value) for value in update["cell"])
+            record = room.interactables.setdefault(
+                cell,
+                {"name": "interaction", "status": "confirmed", "approaches": []},
+            )
+            record["choice_menus"] = int(update.get("choice_menus", 0))
+            record["classification"] = str(
+                update.get("classification") or "tested_nonchoice"
+            )
+            record["usefulness"] = str(update.get("usefulness") or "unknown")
+            record["last_outcome"] = str(update.get("last_outcome") or "unknown")
+            record["outcome_counts"] = (
+                dict(update.get("outcome_counts", {}))
+                if isinstance(update.get("outcome_counts"), dict)
+                else {}
+            )
+        elif update_type == "screen_region":
+            region = tuple(int(value) for value in update["region"])
+            room.screen_regions[region] = {
+                "views": int(update.get("views", 1)),
+                "interest": float(update.get("interest", 0.0)),
+                "hypothesis": update.get("hypothesis"),
+                "inspections": int(update.get("inspections", 0)),
+            }
+        elif update_type == "room_view_tile":
+            region = tuple(int(value) for value in update["region"])
+            path = Path(str(update.get("path") or ""))
+            if path.is_file():
+                room.view_tiles[region] = {
+                    "path": str(path.resolve()),
+                    "coverage": float(update.get("coverage", 1.0)),
+                    "pixels_per_world": int(update.get("pixels_per_world", 1)),
+                    "last_step": int(update.get("last_step", 0)),
+                }
 
     def _add_warp(
         self,
@@ -272,16 +623,63 @@ class WallMapModel:
         target_map = self.room(target_room)
         source_map.cells.add(source)
         target_map.cells.add(target)
-        source_map.warps[(*source, target_room, *target)] = {
-            "action": action,
-            "count": count,
-            "kind": "exit",
-        }
-        target_map.warps[(*target, source_room, *source)] = {
-            "action": action,
-            "count": count,
-            "kind": "entry",
-        }
+
+        nearby = [
+            key
+            for key in source_map.warps
+            if key[2] == target_room
+            and max(abs(key[0] - source[0]), abs(key[1] - source[1]))
+            <= WARP_CLUSTER_RADIUS
+        ]
+        if nearby:
+            key = min(
+                nearby,
+                key=lambda candidate: abs(candidate[0] - source[0])
+                + abs(candidate[1] - source[1]),
+            )
+            record = source_map.warps[key]
+        else:
+            key = (*source, target_room)
+            record = {"kind": "exit", "variants": {}}
+
+        variants = record.setdefault("variants", {})
+        variant = (*source, action, *target)
+        variants[variant] = max(int(count), int(variants.get(variant, 0)))
+
+        source_counts: Counter[tuple[int, int]] = Counter()
+        arrival_counts: Counter[tuple[int, int]] = Counter()
+        action_counts: Counter[str] = Counter()
+        for (source_x, source_y, variant_action, target_x, target_y), variant_count in variants.items():
+            source_counts[(source_x, source_y)] += variant_count
+            arrival_counts[(target_x, target_y)] += variant_count
+            action_counts[variant_action] += variant_count
+
+        representative = min(
+            source_counts,
+            key=lambda cell: (-source_counts[cell], cell[0], cell[1]),
+        )
+        arrival = min(
+            arrival_counts,
+            key=lambda cell: (-arrival_counts[cell], cell[0], cell[1]),
+        )
+        meaningful_actions = [name for name in action_counts if name != "event"]
+        action_pool = meaningful_actions or list(action_counts)
+        preferred_action = min(
+            action_pool,
+            key=lambda name: (-action_counts[name], name),
+        )
+        record.update(
+            {
+                "action": preferred_action,
+                "count": sum(variants.values()),
+                "target_cell": arrival,
+                "arrival_samples": dict(arrival_counts),
+            }
+        )
+        new_key = (*representative, target_room)
+        if new_key != key:
+            source_map.warps.pop(key, None)
+        source_map.warps[new_key] = record
 
 
 class AgentGUI:
@@ -296,10 +694,15 @@ class AgentGUI:
         self.close_deadline = 0.0
         self.map_model = WallMapModel()
         self.map_model.load_memory(self.project_root / "memory" / "navigation.json")
+        self.map_model.load_room_views(
+            self.project_root / "memory" / "room_views" / "index.json"
+        )
         self.style = ttk.Style(root)
         self.colors = THEMES["dark"]
         self.output_widgets: list[tk.Text] = []
         self.legend_swatches: dict[str, tk.Label] = {}
+        self._last_ai_signature: tuple[str, str, str] | None = None
+        self._repeated_ai_decisions = 0
 
         root.title("Deltarune AI Controller")
         root.geometry("1280x820")
@@ -310,11 +713,24 @@ class AgentGUI:
         self.steps_var = tk.StringVar(value="2000")
         self.window_var = tk.StringVar(value="deltarune")
         self.follow_room_var = tk.BooleanVar(value=True)
+        self.show_room_view_var = tk.BooleanVar(value=True)
+        self.show_navigation_var = tk.BooleanVar(value=True)
+        self.show_guesses_var = tk.BooleanVar(value=True)
         self.dark_mode_var = tk.BooleanVar(value=True)
         self.room_var = tk.StringVar()
         self.status_var = tk.StringVar(value="Stopped")
         self.map_detail_var = tk.StringVar(value="No map data yet.")
+        self.current_decision_var = tk.StringVar(value="Waiting to start")
+        self.current_reason_var = tk.StringVar(
+            value="Start the AI to see its latest decision and reasoning here."
+        )
+        self.current_location_var = tk.StringVar(value="Room: not reported")
+        self.current_capture_var = tk.StringVar(value="Scene capture: waiting")
         self._map_transform: tuple[int, int, float, float, float] | None = None
+        self._map_images: list[ImageTk.PhotoImage] = []
+        self._map_image_cache: dict[tuple[object, ...], ImageTk.PhotoImage] = {}
+        self._map_view_state: dict[str, dict[str, float]] = {}
+        self._map_pan_anchor: tuple[str, int, int, float, float] | None = None
 
         self._build_controls()
         self._build_main_area()
@@ -335,7 +751,7 @@ class AgentGUI:
         ).pack(anchor="w")
         ttk.Label(
             title_group,
-            text="Learned navigation, telemetry, and room-map viewer",
+            text="Observed scene memory, learned navigation, and telemetry",
             style="Subtitle.TLabel",
         ).pack(anchor="w")
         ttk.Label(
@@ -385,7 +801,7 @@ class AgentGUI:
 
         map_frame = ttk.LabelFrame(
             panes,
-            text="Learned room map",
+            text="Remembered room view",
             padding=8,
         )
         map_tools = ttk.Frame(map_frame)
@@ -409,6 +825,35 @@ class AgentGUI:
             text="Clear learned map",
             command=self._clear_wall_map,
         ).pack(side="right", padx=4)
+        ttk.Button(
+            map_tools,
+            text="Rebuild scene images",
+            command=self._clear_room_views,
+        ).pack(side="right", padx=4)
+        layer_tools = ttk.Frame(map_frame)
+        layer_tools.pack(fill="x", pady=(0, 5))
+        ttk.Label(layer_tools, text="Layers:").pack(side="left")
+        for label, variable in (
+            ("Remembered scene", self.show_room_view_var),
+            ("Navigation evidence", self.show_navigation_var),
+            ("AI guesses", self.show_guesses_var),
+        ):
+            ttk.Checkbutton(
+                layer_tools,
+                text=label,
+                variable=variable,
+                command=self._redraw_map,
+            ).pack(side="left", padx=(6, 0))
+        ttk.Button(
+            layer_tools,
+            text="Fit room",
+            command=self._reset_map_view,
+        ).pack(side="right", padx=(6, 0))
+        ttk.Label(
+            layer_tools,
+            text="Wheel: zoom  •  Middle/right drag: move",
+            style="Subtitle.TLabel",
+        ).pack(side="right", padx=(8, 0))
         self.map_canvas = tk.Canvas(
             map_frame,
             highlightthickness=1,
@@ -416,6 +861,13 @@ class AgentGUI:
         self.map_canvas.pack(fill="both", expand=True)
         self.map_canvas.bind("<Configure>", lambda _event: self._redraw_map())
         self.map_canvas.bind("<Button-1>", self._inspect_map_cell)
+        self.map_canvas.bind("<MouseWheel>", self._zoom_map)
+        self.map_canvas.bind("<ButtonPress-2>", self._start_map_pan)
+        self.map_canvas.bind("<B2-Motion>", self._drag_map)
+        self.map_canvas.bind("<ButtonRelease-2>", self._end_map_pan)
+        self.map_canvas.bind("<ButtonPress-3>", self._start_map_pan)
+        self.map_canvas.bind("<B3-Motion>", self._drag_map)
+        self.map_canvas.bind("<ButtonRelease-3>", self._end_map_pan)
         self._build_map_legend(map_frame)
         ttk.Label(
             map_frame,
@@ -424,33 +876,72 @@ class AgentGUI:
         ).pack(fill="x", pady=(4, 0))
         panes.add(map_frame, weight=1)
 
-        output_panes = ttk.Panedwindow(panes, orient="vertical")
-        ai_frame = ttk.LabelFrame(output_panes, text="AI output", padding=3)
-        telemetry_frame = ttk.LabelFrame(
-            output_panes, text="Telemetry output", padding=3
+        output_column = ttk.Frame(panes)
+        situation = ttk.LabelFrame(
+            output_column,
+            text="Current situation",
+            padding=(10, 8),
         )
-        self.ai_output = self._text_with_scrollbar(ai_frame)
-        self.telemetry_output = self._text_with_scrollbar(telemetry_frame)
+        situation.pack(fill="x", pady=(0, 8))
+        ttk.Label(
+            situation,
+            textvariable=self.current_decision_var,
+            style="Decision.TLabel",
+        ).pack(fill="x", anchor="w")
+        ttk.Label(
+            situation,
+            textvariable=self.current_reason_var,
+            style="Reason.TLabel",
+            wraplength=500,
+            justify="left",
+        ).pack(fill="x", anchor="w", pady=(3, 6))
+        situation_meta = ttk.Frame(situation, style="Situation.TFrame")
+        situation_meta.pack(fill="x")
+        ttk.Label(
+            situation_meta,
+            textvariable=self.current_location_var,
+            style="Meta.TLabel",
+        ).pack(fill="x", anchor="w")
+        ttk.Label(
+            situation_meta,
+            textvariable=self.current_capture_var,
+            style="Meta.TLabel",
+        ).pack(fill="x", anchor="w", pady=(2, 0))
+
+        output_panes = ttk.Panedwindow(output_column, orient="vertical")
+        output_panes.pack(fill="both", expand=True)
+        ai_frame = ttk.LabelFrame(output_panes, text="Decision history", padding=3)
+        telemetry_frame = ttk.LabelFrame(
+            output_panes, text="Game telemetry", padding=3
+        )
+        self.ai_output = self._text_with_scrollbar(ai_frame, monospace=False)
+        self.telemetry_output = self._text_with_scrollbar(
+            telemetry_frame,
+            monospace=True,
+        )
         output_panes.add(ai_frame, weight=1)
         output_panes.add(telemetry_frame, weight=1)
-        panes.add(output_panes, weight=1)
+        panes.add(output_column, weight=1)
 
     def _build_map_legend(self, parent: ttk.Frame) -> None:
         legend = ttk.LabelFrame(parent, text="Map legend", padding=5)
         legend.pack(fill="x", pady=(5, 0))
         items = [
+            ("Remembered camera pixels", "camera"),
             ("Visited (brighter = repeated)", "cell"),
             ("Observed path", "path"),
             ("Blocked edge", "wall"),
+            ("Seen on screen", "visible_region"),
+            ("Visual guess (?)", "hypothesis"),
             ("Discovered interactable", "interactable"),
-            ("Discovered room warp", "warp"),
+            ("Confirmed room exit", "warp"),
             ("Kris", "player"),
         ]
         for index, (label, color) in enumerate(items):
             item = ttk.Frame(legend)
             item.grid(
-                row=index // 4,
-                column=index % 4,
+                row=index // 3,
+                column=index % 3,
                 sticky="w",
                 padx=(0, 14),
                 pady=2,
@@ -460,13 +951,20 @@ class AgentGUI:
             self.legend_swatches[color] = swatch
             ttk.Label(item, text=label).pack(side="left")
 
-    def _text_with_scrollbar(self, parent: ttk.Frame) -> tk.Text:
+    def _text_with_scrollbar(
+        self,
+        parent: ttk.Frame,
+        *,
+        monospace: bool,
+    ) -> tk.Text:
         scrollbar = ttk.Scrollbar(parent, orient="vertical")
         text = tk.Text(
             parent,
-            wrap="none",
-            font=("Consolas", 9),
+            wrap="word",
+            font=(("Consolas", 9) if monospace else ("Segoe UI", 9)),
             yscrollcommand=scrollbar.set,
+            spacing1=2,
+            spacing3=3,
         )
         scrollbar.configure(command=text.yview)
         scrollbar.pack(side="right", fill="y")
@@ -514,6 +1012,25 @@ class AgentGUI:
             foreground=colors["text"],
             font=("Segoe UI Semibold", 9),
             padding=(10, 5),
+        )
+        self.style.configure("Situation.TFrame", background=colors["panel"])
+        self.style.configure(
+            "Decision.TLabel",
+            background=colors["panel"],
+            foreground=colors["accent_active"],
+            font=("Segoe UI Semibold", 12),
+        )
+        self.style.configure(
+            "Reason.TLabel",
+            background=colors["panel"],
+            foreground=colors["text"],
+            font=("Segoe UI", 9),
+        )
+        self.style.configure(
+            "Meta.TLabel",
+            background=colors["panel"],
+            foreground=colors["muted"],
+            font=("Segoe UI", 8),
         )
         self.style.configure(
             "TLabelframe",
@@ -623,11 +1140,14 @@ class AgentGUI:
                 highlightbackground=colors["border"],
             )
         if hasattr(self, "map_canvas"):
+            self._map_image_cache.clear()
             self._redraw_map()
 
     def start(self) -> None:
         if self.process is not None and self.process.poll() is None:
             return
+        self._last_ai_signature = None
+        self._repeated_ai_decisions = 0
         try:
             steps = int(self.steps_var.get())
             if steps < 1:
@@ -755,32 +1275,85 @@ class AgentGUI:
     def _handle_event(self, payload: object) -> None:
         if not isinstance(payload, dict):
             return
+        if payload.get("kind") == "runtime_status":
+            status = str(payload.get("status") or "")
+            message = str(payload.get("message") or "")
+            if status == "background":
+                self.status_var.set("Running in background")
+            elif status == "running":
+                self.status_var.set(
+                    "Running (LIVE)" if self.live_var.get() else "Running (dry)"
+                )
+            if message:
+                self._append(self.ai_output, f"--- {message} ---\n")
+            return
+        self.map_model.update(payload)
+        self._display_ai_decision(payload)
         telemetry = payload.get("telemetry")
         if telemetry:
-            nearby = ""
-            if telemetry.get("nearest_interactable_name"):
-                nearby = (
-                    f" near={telemetry['nearest_interactable_name']}"
-                    f"@{telemetry.get('nearest_interactable_distance')}"
-                )
-            display_room = (
+            self._append(self.telemetry_output, format_telemetry_event(payload) + "\n\n")
+        self._refresh_room_choices(select_current=self.follow_room_var.get())
+        self._redraw_map()
+
+    def _display_ai_decision(self, payload: dict[str, object]) -> None:
+        category, action, explanation = decision_parts(payload)
+        signature = (category, action, explanation)
+        self.current_decision_var.set(
+            f"Step {int(payload.get('step') or 0):04d}  |  {category}  |  {action}"
+        )
+        self.current_reason_var.set(explanation)
+        telemetry = payload.get("telemetry")
+        if isinstance(telemetry, dict):
+            room = str(
                 telemetry.get("room_name")
                 or self.map_model.current_room
                 or telemetry.get("room_id")
                 or "transition"
+            ).removeprefix("room_")
+            if telemetry.get("mode") == "overworld":
+                x, y = telemetry.get("x"), telemetry.get("y")
+            else:
+                x, y = telemetry.get("player_x"), telemetry.get("player_y")
+            try:
+                location = f"Room: {room}  |  Kris: {round(float(x))}, {round(float(y))}"
+            except (TypeError, ValueError):
+                location = f"Room: {room}  |  Kris: not reported"
+        else:
+            room = (self.map_model.current_room or "not reported").removeprefix(
+                "room_"
             )
-            line = (
-                f"{payload.get('step', 0):04d} "
-                f"v{telemetry.get('version')} {telemetry.get('mode')} "
-                f"room={display_room} "
-                f"pos=({telemetry.get('x')},{telemetry.get('y')}) "
-                f"sprite={telemetry.get('sprite_name') or '-'} "
-                f"dir={telemetry.get('facing_direction') or '-'}{nearby}\n"
+            location = f"Room: {room}  |  Telemetry: unavailable"
+        self.current_location_var.set(location)
+        room_map = self.map_model.rooms.get(self.map_model.current_room or "")
+        active_guesses = 0
+        if room_map is not None:
+            active_guesses = sum(
+                bool(record.get("hypothesis"))
+                and int(record.get("inspections", 0)) < 2
+                for record in room_map.screen_regions.values()
             )
-            self._append(self.telemetry_output, line)
-        self.map_model.update(payload)
-        self._refresh_room_choices(select_current=self.follow_room_var.get())
-        self._redraw_map()
+        capture_status = (
+            "Scene: live"
+            if payload.get("visual_valid", True)
+            else "Scene: holding last clean frame"
+        )
+        self.current_capture_var.set(
+            f"{capture_status}  |  AI guesses: {active_guesses}"
+        )
+        if signature == self._last_ai_signature:
+            self._repeated_ai_decisions += 1
+            if (
+                self._repeated_ai_decisions in {5, 10}
+                or self._repeated_ai_decisions % 25 == 0
+            ):
+                self._append(
+                    self.ai_output,
+                    f"    ...same plan continues ({self._repeated_ai_decisions} steps)\n",
+                )
+            return
+        self._last_ai_signature = signature
+        self._repeated_ai_decisions = 1
+        self._append(self.ai_output, format_ai_decision(payload) + "\n\n")
 
     def _handle_exit(self, return_code: int) -> None:
         self._append(self.ai_output, f"--- AI exited with code {return_code} ---\n")
@@ -801,12 +1374,85 @@ class AgentGUI:
             preferred = "room_krisroom" if "room_krisroom" in rooms else (rooms[0] if rooms else "")
             self.room_var.set(preferred)
 
+    def _room_view_state(self, room_name: str) -> dict[str, float]:
+        return self._map_view_state.setdefault(
+            room_name,
+            {"zoom": 1.0, "pan_x": 0.0, "pan_y": 0.0},
+        )
+
+    def _reset_map_view(self) -> None:
+        room_name = self.room_var.get()
+        if room_name:
+            self._map_view_state[room_name] = {
+                "zoom": 1.0,
+                "pan_x": 0.0,
+                "pan_y": 0.0,
+            }
+        self._redraw_map()
+
+    def _zoom_map(self, event: tk.Event) -> str:
+        room_name = self.room_var.get()
+        if not room_name or self._map_transform is None or not event.delta:
+            return "break"
+        min_x, min_y, old_scale, old_offset_x, old_offset_y = self._map_transform
+        world_x = (event.x - old_offset_x) / old_scale + min_x
+        world_y = (event.y - old_offset_y) / old_scale + min_y
+        state = self._room_view_state(room_name)
+        factor = 1.25 if event.delta > 0 else 0.8
+        state["zoom"] = min(12.0, max(0.20, state["zoom"] * factor))
+        self._redraw_map()
+        if self._map_transform is not None:
+            new_min_x, new_min_y, new_scale, new_offset_x, new_offset_y = (
+                self._map_transform
+            )
+            state["pan_x"] += event.x - (
+                new_offset_x + (world_x - new_min_x) * new_scale
+            )
+            state["pan_y"] += event.y - (
+                new_offset_y + (world_y - new_min_y) * new_scale
+            )
+            self._redraw_map()
+        return "break"
+
+    def _start_map_pan(self, event: tk.Event) -> str:
+        room_name = self.room_var.get()
+        if not room_name:
+            return "break"
+        state = self._room_view_state(room_name)
+        self._map_pan_anchor = (
+            room_name,
+            event.x,
+            event.y,
+            state["pan_x"],
+            state["pan_y"],
+        )
+        self.map_canvas.configure(cursor="fleur")
+        return "break"
+
+    def _drag_map(self, event: tk.Event) -> str:
+        if self._map_pan_anchor is None:
+            return "break"
+        room_name, start_x, start_y, pan_x, pan_y = self._map_pan_anchor
+        if room_name != self.room_var.get():
+            return "break"
+        state = self._room_view_state(room_name)
+        state["pan_x"] = pan_x + event.x - start_x
+        state["pan_y"] = pan_y + event.y - start_y
+        self._redraw_map()
+        return "break"
+
+    def _end_map_pan(self, _event: tk.Event) -> str:
+        self._map_pan_anchor = None
+        self.map_canvas.configure(cursor="")
+        return "break"
+
     def _redraw_map(self) -> None:
         canvas = self.map_canvas
         canvas.delete("all")
+        self._map_images = []
         room_name = self.room_var.get()
         room = self.map_model.rooms.get(room_name)
-        if room is None or not room.cells:
+        if room is None or (not room.cells and not room.view_tiles):
             canvas.create_text(
                 18,
                 18,
@@ -825,22 +1471,68 @@ class AgentGUI:
         for x, y, _direction in room.blocked_edges:
             points.add((x, y))
         points.update(room.interactables)
-        for x, y, _target_room, _target_x, _target_y in room.warps:
+        for x, y, _target_room in room.warps:
             points.add((x, y))
+        for region_x, region_y in room.screen_regions:
+            region_left = region_x * EXPLORATION_REGION_CELLS
+            region_top = region_y * EXPLORATION_REGION_CELLS
+            points.update(
+                (
+                    (region_left, region_top),
+                    (
+                        region_left + EXPLORATION_REGION_CELLS - 1,
+                        region_top + EXPLORATION_REGION_CELLS - 1,
+                    ),
+                )
+            )
+        for region_x, region_y in room.view_tiles:
+            region_left = region_x * EXPLORATION_REGION_CELLS
+            region_top = region_y * EXPLORATION_REGION_CELLS
+            points.update(
+                (
+                    (region_left, region_top),
+                    (
+                        region_left + EXPLORATION_REGION_CELLS - 1,
+                        region_top + EXPLORATION_REGION_CELLS - 1,
+                    ),
+                )
+            )
+        if (
+            self.map_model.current_camera is not None
+            and self.map_model.current_camera[0] == room_name
+        ):
+            _camera_room, camera_x, camera_y, camera_width, camera_height = (
+                self.map_model.current_camera
+            )
+            points.update(
+                (
+                    (
+                        int(camera_x // CELL_SIZE),
+                        int(camera_y // CELL_SIZE),
+                    ),
+                    (
+                        int((camera_x + camera_width - 1e-6) // CELL_SIZE),
+                        int((camera_y + camera_height - 1e-6) // CELL_SIZE),
+                    ),
+                )
+            )
         min_x = min(x for x, _y in points)
         max_x = max(x for x, _y in points)
         min_y = min(y for _x, y in points)
         max_y = max(y for _x, y in points)
         width = max(canvas.winfo_width(), 400)
         height = max(canvas.winfo_height(), 300)
-        offset_x = 32.0
-        offset_y = 44.0
-        scale = min(
+        view_state = self._room_view_state(room_name)
+        base_offset_x = 32.0
+        base_offset_y = 44.0
+        fit_scale = min(
             30.0,
-            (width - offset_x * 2) / max(1, max_x - min_x + 2),
-            (height - offset_y - 24) / max(1, max_y - min_y + 2),
+            (width - base_offset_x * 2) / max(1, max_x - min_x + 2),
+            (height - base_offset_y - 24) / max(1, max_y - min_y + 2),
         )
-        scale = max(5.0, scale)
+        scale = max(0.75, fit_scale * view_state["zoom"])
+        offset_x = base_offset_x + view_state["pan_x"]
+        offset_y = base_offset_y + view_state["pan_y"]
         self._map_transform = (min_x, min_y, scale, offset_x, offset_y)
 
         def center(cell: tuple[int, int]) -> tuple[float, float]:
@@ -861,7 +1553,11 @@ class AgentGUI:
             width - 16,
             15,
             anchor="ne",
-            text=f"8 px grid  •  {len(room.cells)} cells",
+            text=(
+                "8 px detail grid  •  "
+                f"{len({(x // EXPLORATION_REGION_CELLS, y // EXPLORATION_REGION_CELLS) for x, y in room.cells})} "
+                "exploration regions"
+            ),
             fill=self.colors["muted"],
             font=("Segoe UI", 8),
         )
@@ -870,14 +1566,67 @@ class AgentGUI:
         top = offset_y
         right = offset_x + (max_x - min_x + 1) * scale
         bottom = offset_y + (max_y - min_y + 1) * scale
-        for grid_x in range(min_x, max_x + 2):
+        remembered_view_visible = self.show_room_view_var.get() and bool(
+            room.view_tiles
+        )
+        if remembered_view_visible:
+            for (region_x, region_y), record in sorted(room.view_tiles.items()):
+                try:
+                    rendered_size = max(
+                        1,
+                        round(EXPLORATION_REGION_CELLS * scale),
+                    )
+                    tile_path = Path(str(record["path"]))
+                    cache_key = (
+                        str(tile_path),
+                        tile_path.stat().st_mtime_ns,
+                        rendered_size,
+                        self.dark_mode_var.get(),
+                    )
+                    displayed = self._map_image_cache.get(cache_key)
+                    if displayed is None:
+                        with Image.open(tile_path) as source:
+                            tile = source.convert("RGBA")
+                        if not self.dark_mode_var.get():
+                            tile = ImageEnhance.Brightness(tile).enhance(0.92)
+                        resampling = (
+                            Image.Resampling.LANCZOS
+                            if rendered_size < tile.width
+                            else Image.Resampling.NEAREST
+                        )
+                        tile = tile.resize(
+                            (rendered_size, rendered_size),
+                            resampling,
+                        )
+                        displayed = ImageTk.PhotoImage(tile)
+                        if len(self._map_image_cache) >= 512:
+                            self._map_image_cache.clear()
+                        self._map_image_cache[cache_key] = displayed
+                    self._map_images.append(displayed)
+                    image_x = offset_x + (
+                        region_x * EXPLORATION_REGION_CELLS - min_x
+                    ) * scale
+                    image_y = offset_y + (
+                        region_y * EXPLORATION_REGION_CELLS - min_y
+                    ) * scale
+                    canvas.create_image(
+                        image_x,
+                        image_y,
+                        image=displayed,
+                        anchor="nw",
+                    )
+                except (OSError, KeyError, TypeError, ValueError, tk.TclError):
+                    continue
+
+        navigation_visible = self.show_navigation_var.get()
+        for grid_x in (range(min_x, max_x + 2) if navigation_visible else ()):
             x = offset_x + (grid_x - min_x) * scale
             canvas.create_line(x, top, x, bottom, fill=self.colors["grid"])
-        for grid_y in range(min_y, max_y + 2):
+        for grid_y in (range(min_y, max_y + 2) if navigation_visible else ()):
             y = offset_y + (grid_y - min_y) * scale
             canvas.create_line(left, y, right, y, fill=self.colors["grid"])
 
-        for x, y in sorted(room.cells):
+        for x, y in (sorted(room.cells) if navigation_visible else ()):
             cx, cy = center((x, y))
             half = scale * 0.42
             visits = room.visits.get((x, y), 1)
@@ -891,17 +1640,72 @@ class AgentGUI:
                 cy - half,
                 cx + half,
                 cy + half,
-                fill=cell_color,
+                fill="" if remembered_view_visible else cell_color,
                 outline=self.colors["cell_outline"],
             )
-        for source_x, source_y, target_x, target_y in sorted(room.open_edges):
+            if remembered_view_visible and visits >= 5:
+                radius = min(3.0, scale * 0.16)
+                canvas.create_oval(
+                    cx - radius,
+                    cy - radius,
+                    cx + radius,
+                    cy + radius,
+                    fill=cell_color,
+                    outline="",
+                )
+        for source_x, source_y, target_x, target_y in (
+            sorted(room.open_edges) if navigation_visible else ()
+        ):
             canvas.create_line(
                 *center((source_x, source_y)),
                 *center((target_x, target_y)),
                 fill=self.colors["path"],
                 width=max(2, round(scale * 0.16)),
             )
-        for (x, y, direction), failures in sorted(room.blocked_edges.items()):
+        for (region_x, region_y), record in sorted(room.screen_regions.items()):
+            region_left = region_x * EXPLORATION_REGION_CELLS
+            region_top = region_y * EXPLORATION_REGION_CELLS
+            x1 = offset_x + (region_left - min_x) * scale
+            y1 = offset_y + (region_top - min_y) * scale
+            x2 = x1 + EXPLORATION_REGION_CELLS * scale
+            y2 = y1 + EXPLORATION_REGION_CELLS * scale
+            is_current = (
+                room_name,
+                region_x,
+                region_y,
+            ) in self.map_model.current_visible_regions
+            # Keep the live camera boundary visible even when remembered scene
+            # tiles are enabled. Otherwise the detailed background hides which
+            # part of the map Kris can currently see.
+            if navigation_visible:
+                canvas.create_rectangle(
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    outline=(
+                        self.colors["visible_current"]
+                        if is_current
+                        else self.colors["visible_region"]
+                    ),
+                    width=2 if is_current else 1,
+                    dash=() if is_current else (4, 3),
+                )
+            if (
+                self.show_guesses_var.get()
+                and record.get("hypothesis")
+                and int(record.get("inspections", 0)) < 2
+            ):
+                canvas.create_text(
+                    (x1 + x2) / 2,
+                    (y1 + y2) / 2,
+                    text="?",
+                    fill=self.colors["hypothesis"],
+                    font=("Segoe UI Semibold", max(8, round(scale * 0.52))),
+                )
+        for (x, y, direction), failures in (
+            sorted(room.blocked_edges.items()) if navigation_visible else ()
+        ):
             cx, cy = center((x, y))
             half = scale * 0.48
             if direction == "up":
@@ -917,7 +1721,9 @@ class AgentGUI:
                 fill=self.colors["wall"],
                 width=min(8, 3 + max(1, failures)),
             )
-        for (x, y), record in sorted(room.interactables.items()):
+        for (x, y), record in (
+            sorted(room.interactables.items()) if navigation_visible else ()
+        ):
             cx, cy = center((x, y))
             radius = max(4.0, scale * 0.27)
             canvas.create_oval(
@@ -936,8 +1742,9 @@ class AgentGUI:
                 fill="#17130a",
                 font=("TkDefaultFont", max(7, round(scale * 0.32)), "bold"),
             )
-        for (x, y, target_room, _target_x, _target_y), record in sorted(
-            room.warps.items()
+        numbered_exits = list(enumerate(sorted(room.warps.items()), start=1))
+        for exit_number, ((x, y, _target_room), _record) in (
+            numbered_exits if navigation_visible else ()
         ):
             cx, cy = center((x, y))
             radius = max(5.0, scale * 0.32)
@@ -953,13 +1760,38 @@ class AgentGUI:
                 fill=self.colors["warp"],
                 outline=self.colors["warp_outline"],
             )
-            short_target = target_room.removeprefix("room_")
             canvas.create_text(
-                cx + radius + 2,
-                cy - radius,
-                anchor="sw",
-                text=f"→ {short_target}",
-                fill=self.colors["warp"],
+                cx,
+                cy,
+                text=str(exit_number),
+                fill="#ffffff",
+                font=("Segoe UI Semibold", max(7, round(scale * 0.28))),
+            )
+        if (
+            self.map_model.current_camera is not None
+            and self.map_model.current_camera[0] == room_name
+        ):
+            _camera_room, camera_x, camera_y, camera_width, camera_height = (
+                self.map_model.current_camera
+            )
+            camera_left = offset_x + (camera_x / CELL_SIZE - min_x) * scale
+            camera_top = offset_y + (camera_y / CELL_SIZE - min_y) * scale
+            camera_right = camera_left + camera_width / CELL_SIZE * scale
+            camera_bottom = camera_top + camera_height / CELL_SIZE * scale
+            canvas.create_rectangle(
+                camera_left,
+                camera_top,
+                camera_right,
+                camera_bottom,
+                outline=self.colors["camera"],
+                width=3,
+            )
+            canvas.create_text(
+                camera_left + 5,
+                camera_top + 4,
+                anchor="nw",
+                text="VISIBLE NOW",
+                fill=self.colors["camera"],
                 font=("Segoe UI Semibold", 8),
             )
         if (
@@ -990,11 +1822,53 @@ class AgentGUI:
                     arrow="last",
                     arrowshape=(6, 7, 3),
                 )
+        explored_regions = len(
+            {
+                (
+                    x // EXPLORATION_REGION_CELLS,
+                    y // EXPLORATION_REGION_CELLS,
+                )
+                for x, y in room.cells
+            }
+        )
+        exit_summary = ", ".join(
+            f"{exit_number} to {target_room.removeprefix('room_')} "
+            f"(crossed {record.get('count', 1)}x)"
+            for exit_number, ((_x, _y, target_room), record) in numbered_exits
+        )
+        active_hypotheses = sum(
+            bool(record.get("hypothesis"))
+            and int(record.get("inspections", 0)) < 2
+            for record in room.screen_regions.values()
+        )
+        tested_hypotheses = sum(
+            bool(record.get("hypothesis"))
+            and int(record.get("inspections", 0)) >= 2
+            for record in room.screen_regions.values()
+        )
+        camera_summary = ""
+        if (
+            self.map_model.current_camera is not None
+            and self.map_model.current_camera[0] == room_name
+        ):
+            _camera_room, camera_x, camera_y, camera_width, camera_height = (
+                self.map_model.current_camera
+            )
+            camera_summary = (
+                f" Visible now: ({camera_x:.0f}, {camera_y:.0f}) "
+                f"{camera_width:.0f}x{camera_height:.0f}."
+            )
         self.map_detail_var.set(
-            f"{room_name}: {len(room.cells)} visited cells, "
+            f"{room_name}: {len(room.cells)} detailed map cells across "
+            f"{explored_regions} exploration regions, "
+            f"{len(room.view_tiles)} remembered scene regions, "
+            f"{len(room.screen_regions)} regions seen on screen with "
+            f"{active_hypotheses} active and {tested_hypotheses} tested visual guesses, "
             f"{len(room.open_edges)} paths, {len(room.blocked_edges)} wall edges, "
             f"{len(room.interactables)} discovered interactables, "
-            f"{len(room.warps)} warp endpoints. Click a map cell for details."
+            f"{len(room.warps)} confirmed exits. "
+            f"{('Exits: ' + exit_summary + '. ') if exit_summary else ''}"
+            f"{camera_summary} Click a map cell for details."
         )
 
     def _inspect_map_cell(self, event: tk.Event) -> None:
@@ -1009,6 +1883,35 @@ class AgentGUI:
         )
         visits = room.visits.get(cell, 0)
         details = [f"{room_name} cell {cell}", f"visits={visits}"]
+        region_key = (
+            cell[0] // EXPLORATION_REGION_CELLS,
+            cell[1] // EXPLORATION_REGION_CELLS,
+        )
+        screen_region = room.screen_regions.get(region_key)
+        view_tile = room.view_tiles.get(region_key)
+        if view_tile:
+            details.append(
+                "remembered from camera "
+                f"({float(view_tile.get('coverage', 1.0)) * 100:.0f}% of region)"
+            )
+        if screen_region:
+            currently_visible = (
+                room_name,
+                *region_key,
+            ) in self.map_model.current_visible_regions
+            details.append(
+                f"seen on screen {screen_region.get('views', 1)}x"
+                f"{' (currently visible)' if currently_visible else ''}"
+            )
+            if (
+                screen_region.get("hypothesis")
+                and int(screen_region.get("inspections", 0)) < 2
+            ):
+                details.append(
+                    f"AI guess={str(screen_region['hypothesis']).replace('_', ' ')} "
+                    f"(visual interest {float(screen_region.get('interest', 0.0)):.2f}; "
+                    "unconfirmed)"
+                )
         interactable = room.interactables.get(cell)
         if interactable:
             approach_directions = sorted(
@@ -1027,6 +1930,21 @@ class AgentGUI:
                 f"interactable={interactable.get('name')} "
                 f"(confirmed x{interactable.get('confirmations', 1)}{approaches})"
             )
+            classification = str(interactable.get("classification") or "unknown")
+            if classification == "confirmed_npc":
+                details.append("story character=confirmed by an observed choice menu")
+            elif classification == "tested_nonchoice":
+                details.append("story character=unconfirmed; ordinary interaction will not be retried")
+            usefulness = str(interactable.get("usefulness") or "unknown")
+            if usefulness == "progress":
+                details.append("story memory=useful; changed the game state")
+            elif usefulness == "choice_pending":
+                details.append("story memory=promising; unresolved choice responses remain")
+            elif usefulness == "flavor":
+                details.append("story memory=flavor; cooled down unless new evidence appears")
+            last_outcome = str(interactable.get("last_outcome") or "")
+            if last_outcome and last_outcome != "unknown":
+                details.append(f"last result={last_outcome.replace('_', ' ')}")
         walls = [
             f"{direction}×{failures}"
             for (x, y, direction), failures in room.blocked_edges.items()
@@ -1035,15 +1953,15 @@ class AgentGUI:
         if walls:
             details.append("walls=" + ", ".join(sorted(walls)))
         warps = [
-            f"{record.get('kind')} to {target_room} {target_cell} "
-            f"via {record.get('action')} ×{record.get('count')}"
-            for (x, y, target_room, target_x, target_y), record in room.warps.items()
+            f"confirmed exit to {target_room}; crossed with {record.get('action')} "
+            f"{record.get('count')}x; destination spawned Kris near "
+            f"{record.get('target_cell')} (not another exit)"
+            for (x, y, target_room), record in room.warps.items()
             if (x, y) == cell
-            for target_cell in [(target_x, target_y)]
         ]
         details.extend(warps)
         if visits == 0 and cell not in room.cells:
-            details.append("unmapped")
+            details.append("visible but not yet traversed" if screen_region else "unmapped")
         self.map_detail_var.set(" | ".join(details))
 
     @staticmethod
@@ -1057,6 +1975,8 @@ class AgentGUI:
     def _clear_output(self) -> None:
         self.ai_output.delete("1.0", "end")
         self.telemetry_output.delete("1.0", "end")
+        self._last_ai_signature = None
+        self._repeated_ai_decisions = 0
 
     def _clear_wall_map(self) -> None:
         if self.process is not None and self.process.poll() is None:
@@ -1067,19 +1987,54 @@ class AgentGUI:
             return
         if not messagebox.askyesno(
             "Clear learned map",
-            "Delete all learned cells, paths, walls, interactions, and room warps?",
+            "Delete all remembered room images, cells, paths, walls, interactions, "
+            "visual guesses, and room warps?",
         ):
             return
         memory_path = self.project_root / "memory" / "navigation.json"
         memory_path.unlink(missing_ok=True)
         memory_path.with_suffix(memory_path.suffix + ".tmp").unlink(missing_ok=True)
+        room_views_path = self.project_root / "memory" / "room_views"
+        if room_views_path.exists():
+            shutil.rmtree(room_views_path)
         self.map_model = WallMapModel()
+        self._map_images = []
+        self._map_image_cache.clear()
+        self._map_view_state.clear()
         self.room_var.set("")
         self._refresh_room_choices(select_current=False)
         self._redraw_map()
         self._append(
             self.ai_output,
-            "Learned map cleared. The next run will start clean.\n",
+            "Learned map and remembered room views cleared. "
+            "The next run will start clean.\n",
+        )
+
+    def _clear_room_views(self) -> None:
+        if self.process is not None and self.process.poll() is None:
+            messagebox.showinfo(
+                "Stop AI first",
+                "Stop the AI before rebuilding its remembered scene images.",
+            )
+            return
+        if not messagebox.askyesno(
+            "Rebuild scene images",
+            "Delete only the remembered room pictures? Learned paths, walls, "
+            "interactions, and exits will be kept.",
+        ):
+            return
+        room_views_path = self.project_root / "memory" / "room_views"
+        if room_views_path.exists():
+            shutil.rmtree(room_views_path)
+        for room in self.map_model.rooms.values():
+            room.view_tiles.clear()
+        self._map_images = []
+        self._map_image_cache.clear()
+        self._redraw_map()
+        self._append(
+            self.ai_output,
+            "Remembered scene images cleared. Navigation knowledge was kept; "
+            "new high-resolution images will appear during the next run.\n",
         )
 
     def _on_close(self) -> None:

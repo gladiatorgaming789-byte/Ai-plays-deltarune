@@ -10,9 +10,20 @@ from .telemetry import TelemetrySample
 
 class EpisodeTracker:
     def __init__(self, root: Path = Path("runs"), frame_interval: int = 10):
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        self.directory = root / stamp
-        self.directory.mkdir(parents=True, exist_ok=False)
+        if frame_interval < 1:
+            raise ValueError("frame_interval must be positive")
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+        attempt = 0
+        while True:
+            suffix = "" if attempt == 0 else f"-{attempt}"
+            self.directory = root / f"{stamp}{suffix}"
+            try:
+                self.directory.mkdir(parents=True, exist_ok=False)
+                break
+            except FileExistsError:
+                # Separate CLI/GUI runs can start at almost the same instant.
+                # Preserve both logs instead of failing the newer run.
+                attempt += 1
         self.events = self.directory / "events.jsonl"
         self.frame_interval = frame_interval
 
@@ -39,7 +50,12 @@ class EpisodeTracker:
         with self.events.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(event) + "\n")
         if observation.step % self.frame_interval == 0:
-            observation.frame.save(self.directory / f"frame-{observation.step:06d}.png")
+            try:
+                self.directory.mkdir(parents=True, exist_ok=True)
+                observation.frame.save(self.directory / f"frame-{observation.step:06d}.png")
+            except OSError:
+                # Keep the run log intact even if the frame capture cannot be written.
+                pass
 
     def finish(self, policy_summary: dict) -> None:
         with (self.directory / "summary.json").open("w", encoding="utf-8") as stream:

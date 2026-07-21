@@ -1,6 +1,7 @@
 from deltarune_agent.perception import GameState, Perception, VisualFeatures
 from deltarune_agent.telemetry import (
     TelemetryReceiver,
+    TelemetrySample,
     facing_from_sprite,
     fuse_perception,
     parse_packet,
@@ -30,6 +31,26 @@ def test_overworld_telemetry_overrides_false_battle():
     visual = Perception(GameState.BATTLE, 0.7, features)
     sample = parse_packet(b"DRTEL|1|overworld|7|room_home|120|42|obj_mainchara|end")
     result = fuse_perception(visual, sample)
+    assert result.state is GameState.OVERWORLD
+    assert result.source == "telemetry"
+
+
+def test_current_overworld_telemetry_overrides_false_visual_dialogue():
+    features = VisualFeatures(0, 0, 0, 0, 0, 0)
+    visual = Perception(GameState.DIALOGUE, 0.92, features)
+    sample = TelemetrySample(
+        "overworld",
+        7,
+        "room_torbathroom",
+        201,
+        131,
+        "obj_mainchara",
+        0,
+        version=8,
+    )
+
+    result = fuse_perception(visual, sample)
+
     assert result.state is GameState.OVERWORLD
     assert result.source == "telemetry"
 
@@ -146,6 +167,71 @@ def test_v6_rich_packet_keeps_collision_and_interaction_fields():
     assert sample.nearest_interactable_id == 100099
 
 
+def test_v7_motion_packet_supplies_camera_view_without_hidden_objects():
+    packet = (
+        b"DRTEL|7|overworld|7|room_home|120|42|obj_mainchara|540|240|"
+        b"spr_krisr|2|0|4|0|4|0.2|32|16|320|240|end"
+    )
+    sample = parse_packet(packet)
+
+    assert sample is not None
+    assert sample.version == 7
+    assert sample.camera_x == 32
+    assert sample.camera_y == 16
+    assert sample.camera_width == 320
+    assert sample.camera_height == 240
+    assert sample.facing_direction == "right"
+    assert sample.nearest_interactable_name is None
+
+
+def test_v7_rich_packet_keeps_camera_and_collision_field_offsets():
+    packet = (
+        b"DRTEL|7|overworld|7|room_home|120|42|obj_mainchara|540|240|"
+        b"spr_krisd|2|0|4|0|4|0.2|32|16|320|240|"
+        b"100001|116|42|112|30|128|50|-100|1|1|30|54321||-4|0|0|-1|end"
+    )
+    sample = parse_packet(packet)
+
+    assert sample is not None
+    assert sample.camera_x == 32
+    assert sample.camera_width == 320
+    assert sample.instance_id == 100001
+    assert sample.previous_x == 116
+    assert sample.bbox_right == 128
+    assert sample.nearest_interactable_name is None
+    assert sample.nearest_interactable_id == -4
+
+
+def test_v8_rich_packet_reports_the_verified_player_control_gate():
+    packet = (
+        b"DRTEL|8|overworld|7|room_home|120|42|obj_mainchara|540|240|"
+        b"spr_krisd|2|0|4|0|4|0.2|32|16|320|240|"
+        b"100001|116|42|112|30|128|50|-100|1|1|30|54321||-4|0|0|-1|1|end"
+    )
+    sample = parse_packet(packet)
+
+    assert sample is not None
+    assert sample.version == 8
+    assert sample.player_x == 120
+    assert sample.interaction_state == 1
+    assert sample.player_controlled is False
+
+
+def test_v8_control_packet_survives_without_optional_collision_fields():
+    packet = (
+        b"DRTEL|8|overworld|7|room_home|120|42|obj_mainchara|540|240|"
+        b"spr_krisd|2|0|4|0|4|0.2|32|16|320|240|0|end"
+    )
+    sample = parse_packet(packet)
+
+    assert sample is not None
+    assert sample.camera_x == 32
+    assert sample.camera_height == 240
+    assert sample.instance_id is None
+    assert sample.interaction_state == 0
+    assert sample.player_controlled is True
+
+
 def test_facing_uses_verified_kris_sprite_names_and_variants():
     assert facing_from_sprite("spr_krisd") == "down"
     assert facing_from_sprite("spr_krisl_bright") == "left"
@@ -176,6 +262,26 @@ def test_dialogue_sample_keeps_latest_player_position():
     assert sample.x == 10
     assert sample.player_x == 120
     assert sample.player_y == 42
+
+
+def test_v8_control_return_suppresses_lingering_dialogue_packet():
+    receiver = TelemetryReceiver.__new__(TelemetryReceiver)
+    receiver.socket = _PacketSocket(
+        [
+            b"DRTEL|8|overworld|7|room_home|120|42|obj_mainchara|540|240|"
+            b"spr_krisd|2|0|0|0|0|0.2|32|16|320|240|0|end",
+            b"DRTEL|8|dialogue|7|room_home|10|10|obj_writer|end",
+        ]
+    )
+    receiver.latest = None
+    receiver.by_mode = {}
+
+    sample = receiver.poll()
+
+    assert sample is not None
+    assert sample.mode == "overworld"
+    assert sample.player_controlled is True
+    assert sample.x == 120
 
 
 def test_blank_transition_room_is_ignored_and_ordered_room_trace_is_preserved():

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .controller import KeyboardController
 from .observer import ScreenObserver
-from .perception import VisualStateDetector
+from .perception import CutsceneTracker, VisualStateDetector
 from .policy import StarterPolicy
 from .progress import EpisodeTracker
 from .telemetry import TelemetryReceiver, fuse_perception
@@ -13,7 +13,6 @@ from .window import (
     client_region,
     find_window,
     focus_window,
-    foreground_description,
     is_window_foreground,
     remember_window,
 )
@@ -82,11 +81,13 @@ def listen(args: argparse.Namespace) -> None:
                     if sample.player_x is not None and sample.player_y is not None
                     else ""
                 )
-                nearby = (
-                    f" near={sample.nearest_interactable_name}"
-                    f"@{sample.nearest_interactable_distance:.1f}"
-                    if sample.nearest_interactable_name
-                    and sample.nearest_interactable_distance is not None
+                camera = (
+                    f" camera=({sample.camera_x:.0f},{sample.camera_y:.0f},"
+                    f"{sample.camera_width:.0f},{sample.camera_height:.0f})"
+                    if sample.camera_x is not None
+                    and sample.camera_y is not None
+                    and sample.camera_width is not None
+                    and sample.camera_height is not None
                     else ""
                 )
                 print(
@@ -94,7 +95,7 @@ def listen(args: argparse.Namespace) -> None:
                     f"room={sample.room_name or sample.room_id} "
                     f"source=({sample.x:.1f},{sample.y:.1f}){player_position} "
                     f"object={sample.object_name} sprite={sample.sprite_name or '-'} "
-                    f"dir={sample.facing_direction or '-'}{nearby}"
+                    f"dir={sample.facing_direction or '-'}{camera}"
                 )
                 previous = sample
             time.sleep(0.05)
@@ -102,11 +103,30 @@ def listen(args: argparse.Namespace) -> None:
         receiver.close()
 
 
+def _runtime_status(event_stream: bool, status: str, message: str) -> None:
+    if event_stream:
+        print(
+            "AI_GUI_EVENT\t"
+            + json.dumps(
+                {
+                    "kind": "runtime_status",
+                    "status": status,
+                    "message": message,
+                },
+                separators=(",", ":"),
+            ),
+            flush=True,
+        )
+    else:
+        print(message, flush=True)
+
+
 def run(args: argparse.Namespace) -> Path:
     if args.steps < 1 or (args.interval is not None and args.interval < 0) or args.countdown < 0:
         raise ValueError("steps must be positive; interval and countdown must be non-negative")
     observer = ScreenObserver(tuple(args.region) if args.region else None)
     detector = VisualStateDetector(args.visual_memory)
+    cutscene_tracker = CutsceneTracker()
     telemetry_receiver = None if args.no_telemetry else TelemetryReceiver(args.telemetry_port)
     policy = StarterPolicy(args.seed, args.memory)
     if policy.memory_warning:
@@ -130,19 +150,35 @@ def run(args: argparse.Namespace) -> Path:
         if window is not None:
             remember_window(args.window_memory, window)
     if window and not args.region:
-        observer.set_region(client_region(window.hwnd))
+        observer.set_window(window.hwnd, client_region(window.hwnd))
         print(f"Capturing game area: {observer.region}")
+    if window is not None:
+        controller.set_target_window(window.hwnd)
     telemetry_seen = False
+    background_input = False
     try:
         for step in range(args.steps):
             if args.stop_file is not None and args.stop_file.exists():
                 print("Stop requested by GUI; ending the run safely.", flush=True)
                 break
-            if args.live and not is_window_foreground(window):
-                raise RuntimeError(
-                    "Deltarune lost focus; stopped before sending more input. "
-                    f"Foreground was {foreground_description()}."
-                )
+            if args.live:
+                use_background_input = not is_window_foreground(window)
+                if use_background_input != background_input:
+                    controller.set_background_input(use_background_input)
+                    background_input = use_background_input
+                    if background_input:
+                        _runtime_status(
+                            args.event_stream,
+                            "background",
+                            "Deltarune lost focus; continuing with input targeted "
+                            "only to its window.",
+                        )
+                    else:
+                        _runtime_status(
+                            args.event_stream,
+                            "running",
+                            "Deltarune is focused again; using normal foreground input.",
+                        )
             observation = observer.observe(step)
             visual = detector.classify(observation.frame)
             telemetry = telemetry_receiver.poll() if telemetry_receiver else None
@@ -150,25 +186,32 @@ def run(args: argparse.Namespace) -> Path:
                 policy.observe_room_trace(telemetry_receiver.drain_overworld_trace())
             if telemetry is not None:
                 telemetry_seen = True
-                detector.learn_from_telemetry(observation.frame, telemetry.mode)
+                if observation.visual_valid:
+                    detector.learn_from_telemetry(observation.frame, telemetry.mode)
             elif telemetry_receiver is not None and step == 15 and not telemetry_seen:
                 print(
                     "Telemetry warning: no packets received; continuing with the "
                     "learned visual model."
                 )
-            perception = fuse_perception(visual, telemetry)
+            perception = cutscene_tracker.update(
+                fuse_perception(visual, telemetry),
+                telemetry,
+                observation.visual_valid,
+            )
             action = policy.choose(observation, perception, telemetry)
+            cutscene_tracker.note_action(action.name, policy.reason)
             map_updates = policy.drain_map_updates()
             location = (
                 f" room={telemetry.room_name or telemetry.room_id} pos=({telemetry.x:.0f},{telemetry.y:.0f})"
                 if telemetry
                 else ""
             )
-            print(
-                f"{step:04d}: {perception.state.value:<9} {perception.confidence:.2f}"
-                f" [{perception.source}] -> {action.name}{location} | {policy.reason}",
-                flush=True,
-            )
+            if not args.event_stream:
+                print(
+                    f"{step:04d}: {perception.state.value:<9} {perception.confidence:.2f}"
+                    f" [{perception.source}] -> {action.name}{location} | {policy.reason}",
+                    flush=True,
+                )
             tracker.record(observation, perception, telemetry, action, policy.reason, args.live)
             if args.event_stream:
                 print(
@@ -181,6 +224,7 @@ def run(args: argparse.Namespace) -> Path:
                             "source": perception.source,
                             "action": action.name,
                             "reason": policy.reason,
+                            "visual_valid": observation.visual_valid,
                             "telemetry": telemetry.as_dict() if telemetry else None,
                             "map_updates": map_updates,
                         },

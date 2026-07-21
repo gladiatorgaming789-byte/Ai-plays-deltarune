@@ -9,14 +9,20 @@ This optional UndertaleModTool script adds small GML telemetry hooks:
 - `obj_savemenu` sends `choice`, so natural save menus are never mistaken for
   movement or a collision.
 
-Telemetry v6 sends three independent packets in order: core room/position/state,
-motion and animation, then rich collision/interaction context. If a field in
-the final layer is unavailable in a particular game build, the controller still
-receives sprite, facing direction, and velocity from the motion layer. The rich
-layer adds previous position, collision bounding box, instance ID, depth,
-sprite scale, game timing, and the closest `obj_interactable` identity,
-position, and distance. While dialogue or a menu is active, the receiver keeps
-the latest player position alongside the state object's own position.
+Telemetry v8 sends four independent packets in order: core room/position/state,
+motion/animation/camera view, Deltarune's player-control gate, then rich player
+collision context. If a field in the final layer is unavailable in a particular
+game build, the controller still receives sprite, facing direction, velocity,
+camera bounds, and the control gate from the earlier layers. The rich layer adds
+the player's previous position, collision bounding box, instance ID, depth,
+sprite scale, and game timing. It deliberately does
+not query or transmit nearby interactable instances, identities, or positions;
+the controller must form visual guesses and verify them through play. While dialogue or a menu is active, the receiver keeps
+the latest player position alongside the state object's own position. The rich
+packet also retains the control gate for compatibility. The controller uses a
+sustained control-locked overworld sequence or dialogue that began automatically
+as cutscene evidence. Dialogue opened by the agent's own object interaction
+remains dialogue, and a missing player packet is never proof of a cutscene.
 
 Deltarune does not keep Kris's overworld facing in GameMaker's built-in
 `direction` variable. The controller derives facing from the verified Chapter 1
@@ -34,9 +40,10 @@ The Python controller accepts no remote traffic.
 The installer uses the `CodeImportGroup` API available in UndertaleModTool
 0.8.4.1 and newer.
 
-Apply v6 to a clean `data.win` or restored unmodded backup. Restore the clean
+Apply v8 to a clean `data.win` or restored unmodded backup. Restore the clean
 file first if any earlier telemetry version is installed, so obsolete appended
-code is removed rather than layered underneath v6.
+code is removed rather than layered underneath v8. The installer refuses to
+append v8 when it detects an older telemetry sender.
 
 ## Safe installation, one chapter at a time
 
@@ -57,8 +64,9 @@ Validate the mod without sending any controls:
 python -m deltarune_agent telemetry --seconds 30
 ```
 
-Switch to Deltarune during those 30 seconds. Room and position lines should
-appear in PowerShell. After that succeeds, use the normal `run --live` command.
+Switch to Deltarune during those 30 seconds. Room, position, and four camera
+values should appear in PowerShell. After that succeeds, use the normal
+`run --live` command.
 
 Repeat only for chapters you intend to play. Steam updates may replace modified
 files; reapply against the new original rather than an old backup.

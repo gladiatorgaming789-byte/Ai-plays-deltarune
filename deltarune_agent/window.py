@@ -23,6 +23,27 @@ kernel32.QueryFullProcessImageNameW.argtypes = (
 kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
 kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
 kernel32.CloseHandle.restype = wintypes.BOOL
+user32.PostMessageW.argtypes = (
+    wintypes.HWND,
+    wintypes.UINT,
+    wintypes.WPARAM,
+    wintypes.LPARAM,
+)
+user32.PostMessageW.restype = wintypes.BOOL
+
+WM_KEYDOWN = 0x0100
+WM_KEYUP = 0x0101
+MAPVK_VK_TO_VSC = 0
+VIRTUAL_KEYS = {
+    "left": 0x25,
+    "up": 0x26,
+    "right": 0x27,
+    "down": 0x28,
+    "z": 0x5A,
+    "x": 0x58,
+    "c": 0x43,
+}
+EXTENDED_KEYS = {"left", "up", "right", "down"}
 
 
 @dataclass(frozen=True)
@@ -218,6 +239,26 @@ def foreground_description() -> str:
     if not foreground:
         return "no foreground window"
     return f'{_executable(foreground) or "unknown"}: {_title(foreground) or "untitled"}'
+
+
+def post_window_key(hwnd: int, key: str, pressed: bool) -> None:
+    """Post a key state directly to one window without typing elsewhere."""
+    virtual_key = VIRTUAL_KEYS.get(key.casefold())
+    if virtual_key is None:
+        raise ValueError(f"unsupported targeted key {key!r}")
+    scan_code = int(user32.MapVirtualKeyW(virtual_key, MAPVK_VK_TO_VSC))
+    lparam = 1 | (scan_code << 16)
+    if key.casefold() in EXTENDED_KEYS:
+        lparam |= 1 << 24
+    if not pressed:
+        lparam |= (1 << 30) | (1 << 31)
+    if not user32.PostMessageW(
+        hwnd,
+        WM_KEYDOWN if pressed else WM_KEYUP,
+        virtual_key,
+        lparam,
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
 
 
 def client_region(hwnd: int) -> tuple[int, int, int, int]:

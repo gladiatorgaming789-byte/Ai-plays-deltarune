@@ -1,5 +1,5 @@
 from collections import deque
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from enum import Enum
 from math import sqrt
 from pathlib import Path
@@ -11,6 +11,7 @@ from .visual_model import OnlineVisualModel
 
 class GameState(str, Enum):
     DIALOGUE = "dialogue"
+    CUTSCENE = "cutscene"
     OVERWORLD = "overworld"
     MENU = "menu"
     BATTLE = "battle"
@@ -41,6 +42,156 @@ class Perception:
     confidence: float
     features: VisualFeatures
     source: str = "visual"
+
+
+def looks_like_dialogue_choice(frame: Image.Image) -> bool:
+    """Detect repeated option markers inside Deltarune's dialogue panel.
+
+    Some response prompts are drawn by ``obj_writer`` and therefore still emit
+    dialogue telemetry. At the game's native 320x240 layout, separate options
+    repeat the same small asterisk glyph in a narrow left marker column. This
+    checks that visible UI structure without reading option text or a hidden
+    selection value.
+    """
+    image = frame.convert("RGB").resize((320, 240), Image.Resampling.NEAREST)
+    pixels = image.load()
+    left, right = 24, 42
+    top, bottom = 168, 228
+    white = {
+        (x, y)
+        for y in range(top, bottom)
+        for x in range(left, right)
+        if min(pixels[x, y]) >= 220
+    }
+    components: list[tuple[int, int, tuple[tuple[int, int], ...]]] = []
+    while white:
+        start = white.pop()
+        stack = [start]
+        points = [start]
+        while stack:
+            x, y = stack.pop()
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    if not dx and not dy:
+                        continue
+                    neighbor = (x + dx, y + dy)
+                    if neighbor in white:
+                        white.remove(neighbor)
+                        stack.append(neighbor)
+                        points.append(neighbor)
+        min_x = min(x for x, _y in points)
+        max_x = max(x for x, _y in points)
+        min_y = min(y for _x, y in points)
+        max_y = max(y for _x, y in points)
+        width = max_x - min_x + 1
+        height = max_y - min_y + 1
+        if 3 <= len(points) <= 40 and 2 <= width <= 9 and 2 <= height <= 9:
+            signature = tuple(sorted((x - min_x, y - min_y) for x, y in points))
+            components.append((min_x, min_y, signature))
+    return any(
+        first_signature == second_signature
+        and abs(first_x - second_x) <= 2
+        and abs(first_y - second_y) >= 12
+        for index, (first_x, first_y, first_signature) in enumerate(components)
+        for second_x, second_y, second_signature in components[index + 1 :]
+    )
+
+
+class CutsceneTracker:
+    """Recognize sustained scripted control without using route coordinates."""
+
+    DIALOGUE_THRESHOLD = 12
+    CONTROL_LOCK_THRESHOLD = 12
+    TELEMETRY_GAP_GRACE = 300
+
+    def __init__(self) -> None:
+        self.dialogue_steps = 0
+        self.control_locked_steps = 0
+        self.cutscene_active = False
+        self.gap_steps = 0
+        self.in_dialogue = False
+        self.dialogue_started_by_interaction = False
+        self.last_action: str | None = None
+        self.last_reason = ""
+
+    def note_action(self, action: str, reason: str) -> None:
+        self.last_action = action
+        self.last_reason = reason
+
+    def update(
+        self,
+        perception: Perception,
+        telemetry,
+        visual_valid: bool = True,
+    ) -> Perception:
+        mode = getattr(telemetry, "mode", None)
+        # A present telemetry sender is authoritative about writer state.
+        # Visual dialogue remains a fallback only during a telemetry gap.
+        dialogue = mode == "dialogue" or (
+            telemetry is None and perception.state is GameState.DIALOGUE
+        )
+        player_controlled = getattr(telemetry, "player_controlled", None)
+        control_locked = player_controlled is False and mode == "overworld"
+        if control_locked:
+            self.control_locked_steps += 1
+        elif telemetry is not None:
+            self.control_locked_steps = 0
+        if dialogue:
+            if not self.in_dialogue:
+                self.dialogue_started_by_interaction = (
+                    self.last_action == "confirm"
+                    and "try interaction" in self.last_reason.casefold()
+                )
+            self.in_dialogue = True
+            self.dialogue_steps += 1
+            if (
+                not self.dialogue_started_by_interaction
+                and self.dialogue_steps >= self.DIALOGUE_THRESHOLD
+            ):
+                self.cutscene_active = True
+                self.gap_steps = 0
+                return replace(
+                    perception,
+                    state=GameState.CUTSCENE,
+                    confidence=max(0.90, perception.confidence),
+                    source="automatic-dialogue-sequence",
+                )
+            return perception
+
+        self.in_dialogue = False
+        self.dialogue_started_by_interaction = False
+        if telemetry is not None:
+            self.dialogue_steps = 0
+        if self.control_locked_steps >= self.CONTROL_LOCK_THRESHOLD:
+            self.cutscene_active = True
+            self.gap_steps = 0
+            return replace(
+                perception,
+                state=GameState.CUTSCENE,
+                confidence=0.96,
+                source="telemetry-control",
+            )
+
+        if telemetry is None and self.cutscene_active:
+            self.gap_steps += 1
+            if self.gap_steps <= self.TELEMETRY_GAP_GRACE:
+                return replace(
+                    perception,
+                    state=GameState.CUTSCENE,
+                    confidence=0.88 if visual_valid else 0.96,
+                    source="cutscene-continuity",
+                )
+
+        if mode in {"battle", "choice"} or (
+            mode == "overworld" and not control_locked
+        ) or (
+            telemetry is None and self.gap_steps > self.TELEMETRY_GAP_GRACE
+        ):
+            self.dialogue_steps = 0
+            self.control_locked_steps = 0
+            self.cutscene_active = False
+            self.gap_steps = 0
+        return perception
 
 
 class VisualStateDetector:

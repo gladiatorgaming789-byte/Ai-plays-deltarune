@@ -41,6 +41,10 @@ class TelemetrySample:
     version: int = 1
     room_width: float | None = None
     room_height: float | None = None
+    camera_x: float | None = None
+    camera_y: float | None = None
+    camera_width: float | None = None
+    camera_height: float | None = None
     sprite_name: str | None = None
     image_index: float | None = None
     facing_direction: str | None = None
@@ -70,6 +74,8 @@ class TelemetrySample:
     nearest_interactable_distance: float | None = None
     player_x: float | None = None
     player_y: float | None = None
+    interaction_state: int | None = None
+    player_controlled: bool | None = None
 
     def is_fresh(self, now: float | None = None, max_age: float = 1.0) -> bool:
         return (time.monotonic() if now is None else now) - self.received_at <= max_age
@@ -87,7 +93,7 @@ def parse_packet(packet: bytes, received_at: float | None = None) -> TelemetrySa
         return None
     text = packet[start:].rstrip(b"\x00").decode("utf-8", errors="replace")
     fields = text.split("|")
-    if len(fields) < 9 or fields[0] != "DRTEL" or fields[1] not in {"1", "2", "3", "4", "5", "6"}:
+    if len(fields) < 9 or fields[0] != "DRTEL" or fields[1] not in {"1", "2", "3", "4", "5", "6", "7", "8"}:
         return None
     try:
         version = int(fields[1])
@@ -113,31 +119,60 @@ def parse_packet(packet: bytes, received_at: float | None = None) -> TelemetrySa
                 "speed": float(fields[15]),
                 "image_speed": float(fields[16]),
             }
-        has_rich_fields = version >= 4 and len(fields) >= 35
+            if version >= 7:
+                if len(fields) < 22:
+                    return None
+                extra.update(
+                    {
+                        "camera_x": float(fields[17]),
+                        "camera_y": float(fields[18]),
+                        "camera_width": float(fields[19]),
+                        "camera_height": float(fields[20]),
+                    }
+                )
+        has_rich_fields = (
+            version in {4, 5, 6} and len(fields) >= 35
+        ) or (version >= 7 and len(fields) >= 39)
         if has_rich_fields:
-            if len(fields) < 35:
-                return None
+            offset = 4 if version >= 7 else 0
             extra.update(
                 {
-                    "instance_id": int(float(fields[17])),
-                    "previous_x": float(fields[18]),
-                    "previous_y": float(fields[19]),
-                    "bbox_left": float(fields[20]),
-                    "bbox_top": float(fields[21]),
-                    "bbox_right": float(fields[22]),
-                    "bbox_bottom": float(fields[23]),
-                    "depth": float(fields[24]),
-                    "image_xscale": float(fields[25]),
-                    "image_yscale": float(fields[26]),
-                    "room_speed": float(fields[27]),
-                    "game_time_ms": float(fields[28]),
-                    "nearest_interactable_name": fields[29] or None,
-                    "nearest_interactable_id": int(float(fields[30])),
-                    "nearest_interactable_x": float(fields[31]),
-                    "nearest_interactable_y": float(fields[32]),
-                    "nearest_interactable_distance": float(fields[33]),
+                    "instance_id": int(float(fields[17 + offset])),
+                    "previous_x": float(fields[18 + offset]),
+                    "previous_y": float(fields[19 + offset]),
+                    "bbox_left": float(fields[20 + offset]),
+                    "bbox_top": float(fields[21 + offset]),
+                    "bbox_right": float(fields[22 + offset]),
+                    "bbox_bottom": float(fields[23 + offset]),
+                    "depth": float(fields[24 + offset]),
+                    "image_xscale": float(fields[25 + offset]),
+                    "image_yscale": float(fields[26 + offset]),
+                    "room_speed": float(fields[27 + offset]),
+                    "game_time_ms": float(fields[28 + offset]),
+                    "nearest_interactable_name": fields[29 + offset] or None,
+                    "nearest_interactable_id": int(float(fields[30 + offset])),
+                    "nearest_interactable_x": float(fields[31 + offset]),
+                    "nearest_interactable_y": float(fields[32 + offset]),
+                    "nearest_interactable_distance": float(fields[33 + offset]),
                 }
             )
+        if version >= 8:
+            # The control gate has its own short packet because collision fields
+            # are not available in every Deltarune build. Keep accepting it from
+            # the full rich packet as well for compatibility with existing v8.
+            control_field = None
+            if len(fields) >= 40:
+                control_field = fields[38]
+            elif len(fields) == 23:
+                control_field = fields[21]
+            if control_field is not None:
+                interaction_state = int(float(control_field))
+                extra.update(
+                    {
+                        "interaction_state": interaction_state,
+                        "player_controlled": interaction_state == 0,
+                    }
+                )
         mode = fields[2]
         x = float(fields[5])
         y = float(fields[6])
@@ -195,9 +230,21 @@ class TelemetryReceiver:
             if (sample := self.by_mode.get(mode)) is not None
             and sample.is_fresh(max_age=SPECIALIZED_MAX_AGE)
         ]
+        player = self.by_mode.get("overworld")
+        controlled_overworld = (
+            player is not None
+            and player.is_fresh()
+            and player.player_controlled is True
+        )
+        if controlled_overworld:
+            # Dialogue and choice objects can leave one last packet behind as
+            # they are destroyed. The v8 control gate is stronger evidence
+            # that normal play has resumed, and prevents an extra confirm from
+            # immediately interacting with the same object again. A battle
+            # packet remains authoritative because its controller is separate.
+            specialized = [sample for sample in specialized if sample.mode == "battle"]
         if specialized:
             selected = max(specialized, key=lambda sample: sample.received_at)
-            player = self.by_mode.get("overworld")
             if player is not None and player.is_fresh():
                 replacements = {"player_x": player.x, "player_y": player.y}
                 if not has_stable_room_name(selected.room_name):
@@ -206,6 +253,8 @@ class TelemetryReceiver:
                     )
                 selected = replace(selected, **replacements)
             return selected
+        if controlled_overworld:
+            return player
         if self.latest is not None and self.latest.is_fresh():
             return self.latest
         return None
@@ -228,6 +277,13 @@ def fuse_perception(visual: Perception, telemetry: TelemetrySample | None) -> Pe
         return replace(visual, state=GameState.MENU, confidence=0.99, source="telemetry")
     if telemetry.mode == "dialogue":
         return replace(visual, state=GameState.DIALOGUE, confidence=0.99, source="telemetry")
+    if telemetry.mode == "overworld" and telemetry.version >= 2:
+        return replace(
+            visual,
+            state=GameState.OVERWORLD,
+            confidence=0.99,
+            source="telemetry",
+        )
     if telemetry.mode == "overworld" and visual.state is GameState.BATTLE:
         return replace(visual, state=GameState.OVERWORLD, confidence=0.99, source="telemetry")
     return replace(visual, source="visual+telemetry")
