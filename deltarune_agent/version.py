@@ -1,1 +1,1 @@
-AGENT_REVISION = "run5-evidence-lifecycle-v1"
+AGENT_REVISION = "run6-transition-semantics-v1"
