@@ -10,24 +10,22 @@ from .objectives import ObjectiveManager
 from .observer import Observation
 from .perception import GameState, Perception
 from .telemetry import TelemetrySample
+from .visual_freshness import VisualFreshnessGuard
 
 
 class HierarchicalPolicy:
-    """Specialized reflex controllers wrapped around the proven explorer.
-
-    Overworld navigation and persistent learning remain delegated to the
-    explorer. Battle, dialogue analysis, and high-level objective tracking are
-    isolated so they can evolve without destabilizing mapping.
-    """
+    """Specialized reflex controllers wrapped around the proven explorer."""
 
     def __init__(self, seed: int = 0, memory_path: Path | None = None):
         self.explorer = ImprovedExplorer(seed, memory_path)
         self.objectives = ObjectiveManager()
         self.dialogue = DialogueReader()
         self.battle = BattleController()
+        self.visual_freshness = VisualFreshnessGuard()
         self.reason = "hierarchical policy starting"
         self.last_dialogue_signature: str | None = None
         self.last_dialogue_text: str | None = None
+        self.last_visual_valid = True
 
     def __getattr__(self, name: str):
         return getattr(self.explorer, name)
@@ -38,6 +36,12 @@ class HierarchicalPolicy:
         perception: Perception,
         telemetry: TelemetrySample | None = None,
     ) -> Action:
+        observation = self.visual_freshness.validate(
+            observation,
+            telemetry,
+        )
+        self.last_visual_valid = observation.visual_valid
+
         if perception.state is GameState.BATTLE:
             soul = None
             if telemetry is not None:
@@ -122,4 +126,7 @@ class HierarchicalPolicy:
             self.last_dialogue_signature
         )
         summary["last_dialogue_text"] = self.last_dialogue_text
+        summary["frozen_visual_frames"] = (
+            self.visual_freshness.frozen_frames
+        )
         return summary
