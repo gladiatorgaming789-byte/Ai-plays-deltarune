@@ -1,1 +1,1 @@
-AGENT_REVISION = "run4-npc-choice-stability-v2"
+AGENT_REVISION = "run5-evidence-lifecycle-v1"

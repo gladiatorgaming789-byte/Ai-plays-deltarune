@@ -11,9 +11,10 @@ from PIL import Image, ImageChops
 
 from .screen_regions import REGION_PIXELS
 from .telemetry import TelemetrySample
+from .viewport import camera_viewport_box
 
 
-INDEX_VERSION = 2
+INDEX_VERSION = 3
 PIXELS_PER_WORLD = 4
 TILE_PIXELS = REGION_PIXELS * PIXELS_PER_WORLD
 
@@ -30,33 +31,6 @@ def room_view_image_is_usable(image: Image.Image) -> bool:
         return False
     white_ratio = sum(min(pixel) >= 245 for pixel in visible) / len(visible)
     return white_ratio < 0.95
-
-
-def camera_viewport_box(
-    image_size: tuple[int, int],
-    camera_size: tuple[float, float],
-) -> tuple[int, int, int, int] | None:
-    """Find the centered screenshot area matching the camera aspect ratio."""
-    image_width, image_height = image_size
-    camera_width, camera_height = camera_size
-    if (
-        image_width <= 0
-        or image_height <= 0
-        or camera_width <= 0
-        or camera_height <= 0
-    ):
-        return None
-    image_ratio = image_width / image_height
-    camera_ratio = camera_width / camera_height
-    if abs(image_ratio - camera_ratio) <= 0.002:
-        return (0, 0, image_width, image_height)
-    if image_ratio > camera_ratio:
-        viewport_width = max(1, round(image_height * camera_ratio))
-        left = (image_width - viewport_width) // 2
-        return (left, 0, left + viewport_width, image_height)
-    viewport_height = max(1, round(image_width / camera_ratio))
-    top = (image_height - viewport_height) // 2
-    return (0, top, image_width, top + viewport_height)
 
 
 def camera_region_coordinates(
@@ -120,6 +94,10 @@ class RoomViewMemory:
             "rooms": {},
         }
         self.load_warning: str | None = None
+        # A changed opaque pixel is replaced only after two matching player-
+        # free observations. This repairs old sprite ghosts and camera seams
+        # without making animated scenery flicker on every analysis frame.
+        self._candidate_tiles: dict[tuple[str, int, int], Image.Image] = {}
         self._load()
 
     def _load(self) -> None:
@@ -128,7 +106,7 @@ class RoomViewMemory:
         try:
             data = json.loads(self.index_path.read_text(encoding="utf-8"))
             version = int(data.get("version", 0))
-            if version not in {1, INDEX_VERSION}:
+            if version not in {1, 2, INDEX_VERSION}:
                 raise ValueError("unsupported room-view index version")
             if int(data.get("region_pixels", 0)) != REGION_PIXELS:
                 raise ValueError("unsupported room-view tile size")
@@ -211,40 +189,37 @@ class RoomViewMemory:
             camera_width,
             camera_height,
         )
-        # Do not freeze Kris or the immediately player-covered pixels into the
-        # remembered scenery. Actual collision bounds are preferred when a
-        # rich packet supplies them; otherwise use a conservative footprint
-        # around the observed player origin.
+        # Do not freeze Kris into the remembered scenery. Mask only the exact
+        # player rectangle rather than throwing away every 32x32 region it
+        # touches; the old coarse exclusion produced conspicuous black holes.
         player_left = (
-            float(telemetry.bbox_left) - 6
-            if telemetry.bbox_left is not None
-            else telemetry.x - 16
+            float(getattr(telemetry, "player_bbox_left", None)) - 2
+            if getattr(telemetry, "player_bbox_left", None) is not None
+            else float(getattr(telemetry, "bbox_left", None)) - 2
+            if getattr(telemetry, "bbox_left", None) is not None
+            else telemetry.x - 8
         )
         player_top = (
-            float(telemetry.bbox_top) - 16
-            if telemetry.bbox_top is not None
+            float(getattr(telemetry, "player_bbox_top", None)) - 2
+            if getattr(telemetry, "player_bbox_top", None) is not None
+            else float(getattr(telemetry, "bbox_top", None)) - 2
+            if getattr(telemetry, "bbox_top", None) is not None
             else telemetry.y - 16
         )
         player_right = (
-            float(telemetry.bbox_right) + 6
-            if telemetry.bbox_right is not None
-            else telemetry.x + 24
+            float(getattr(telemetry, "player_bbox_right", None)) + 2
+            if getattr(telemetry, "player_bbox_right", None) is not None
+            else float(getattr(telemetry, "bbox_right", None)) + 2
+            if getattr(telemetry, "bbox_right", None) is not None
+            else telemetry.x + 8
         )
         player_bottom = (
-            float(telemetry.bbox_bottom) + 16
-            if telemetry.bbox_bottom is not None
-            else telemetry.y + 48
+            float(getattr(telemetry, "player_bbox_bottom", None)) + 2
+            if getattr(telemetry, "player_bbox_bottom", None) is not None
+            else float(getattr(telemetry, "bbox_bottom", None)) + 2
+            if getattr(telemetry, "bbox_bottom", None) is not None
+            else telemetry.y + 16
         )
-        regions = {
-            (region_x, region_y)
-            for region_x, region_y in regions
-            if (
-                (region_x + 1) * REGION_PIXELS <= player_left
-                or region_x * REGION_PIXELS >= player_right
-                or (region_y + 1) * REGION_PIXELS <= player_top
-                or region_y * REGION_PIXELS >= player_bottom
-            )
-        }
 
         rooms = self._rooms()
         room_data = rooms.setdefault(
@@ -277,18 +252,6 @@ class RoomViewMemory:
                 continue
 
             tile_key = f"{region_x},{region_y}"
-            existing_record = tiles.get(tile_key)
-            if (
-                isinstance(existing_record, dict)
-                and float(existing_record.get("coverage", 0.0)) >= 0.999
-                and int(existing_record.get("pixels_per_world", 1))
-                >= PIXELS_PER_WORLD
-            ):
-                # A complete high-resolution snapshot is intentionally stable.
-                # Replacing it every few frames caused animated scenery and
-                # camera jitter to flicker or tear across tile boundaries.
-                continue
-
             source_left = floor(
                 (world_left - camera_x) / camera_width * viewport.width
             )
@@ -321,6 +284,27 @@ class RoomViewMemory:
                 (destination_width, destination_height),
                 Image.Resampling.NEAREST,
             ).convert("RGBA")
+            overlap_left = max(world_left, player_left)
+            overlap_top = max(world_top, player_top)
+            overlap_right = min(world_right, player_right)
+            overlap_bottom = min(world_bottom, player_bottom)
+            if overlap_right > overlap_left and overlap_bottom > overlap_top:
+                alpha = crop.getchannel("A")
+                mask_box = (
+                    max(0, floor((overlap_left - world_left) * PIXELS_PER_WORLD)),
+                    max(0, floor((overlap_top - world_top) * PIXELS_PER_WORLD)),
+                    min(
+                        destination_width,
+                        ceil((overlap_right - world_left) * PIXELS_PER_WORLD),
+                    ),
+                    min(
+                        destination_height,
+                        ceil((overlap_bottom - world_top) * PIXELS_PER_WORLD),
+                    ),
+                )
+                if mask_box[2] > mask_box[0] and mask_box[3] > mask_box[1]:
+                    alpha.paste(0, mask_box)
+                    crop.putalpha(alpha)
             relative_path = Path(str(room_data["directory"])) / f"{region_x}_{region_y}.png"
             tile_path = self.root / relative_path
             if tile_path.exists():
@@ -334,12 +318,49 @@ class RoomViewMemory:
             if previous.size != (TILE_PIXELS, TILE_PIXELS):
                 previous = Image.new("RGBA", (TILE_PIXELS, TILE_PIXELS))
             updated = previous.copy()
-            # Remember each revealed pixel once. Replacing already opaque
-            # pixels made partial camera-edge tiles tear whenever animated
-            # scenery or a sub-pixel camera shift crossed the same region.
             previous_area = previous.crop(destination_box).getchannel("A")
             unseen_mask = ImageChops.invert(previous_area)
-            updated.paste(crop, destination_box[:2], unseen_mask)
+            paste_mask = ImageChops.multiply(unseen_mask, crop.getchannel("A"))
+
+            candidate_key = (room, region_x, region_y)
+            candidate = self._candidate_tiles.get(candidate_key)
+            if candidate is not None:
+                prior_crop = candidate.crop(destination_box)
+                delta = ImageChops.difference(
+                    prior_crop.convert("RGB"),
+                    crop.convert("RGB"),
+                )
+                bands = delta.split()
+                max_delta = ImageChops.lighter(
+                    ImageChops.lighter(bands[0], bands[1]),
+                    bands[2],
+                )
+                stable_mask = max_delta.point(
+                    lambda value: 255 if value <= 6 else 0
+                )
+                stable_mask = ImageChops.multiply(
+                    stable_mask,
+                    prior_crop.getchannel("A"),
+                )
+                stable_mask = ImageChops.multiply(
+                    stable_mask,
+                    crop.getchannel("A"),
+                )
+                stable_mask = ImageChops.multiply(stable_mask, previous_area)
+                paste_mask = ImageChops.lighter(paste_mask, stable_mask)
+            updated.paste(crop, destination_box[:2], paste_mask)
+
+            next_candidate = (
+                candidate.copy()
+                if candidate is not None
+                else Image.new("RGBA", (TILE_PIXELS, TILE_PIXELS))
+            )
+            next_candidate.paste(
+                crop,
+                destination_box[:2],
+                crop.getchannel("A"),
+            )
+            self._candidate_tiles[candidate_key] = next_candidate
             difference = ImageChops.difference(previous, updated)
             # RGBA getbbox() can ignore RGB-only changes when the alpha
             # difference is zero, so inspect every band independently.
@@ -348,7 +369,9 @@ class RoomViewMemory:
             room_directory.mkdir(parents=True, exist_ok=True)
             temporary = tile_path.with_suffix(".tmp.png")
             try:
-                updated.save(temporary, format="PNG", optimize=True)
+                # PNG is lossless at every compression level. Fast encoding
+                # keeps scene-memory writes from pausing the control loop.
+                updated.save(temporary, format="PNG", compress_level=1)
                 temporary.replace(tile_path)
             except OSError:
                 # A single tile write can fail on a transient filesystem issue.
@@ -377,7 +400,8 @@ class RoomViewMemory:
                 )
             )
 
-        self._save_index()
+        if changed:
+            self._save_index()
         return changed
 
     def _save_index(self) -> None:

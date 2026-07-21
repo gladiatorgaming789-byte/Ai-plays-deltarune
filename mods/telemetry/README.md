@@ -9,20 +9,39 @@ This optional UndertaleModTool script adds small GML telemetry hooks:
 - `obj_savemenu` sends `choice`, so natural save menus are never mistaken for
   movement or a collision.
 
-Telemetry v8 sends four independent packets in order: core room/position/state,
-motion/animation/camera view, Deltarune's player-control gate, then rich player
-collision context. If a field in the final layer is unavailable in a particular
-game build, the controller still receives sprite, facing direction, velocity,
-camera bounds, and the control gate from the earlier layers. The rich layer adds
-the player's previous position, collision bounding box, instance ID, depth,
-sprite scale, and game timing. It deliberately does
-not query or transmit nearby interactable instances, identities, or positions;
-the controller must form visual guesses and verify them through play. While dialogue or a menu is active, the receiver keeps
-the latest player position alongside the state object's own position. The rich
-packet also retains the control gate for compatibility. The controller uses a
-sustained control-locked overworld sequence or dialogue that began automatically
-as cutscene evidence. Dialogue opened by the agent's own object interaction
-remains dialogue, and a missing player packet is never proof of a cutscene.
+Telemetry v9 uses named, independently mergeable packet parts. Each part has a
+per-object sequence number, so a delayed UDP datagram cannot combine camera or
+collision data from two different frames:
+
+- `core`: mode, room ID/name, instance origin, and object name;
+- `motion`: room and camera bounds/angle, sprite, animation, velocity, and
+  Deltarune's `global.interact` player-control gate;
+- `collision`: current instance ID and collision bounding box;
+- `render`: depth, scale, alpha, visibility, and sprite size/origin;
+- `timing`: room speed and measured game FPS.
+
+The `core`, `motion`, `collision`, and `render` parts are emitted every drawn
+frame. This preserves the last player-observable source position and geometry
+immediately before a room transition instead of assigning a warp to an older
+ten-Hz sample. Timing details remain limited to about ten samples per second.
+The receiver combines matching parts, rejects older sequence numbers, derives
+the observed movement delta between samples, and records both the raw GameMaker instance
+origin and the collision-foot point (bounding-box center/bottom). On a room
+change it records the last observed source room, origin, foot, and facing as
+transition evidence.
+
+One optional group cannot invalidate an already-received core packet. This is
+important because the recorded v8 diagnostic run received all 2,000 core/motion/control
+samples but none of its all-or-nothing rich packets. v9 isolates collision,
+render, and timing expressions and parses each named optional value
+independently.
+
+The patch deliberately does not query or transmit nearby interactable
+instances, identities, positions, room-warp objects, choice text, selection
+indexes, or option counts. The controller must form visual guesses and verify
+them through play. While dialogue or a menu is active, the receiver attaches the
+latest player origin, foot, sprite/facing, collision box, and camera context
+alongside the state object's own origin.
 
 Deltarune does not keep Kris's overworld facing in GameMaker's built-in
 `direction` variable. The controller derives facing from the verified Chapter 1
@@ -35,15 +54,14 @@ For repeatable early-game testing, the patch calls Deltarune's native
 visible or collidable object, so it cannot alter navigation or become an
 artificial interaction target. This intentionally writes the current save slot.
 
-Packets are sent about ten times per second by UDP to `127.0.0.1:42069` only.
-The Python controller accepts no remote traffic.
-The installer uses the `CodeImportGroup` API available in UndertaleModTool
-0.8.4.1 and newer.
+Packets use UDP to `127.0.0.1:42069` only. The Python controller binds only to
+localhost. The installer uses `CodeImportGroup`, verified against the installed
+UndertaleModTool 0.9.1.2 scripts, and remains compatible with 0.8.4.1.
 
-Apply v8 to a clean `data.win` or restored unmodded backup. Restore the clean
+Apply v9 to a clean `data.win` or restored unmodded backup. Restore the clean
 file first if any earlier telemetry version is installed, so obsolete appended
-code is removed rather than layered underneath v8. The installer refuses to
-append v8 when it detects an older telemetry sender.
+code is removed rather than layered underneath v9. The installer refuses to
+append v9 when it detects an older telemetry sender.
 
 ## Safe installation, one chapter at a time
 
@@ -64,8 +82,12 @@ Validate the mod without sending any controls:
 python -m deltarune_agent telemetry --seconds 30
 ```
 
-Switch to Deltarune during those 30 seconds. Room, position, and four camera
-values should appear in PowerShell. After that succeeds, use the normal
+Switch to Deltarune during those 30 seconds. Room, origin position, sprite,
+facing, and camera values should appear. Normal-run event records additionally
+contain packet sequence/parts, control state, collision-foot position, and
+observed transition-source evidence. If collision fields remain blank,
+state/camera telemetry will continue working and the missing packet part will
+identify the failed optional group. After that succeeds, use the normal
 `run --live` command.
 
 Repeat only for chapters you intend to play. Steam updates may replace modified

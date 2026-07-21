@@ -1,4 +1,4 @@
-from collections import deque
+from collections import Counter, deque
 from math import hypot
 from pathlib import Path
 
@@ -23,6 +23,7 @@ COLLISION_CONFIRM_SAMPLES = 3
 WARP_SEEK_STEPS = 12
 EXIT_PROBE_COMMIT_STEPS = 4
 MAX_EXIT_PROBES = 1
+EXIT_PROBE_APPROACH_RADIUS = 1
 BACKTRACK_WARP_RADIUS = 2
 INTERACTION_MEMORY_RADIUS = 6
 SCREEN_ANALYSIS_INTERVAL = 5
@@ -37,7 +38,13 @@ CHARACTER_SINGLE_APPROACH_MAX_TARGETS = 2
 CHARACTER_SINGLE_APPROACH_MIN_VIEWS = 3
 CHARACTER_SINGLE_APPROACH_MIN_INTEREST = 0.18
 CHARACTER_PROBE_VERSION = 1
+VISUAL_GUESS_MODEL_VERSION = 2
+VISUAL_GOAL_COOLDOWN_STEPS = 72
+VISUAL_FAILURE_LIMIT = 2
+MIN_EXIT_OPENING_SCORE = 0.44
+WARP_PROGRESS_ATTRIBUTION_STEPS = 180
 LEGACY_CHARACTER_PROBE_FAILURES = 4
+MIN_VISUAL_GUESS_CONFIDENCE = 0.32
 CHOICE_CONFIRM_SETTLE_STEPS = 2
 LEGACY_CHOICE_DIALOGUE_STEPS = 30
 STORY_USEFULNESS_RANK = {
@@ -140,12 +147,21 @@ class StarterPolicy:
         self.completed_interaction: tuple[str, int, int, str] | None = None
         self.transitions = self.world.transitions
         self.warps = self.world.warps
+        self.last_portal_id: str | None = None
+        self.last_portal_crossing_tick = 0
         self.exit_probes = self.world.exit_probes
         self.character_probes = self.world.character_probes
         self.exit_search_goal: tuple[str, int, int, str] | None = None
+        self.map_updates: list[dict[str, object]] = []
         self.screen_regions = self.world.screen_regions
         for (screen_room, region_x, region_y), record in self.screen_regions.items():
-            if record.get("hypothesis") == "possible_interactable":
+            previous_record = dict(record)
+            record.setdefault("guess_id", f"{screen_room}@{region_x},{region_y}")
+            if (
+                record.get("hypothesis") == "possible_interactable"
+                and int(record.get("guess_model_version", 0))
+                < VISUAL_GUESS_MODEL_VERSION
+            ):
                 # Older builds treated any distinctive interior texture as an
                 # interactable. That evidence was too weak and caused scenery
                 # to be revisited as an NPC.
@@ -169,6 +185,17 @@ class StarterPolicy:
                     # probe under the exact-approach planner.
                     record["inspections"] = 0
                 record["character_probe_version"] = CHARACTER_PROBE_VERSION
+            self._refresh_visual_guess_metadata(
+                (region_x, region_y),
+                record,
+            )
+            if record != previous_record:
+                self.map_updates.append(
+                    self._screen_region_map_update(
+                        (screen_room, region_x, region_y),
+                        record,
+                    )
+                )
         self.choice_trials = self.world.choice_trials
         self.room_view = (
             RoomViewMemory(memory_path.parent / "room_views")
@@ -183,9 +210,28 @@ class StarterPolicy:
             )
         self.current_visible_regions: set[tuple[str, int, int]] = set()
         self.visual_goal: tuple[str, int, int] | None = None
+        self.decision_visual_goal: tuple[str, int, int] | None = None
         self.visual_goal_age = 0
         self.visual_goal_stalls = 0
         self.visual_goal_best_distance: int | None = None
+        self.visual_goal_cooldowns: dict[tuple[str, int, int], int] = {
+            # Stored ticks came from the previous process. Rebase them to a
+            # bounded fresh-run cooldown instead of treating an old absolute
+            # tick (for example 1,900) as 1,900 more steps in this run.
+            key: VISUAL_GOAL_COOLDOWN_STEPS
+            for key, record in self.screen_regions.items()
+            if str(record.get("guess_state") or "") == "cooldown"
+            and int(record.get("cooldown_until_tick", 0) or 0) > 0
+        }
+        for cooldown_key, expires_at in self.visual_goal_cooldowns.items():
+            self.screen_regions[cooldown_key]["cooldown_until_tick"] = expires_at
+        self.visual_observation_sequence = max(
+            (
+                int(record.get("last_seen_sequence", 0))
+                for record in self.screen_regions.values()
+            ),
+            default=0,
+        )
         self.room_entry_from = self.world.room_entry_from
         self.recent_rooms: deque[str] = deque(maxlen=8)
         self.suppressed_room_links = self.world.suppressed_room_links
@@ -197,9 +243,11 @@ class StarterPolicy:
         self.loop_direction_cooldowns: dict[
             tuple[str, int, int], tuple[frozenset[str], int]
         ] = {}
+        self.recovery_direction: str | None = None
+        self.recovery_until_tick = 0
+        self.recovery_room_region: tuple[str, int, int] | None = None
         self.steps_without_frontier = 0
         self.reason = "starting"
-        self.map_updates: list[dict[str, object]] = []
         self.stalled_recovery_steps = 0
         self.previous_state: GameState | None = None
         self.story_epoch = max(
@@ -223,6 +271,16 @@ class StarterPolicy:
         self.pending_choice_epoch = self.story_epoch
         self.choice_settle_steps = 0
         self.choice_session_trials = 0
+        self._run_baseline = {
+            "mapped_cells": len(self.seen_cells),
+            "open_edges": len(self.open_edges),
+            "blocked_failures": sum(self.blocked.values()),
+            "interactables": len(self.interactables),
+            "warp_crossings": sum(self.warps.values()),
+            "exit_probe_attempts": sum(self.exit_probes.values()),
+            "character_probe_attempts": sum(self.character_probes.values()),
+            "screen_regions": len(self.screen_regions),
+        }
         if any(self._story_interaction_retryable(key) for key in self.interactables):
             self.story_stall_steps = STORY_SEARCH_STEPS
 
@@ -232,6 +290,7 @@ class StarterPolicy:
         perception: Perception,
         telemetry: TelemetrySample | None = None,
     ) -> Action:
+        self.decision_visual_goal = None
         state = perception.state
         if (
             state is GameState.DIALOGUE
@@ -577,6 +636,21 @@ class StarterPolicy:
         self.story_epoch += 1
         self.story_progress_events += 1
         self.story_stall_steps = 0
+        if (
+            event != "discovered a new room"
+            and self.last_portal_id is not None
+            and self.navigation_tick - self.last_portal_crossing_tick
+            <= WARP_PROGRESS_ATTRIBUTION_STEPS
+        ):
+            self.world.record_warp_progress(
+                self.last_portal_id,
+                event,
+                discovery_only=False,
+                step=self.navigation_tick,
+            )
+            portal_update = self._portal_map_update(self.last_portal_id)
+            if portal_update is not None:
+                self.map_updates.append(portal_update)
         update: dict[str, object] = {
             "type": "story_progress",
             "event": event,
@@ -726,8 +800,26 @@ class StarterPolicy:
         return telemetry.room_name or str(telemetry.room_id)
 
     @staticmethod
+    def _position(telemetry: TelemetrySample) -> tuple[float, float]:
+        # v9 distinguishes the instance origin from the collision-foot point.
+        # Navigation and map evidence describe where Kris can stand, so prefer
+        # the foot when it is available while retaining legacy packet behavior.
+        x = (
+            telemetry.player_foot_x
+            if telemetry.player_foot_x is not None
+            else telemetry.x
+        )
+        y = (
+            telemetry.player_foot_y
+            if telemetry.player_foot_y is not None
+            else telemetry.y
+        )
+        return float(x), float(y)
+
+    @staticmethod
     def _cell(telemetry: TelemetrySample) -> tuple[int, int]:
-        return int(telemetry.x // CELL_SIZE), int(telemetry.y // CELL_SIZE)
+        x, y = StarterPolicy._position(telemetry)
+        return int(x // CELL_SIZE), int(y // CELL_SIZE)
 
     @staticmethod
     def _region(cell: tuple[int, int]) -> tuple[int, int]:
@@ -743,14 +835,33 @@ class StarterPolicy:
             self.recent_rooms.append(self.observed_room or room)
         if self.observed_room is not None and room != self.observed_room:
             source_room = self.observed_room
+            source_x: float | None = None
+            source_y: float | None = None
+            if telemetry.transition_from_room_name == source_room:
+                source_x = (
+                    telemetry.transition_from_foot_x
+                    if telemetry.transition_from_foot_x is not None
+                    else telemetry.transition_from_x
+                )
+                source_y = (
+                    telemetry.transition_from_foot_y
+                    if telemetry.transition_from_foot_y is not None
+                    else telemetry.transition_from_y
+                )
+            source_cell = (
+                (int(source_x // CELL_SIZE), int(source_y // CELL_SIZE))
+                if source_x is not None and source_y is not None
+                else self.observed_cell
+            )
             first_visit = not any(
                 seen_room == room for seen_room, _x, _y in self.seen_cells
             )
-            self.transitions[(source_room, room)] += 1
             self.room_entry_from[room] = source_room
             if self.recent_rooms and self.recent_rooms[-1] == room:
                 self.suppressed_room_links.add(frozenset((source_room, room)))
             self.exit_search_goal = None
+            if source_cell is not None:
+                self._confirm_visual_exit(source_room, source_cell, room)
             self.visual_goal = None
             self.visual_goal_age = 0
             self.visual_goal_stalls = 0
@@ -766,36 +877,145 @@ class StarterPolicy:
                 previous_room = self.recent_rooms[-2]
                 if previous_room == room:
                     self.suppressed_room_links.add(frozenset((source_room, room)))
-            if self.observed_cell is not None:
+            if source_cell is not None:
                 action = (
                     self.last_movement
                     or self.last_overworld_movement
+                    or (
+                        telemetry.transition_from_facing
+                        if telemetry.transition_from_facing in DIRECTION_VECTORS
+                        else None
+                    )
                     or "event"
                 )
                 warp = (
                     source_room,
-                    *self.observed_cell,
+                    *source_cell,
                     action,
                     room,
                     *cell,
                 )
-                self.warps[warp] += 1
+                previous_portal_id = self.last_portal_id
+                previous_crossing_tick = self.last_portal_crossing_tick
+                portal_id = self.world.record_warp_transition(
+                    warp,
+                    destination_was_novel=first_visit,
+                    step=self.navigation_tick,
+                )
+                if previous_portal_id is not None:
+                    previous_portal = self.world.portal_metadata(
+                        previous_portal_id
+                    )
+                    if (
+                        previous_portal is not None
+                        and previous_portal.get("from_room") == room
+                        and previous_portal.get("to_room") == source_room
+                    ):
+                        self.world.record_warp_return(
+                            previous_portal_id,
+                            dwell_steps=max(
+                                0,
+                                self.navigation_tick - previous_crossing_tick,
+                            ),
+                            returned_via=portal_id,
+                            step=self.navigation_tick,
+                        )
+                        previous_update = self._portal_map_update(
+                            previous_portal_id
+                        )
+                        if previous_update is not None:
+                            self.map_updates.append(previous_update)
+                self.last_portal_id = portal_id
+                self.last_portal_crossing_tick = self.navigation_tick
+                portal = self.world.portal_metadata(portal_id) or {}
                 self.map_updates.append(
                     {
                         "type": "warp",
+                        "portal_id": portal_id,
                         "from_room": source_room,
-                        "from_cell": list(self.observed_cell),
+                        "from_cell": list(source_cell),
+                        "from_world": (
+                            [round(source_x, 2), round(source_y, 2)]
+                            if source_x is not None and source_y is not None
+                            else None
+                        ),
                         "action": action,
                         "to_room": room,
                         "to_cell": list(cell),
                         "count": self.warps[warp],
+                        "role": portal.get("role", "unknown"),
+                        "role_confidence": portal.get("confidence", 0.25),
+                        "role_basis": list(portal.get("basis", [])),
+                        "source_footprint": portal.get("source_footprint"),
+                        "arrival_footprint": portal.get("arrival_footprint"),
+                        "aperture": portal.get("aperture"),
                     }
                 )
+            else:
+                # A malformed legacy transition can lack a source point. Keep
+                # the room graph count without inventing portal geometry.
+                self.transitions[(source_room, room)] += 1
             self.last_overworld_movement = None
             if first_visit:
                 self._record_story_progress("discovered a new room", telemetry)
         self.observed_room = room
         self.observed_cell = cell
+
+    def _portal_map_update(self, portal_id: str) -> dict[str, object] | None:
+        portal = self.world.portal_metadata(portal_id)
+        if portal is None:
+            return None
+        return {
+            "type": "warp_role",
+            "portal_id": portal_id,
+            "from_room": portal.get("from_room"),
+            "to_room": portal.get("to_room"),
+            "action": portal.get("action"),
+            "role": portal.get("role", "unknown"),
+            "role_confidence": portal.get("confidence", 0.25),
+            "role_basis": list(portal.get("basis", [])),
+            "crossings": int(portal.get("crossings", 0)),
+            "source_footprint": portal.get("source_footprint"),
+            "arrival_footprint": portal.get("arrival_footprint"),
+            "aperture": portal.get("aperture"),
+        }
+
+    def _confirm_visual_exit(
+        self,
+        room: str,
+        source_cell: tuple[int, int],
+        target_room: str,
+    ) -> None:
+        """Confirm only a learned guess spatially supported by a real warp."""
+        source_region = self._region(source_cell)
+        matches = [
+            (key, record)
+            for key, record in self.screen_regions.items()
+            if key[0] == room
+            and record.get("hypothesis") == "possible_exit"
+            and max(abs(key[1] - source_region[0]), abs(key[2] - source_region[1]))
+            <= 1
+        ]
+        if not matches:
+            return
+        key, record = min(
+            matches,
+            key=lambda item: (
+                abs(item[0][1] - source_region[0])
+                + abs(item[0][2] - source_region[1]),
+                -float(item[1].get("guess_confidence", 0.0)),
+            ),
+        )
+        record["guess_state"] = "confirmed"
+        record["confirmed_target_room"] = target_room
+        record["confirmed_at_cell"] = list(source_cell)
+        record["completed_tests"] = max(
+            1,
+            int(record.get("completed_tests", record.get("inspections", 0))),
+        )
+        record["inspections"] = int(record["completed_tests"])
+        self._refresh_visual_guess_metadata((key[1], key[2]), record)
+        self.map_updates.append(self._screen_region_map_update(key, record))
 
     def observe_room_trace(self, samples: list[TelemetrySample]) -> None:
         """Observe every ordered room packet, including multiple warps per step."""
@@ -834,6 +1054,7 @@ class StarterPolicy:
                     observation.step,
                 )
             )
+        self.visual_observation_sequence += 1
         for visual in analyze_screen_regions(observation.frame, telemetry):
             key = (room, visual.region_x, visual.region_y)
             existing = self.screen_regions.get(key)
@@ -841,14 +1062,44 @@ class StarterPolicy:
                 float(existing.get("interest", 0.0)) if existing else 0.0
             )
             previous_hypothesis = existing.get("hypothesis") if existing else None
+            previous_signature = str(existing.get("last_signature") or "") if existing else ""
             record = dict(existing or {})
+            record.setdefault(
+                "guess_id",
+                f"{room}@{visual.region_x},{visual.region_y}",
+            )
             record["views"] = int(record.get("views", 0)) + 1
-            entity_evidence, obstruction_targets = self._region_obstruction_evidence(
+            viewpoint = [
+                int(float(telemetry.camera_x or 0) // 16),
+                int(float(telemetry.camera_y or 0) // 16),
+            ]
+            viewpoints = [
+                list(value)
+                for value in record.get("evidence_viewpoints", [])
+                if isinstance(value, (list, tuple)) and len(value) == 2
+            ]
+            if viewpoint not in viewpoints:
+                viewpoints.append(viewpoint)
+                viewpoints = viewpoints[-12:]
+            record["evidence_viewpoints"] = viewpoints
+            record["independent_views"] = max(
+                int(record.get("independent_views", 0)),
+                len(viewpoints),
+            )
+            if visual.appearance_signature and visual.appearance_signature != previous_signature:
+                record["appearance_changes"] = int(record.get("appearance_changes", 0)) + 1
+            obstruction_details = self._region_obstruction_details(
                 room,
                 (visual.region_x, visual.region_y),
             )
+            entity_evidence = len(obstruction_details["directions"])
+            obstruction_targets = len(obstruction_details["targets"])
             record["entity_approach_directions"] = entity_evidence
             record["obstruction_target_cells"] = obstruction_targets
+            record["approach_directions"] = list(obstruction_details["directions"])
+            record["obstruction_cells"] = [
+                list(target) for target in obstruction_details["targets"]
+            ]
             record["walkable_evidence"] = self._region_has_walkable_evidence(
                 room,
                 (visual.region_x, visual.region_y),
@@ -856,6 +1107,40 @@ class StarterPolicy:
             record["last_signature"] = visual.appearance_signature
             record["last_interest"] = visual.interest
             record["interest"] = max(previous_interest, visual.interest)
+            record["last_seen_step"] = observation.step
+            record["last_seen_sequence"] = self.visual_observation_sequence
+            record["contrast"] = round(visual.contrast, 3)
+            record["edge_density"] = round(visual.edge_density, 3)
+            record["colorfulness"] = round(visual.colorfulness, 3)
+            record["dark_ratio"] = round(visual.dark_ratio, 3)
+            record["edge_opening_score"] = round(visual.edge_opening_score, 3)
+            record["edge_width_ratio"] = round(visual.edge_width_ratio, 3)
+            record["guess_model_version"] = VISUAL_GUESS_MODEL_VERSION
+            # Keep the clearest observed feature stable. Animation or an empty
+            # follow-up frame must not make a persisted guess box drift across
+            # the remembered scene while the miss counter is still evaluating it.
+            if existing is None or visual.interest >= previous_interest:
+                record["visual_summary"] = visual.feature_summary
+                if (
+                    visual.focus_world_x is not None
+                    and visual.focus_world_y is not None
+                ):
+                    record["focus_world"] = [
+                        round(visual.focus_world_x, 2),
+                        round(visual.focus_world_y, 2),
+                    ]
+                    record["anchor_world"] = list(record["focus_world"])
+                if visual.feature_box_world is not None:
+                    record["feature_box_world"] = [
+                        round(value, 2) for value in visual.feature_box_world
+                    ]
+                    record["visual_box_world"] = list(record["feature_box_world"])
+                if visual.passage_box_world is not None:
+                    record["passage_box_world"] = [
+                        round(value, 2) for value in visual.passage_box_world
+                    ]
+                if visual.edge_hint:
+                    record["edge_hint"] = visual.edge_hint
             record.setdefault("inspections", 0)
             if (
                 previous_hypothesis == "possible_exit"
@@ -874,6 +1159,9 @@ class StarterPolicy:
             )
             accept_hypothesis = bool(visual.hypothesis) and (
                 previous_hypothesis is None or visual.interest > previous_interest
+            ) and (
+                visual.hypothesis != "possible_exit"
+                or visual.edge_opening_score >= MIN_EXIT_OPENING_SCORE
             )
             if accept_hypothesis and previous_hypothesis is None:
                 active = [
@@ -889,19 +1177,19 @@ class StarterPolicy:
                         key=lambda item: float(item[1].get("interest", 0.0)),
                     )
                     if visual.interest > float(weakest.get("interest", 0.0)) + 0.05:
-                        weakest["inspections"] = 2
+                        weakest["inspections"] = 3
+                        weakest["completed_tests"] = max(
+                            3,
+                            int(weakest.get("completed_tests", 0)),
+                        )
+                        weakest["guess_state"] = "retired"
+                        weakest["retired_reason"] = "replaced by stronger independent evidence"
+                        self._refresh_visual_guess_metadata(
+                            (weakest_key[1], weakest_key[2]),
+                            weakest,
+                        )
                         self.map_updates.append(
-                            {
-                                "type": "screen_region",
-                                "room": weakest_key[0],
-                                "region": [weakest_key[1], weakest_key[2]],
-                                "views": int(weakest.get("views", 1)),
-                                "interest": round(
-                                    float(weakest.get("interest", 0.0)), 3
-                                ),
-                                "hypothesis": weakest.get("hypothesis"),
-                                "inspections": 2,
-                            }
+                            self._screen_region_map_update(weakest_key, weakest)
                         )
                     else:
                         accept_hypothesis = False
@@ -911,8 +1199,21 @@ class StarterPolicy:
                 # different lead instead of revisiting the same scenery.
                 record["hypothesis"] = None
                 record["inspections"] = max(2, int(record.get("inspections", 0)))
+                record["completed_tests"] = max(
+                    2,
+                    int(record.get("completed_tests", 0)),
+                )
+                record["guess_state"] = "retired"
+                record["retired_reason"] = (
+                    "repeated ordinary walkable views contradicted the opening"
+                )
             elif accept_hypothesis:
                 record["hypothesis"] = visual.hypothesis
+                if previous_hypothesis != visual.hypothesis:
+                    record["guess_state"] = "proposed"
+                    record["approach_attempts"] = 0
+                    record["completed_tests"] = 0
+                    record["failed_approaches"] = 0
             else:
                 record.setdefault("hypothesis", previous_hypothesis)
             strong_character_shape = (
@@ -927,15 +1228,33 @@ class StarterPolicy:
                 and visual.interest >= CHARACTER_SINGLE_APPROACH_MIN_INTEREST
                 and record.get("hypothesis") != "possible_exit"
             )
-            if strong_character_shape or compact_single_approach:
+            retired_character_lead = bool(record.get("retired_reason")) and not bool(
+                record.get("choice_retry")
+            )
+            if strong_character_shape and not retired_character_lead:
                 record["hypothesis"] = "possible_character"
                 record["character_probe_version"] = CHARACTER_PROBE_VERSION
+                record.setdefault("guess_state", "proposed")
+            elif compact_single_approach and not retired_character_lead:
+                # A single collision side is enough to remember an object, but
+                # not enough to call a bed, sink, or cabinet a character.
+                record["hypothesis"] = "possible_interactable"
+                record["character_probe_version"] = CHARACTER_PROBE_VERSION
+                record.setdefault("guess_state", "proposed")
             elif (
-                record.get("hypothesis") == "possible_character"
+                record.get("hypothesis") in {
+                    "possible_character",
+                    "possible_interactable",
+                }
                 and not strong_character_shape
                 and not compact_single_approach
             ):
                 record["hypothesis"] = None
+            self._refresh_visual_guess_metadata(
+                (visual.region_x, visual.region_y),
+                record,
+                obstruction_details,
+            )
             self.screen_regions[key] = record
             if (
                 existing is None
@@ -943,19 +1262,243 @@ class StarterPolicy:
                 or float(record["interest"]) >= previous_interest + 0.05
             ):
                 self.map_updates.append(
-                    {
-                        "type": "screen_region",
-                        "room": room,
-                        "region": [visual.region_x, visual.region_y],
-                        "views": int(record["views"]),
-                        "interest": round(float(record["interest"]), 3),
-                        "hypothesis": record.get("hypothesis"),
-                        "inspections": int(record.get("inspections", 0)),
-                        "entity_approach_directions": entity_evidence,
-                        "obstruction_target_cells": obstruction_targets,
-                        "guess_misses": int(record.get("guess_misses", 0)),
-                    }
+                    self._screen_region_map_update(key, record)
                 )
+
+    @staticmethod
+    def _clamp_guess_confidence(value: float) -> float:
+        return round(min(0.95, max(0.05, value)), 3)
+
+    def _refresh_visual_guess_metadata(
+        self,
+        region: tuple[int, int],
+        record: dict[str, object],
+        obstruction_details: dict[str, object] | None = None,
+    ) -> None:
+        hypothesis = str(record.get("hypothesis") or "")
+        if hypothesis not in {
+            "possible_exit",
+            "possible_character",
+            "possible_interactable",
+        }:
+            return
+        independent_views = max(1, int(record.get("independent_views", 1)))
+        interest = float(record.get("interest", 0.0))
+        completed_tests = int(
+            record.get("completed_tests", record.get("inspections", 0))
+        )
+        failed_approaches = int(record.get("failed_approaches", 0))
+        misses = int(record.get("guess_misses", 0))
+        default_anchor = [
+            region[0] * EXPLORATION_REGION_CELLS
+            + EXPLORATION_REGION_CELLS // 2,
+            region[1] * EXPLORATION_REGION_CELLS
+            + EXPLORATION_REGION_CELLS // 2,
+        ]
+
+        record["guess_model_version"] = VISUAL_GUESS_MODEL_VERSION
+        record.setdefault("guess_state", "proposed")
+        record.setdefault("approach_attempts", 0)
+        record.setdefault("completed_tests", completed_tests)
+        record.setdefault("failed_approaches", failed_approaches)
+
+        if hypothesis in {"possible_character", "possible_interactable"}:
+            details = obstruction_details or {
+                "directions": tuple(record.get("approach_directions", ())),
+                "targets": tuple(
+                    tuple(int(value) for value in target)
+                    for target in record.get("obstruction_cells", [])
+                    if isinstance(target, (list, tuple)) and len(target) == 2
+                ),
+                "anchor": None,
+            }
+            directions = tuple(str(value) for value in details.get("directions", ()))
+            targets = tuple(details.get("targets", ()))
+            if not directions:
+                directions = tuple(
+                    str(value) for value in record.get("approach_directions", ())
+                )
+            approach_count = max(
+                len(directions),
+                int(record.get("entity_approach_directions", 0)),
+            )
+            target_count = max(
+                len(targets),
+                int(record.get("obstruction_target_cells", 0)),
+            )
+            anchor = details.get("anchor")
+            if anchor is None and targets:
+                anchor = targets[0]
+            parsed_targets = [
+                (int(target[0]), int(target[1]))
+                for target in targets
+                if isinstance(target, (list, tuple)) and len(target) == 2
+            ]
+            if parsed_targets:
+                obstruction_box = [
+                    min(target[0] for target in parsed_targets) * CELL_SIZE,
+                    min(target[1] for target in parsed_targets) * CELL_SIZE,
+                    (max(target[0] for target in parsed_targets) + 1) * CELL_SIZE,
+                    (max(target[1] for target in parsed_targets) + 1) * CELL_SIZE,
+                ]
+                record["obstruction_box_world"] = obstruction_box
+                record["anchor_world"] = [
+                    round((obstruction_box[0] + obstruction_box[2]) / 2, 2),
+                    round((obstruction_box[1] + obstruction_box[3]) / 2, 2),
+                ]
+            if isinstance(anchor, tuple) and len(anchor) == 2:
+                record["anchor_cell"] = [int(anchor[0]), int(anchor[1])]
+            else:
+                record.setdefault("anchor_cell", default_anchor)
+            record["guess_label"] = (
+                f"Possible character-sized {max(1, target_count)}-cell obstacle"
+                if hypothesis == "possible_character"
+                else f"Possible compact {max(1, target_count)}-cell object"
+            )
+            record["evidence_kind"] = "compact_obstruction"
+            side_text = (
+                "/".join(directions)
+                if directions
+                else f"{max(1, approach_count)} learned side"
+                + ("s" if approach_count != 1 else "")
+            )
+            category_note = (
+                "multiple sides support a character-sized obstacle"
+                if hypothesis == "possible_character"
+                else "one collision side is not enough to distinguish a person from scenery"
+            )
+            record["evidence_summary"] = (
+                f"compact {max(1, target_count)}-cell obstruction approached from "
+                f"{side_text}; {category_note}"
+            )
+            confidence = (
+                (0.18 if hypothesis == "possible_character" else 0.08)
+                + min(0.38, approach_count * 0.19)
+                + min(0.10, independent_views * 0.025)
+                + min(0.12, interest * 0.18)
+                - max(0, target_count - 4) * 0.05
+                - completed_tests * 0.10
+                - failed_approaches * 0.12
+            )
+        else:
+            focus = record.get("focus_world")
+            if isinstance(focus, (list, tuple)) and len(focus) == 2:
+                record["anchor_cell"] = [
+                    int(float(focus[0]) // CELL_SIZE),
+                    int(float(focus[1]) // CELL_SIZE),
+                ]
+                record["anchor_world"] = [float(focus[0]), float(focus[1])]
+            else:
+                record.setdefault("anchor_cell", default_anchor)
+            edge_hint = str(record.get("edge_hint") or "room edge")
+            path_continuation = bool(record.get("path_continuation"))
+            opening_score = float(record.get("edge_opening_score", 0.0))
+            opening_width = float(record.get("edge_width_ratio", 0.0))
+            record["guess_label"] = (
+                f"Mapped corridor toward {edge_hint} boundary"
+                if path_continuation
+                else f"Possible {edge_hint} opening ({opening_width:.0%} edge span)"
+                if edge_hint != "room edge"
+                else "Possible localized boundary opening"
+            )
+            record["evidence_kind"] = (
+                "mapped_path_continuation"
+                if path_continuation
+                else "visual_edge_landmark"
+            )
+            visual_summary = str(record.get("visual_summary") or "localized visual opening")
+            record["evidence_summary"] = (
+                f"{visual_summary}; learned path continues toward it"
+                if path_continuation
+                else f"{visual_summary}; opening-shape score {opening_score:.0%}"
+            )
+            confidence = (
+                0.08
+                + min(0.40, opening_score * 0.42)
+                + min(0.08, independent_views * 0.02)
+                + min(0.08, interest * 0.12)
+                + (0.28 if path_continuation else 0.0)
+                - misses * 0.12
+                - completed_tests * 0.10
+                - failed_approaches * 0.14
+            )
+            if opening_width >= 0.66 and not path_continuation:
+                confidence -= 0.24
+                record["evidence_summary"] += "; broad dark seam penalty"
+            if float(record.get("dark_ratio", 0.0)) >= 0.72 and not path_continuation:
+                confidence -= 0.10
+        record["guess_confidence"] = self._clamp_guess_confidence(confidence)
+
+    @staticmethod
+    def _screen_region_map_update(
+        key: tuple[str, int, int],
+        record: dict[str, object],
+    ) -> dict[str, object]:
+        update: dict[str, object] = {
+            "type": "screen_region",
+            "room": key[0],
+            "region": [key[1], key[2]],
+            "views": int(record.get("views", 1)),
+            "independent_views": int(record.get("independent_views", 1)),
+            "appearance_changes": int(record.get("appearance_changes", 0)),
+            "interest": round(float(record.get("interest", 0.0)), 3),
+            "hypothesis": record.get("hypothesis"),
+            "inspections": int(record.get("inspections", 0)),
+            "completed_tests": int(
+                record.get("completed_tests", record.get("inspections", 0))
+            ),
+            "approach_attempts": int(record.get("approach_attempts", 0)),
+            "failed_approaches": int(record.get("failed_approaches", 0)),
+            "guess_state": str(record.get("guess_state") or "proposed"),
+            "guess_model_version": int(
+                record.get("guess_model_version", VISUAL_GUESS_MODEL_VERSION)
+            ),
+            "entity_approach_directions": int(
+                record.get("entity_approach_directions", 0)
+            ),
+            "obstruction_target_cells": int(
+                record.get("obstruction_target_cells", 0)
+            ),
+            "guess_misses": int(record.get("guess_misses", 0)),
+            "path_continuation": bool(record.get("path_continuation", False)),
+            "choice_retry": bool(record.get("choice_retry", False)),
+        }
+        for field in (
+            "guess_confidence",
+            "guess_id",
+            "guess_label",
+            "evidence_kind",
+            "evidence_summary",
+            "anchor_cell",
+            "anchor_world",
+            "focus_world",
+            "feature_box_world",
+            "visual_box_world",
+            "passage_box_world",
+            "obstruction_box_world",
+            "edge_hint",
+            "edge_opening_score",
+            "edge_width_ratio",
+            "visual_summary",
+            "approach_directions",
+            "obstruction_cells",
+            "evidence_viewpoints",
+            "last_seen_sequence",
+            "last_seen_step",
+            "cooldown_until_tick",
+            "contrast",
+            "edge_density",
+            "colorfulness",
+            "dark_ratio",
+            "retired_reason",
+            "last_failure_reason",
+            "confirmed_target_room",
+            "confirmed_at_cell",
+            "confirmed_interactable_cell",
+        ):
+            if record.get(field) is not None:
+                update[field] = record[field]
+        return update
 
     def _region_has_walkable_evidence(
         self,
@@ -972,8 +1515,16 @@ class StarterPolicy:
         room: str,
         region: tuple[int, int],
     ) -> tuple[int, int]:
+        details = self._region_obstruction_details(room, region)
+        return len(details["directions"]), len(details["targets"])
+
+    def _region_obstruction_details(
+        self,
+        room: str,
+        region: tuple[int, int],
+    ) -> dict[str, object]:
         if not self._region_has_walkable_evidence(room, region):
-            return 0, 0
+            return {"directions": (), "targets": (), "anchor": None}
         approaches: list[tuple[tuple[int, int], str]] = []
         for (edge_room, source_x, source_y, direction), failures in self.blocked.items():
             if edge_room != room or failures <= 0 or direction not in DIRECTION_VECTORS:
@@ -982,8 +1533,8 @@ class StarterPolicy:
             target = (source_x + dx, source_y + dy)
             if self._region(target) == region:
                 approaches.append((target, direction))
-        best_directions = 0
-        best_targets = 0
+        best_directions: set[str] = set()
+        best_targets: set[tuple[int, int]] = set()
         for target, _direction in approaches:
             nearby = [
                 (nearby_target, direction)
@@ -995,11 +1546,31 @@ class StarterPolicy:
                 <= 2
             ]
             directions = {direction for _nearby_target, direction in nearby}
-            target_count = len({nearby_target for nearby_target, _direction in nearby})
-            if (len(directions), -target_count) > (best_directions, -best_targets):
-                best_directions = len(directions)
-                best_targets = target_count
-        return best_directions, best_targets
+            targets = {nearby_target for nearby_target, _direction in nearby}
+            if (len(directions), -len(targets)) > (
+                len(best_directions),
+                -len(best_targets),
+            ):
+                best_directions = directions
+                best_targets = targets
+        anchor = None
+        if best_targets:
+            anchor = min(
+                best_targets,
+                key=lambda candidate: (
+                    sum(
+                        abs(candidate[0] - target[0])
+                        + abs(candidate[1] - target[1])
+                        for target in best_targets
+                    ),
+                    candidate,
+                ),
+            )
+        return {
+            "directions": tuple(sorted(best_directions)),
+            "targets": tuple(sorted(best_targets)),
+            "anchor": anchor,
+        }
 
     def _region_character_approach_count(
         self,
@@ -1046,8 +1617,9 @@ class StarterPolicy:
             self.collision_pending = False
             return
         self.awaiting_fresh_telemetry = False
-        delta_x = telemetry.x - self.last_position[0]
-        delta_y = telemetry.y - self.last_position[1]
+        position_x, position_y = self._position(telemetry)
+        delta_x = position_x - self.last_position[0]
+        delta_y = position_y - self.last_position[1]
         distance = hypot(delta_x, delta_y)
         stationary = distance < 0.75
         self.input_not_registered = (
@@ -1064,8 +1636,8 @@ class StarterPolicy:
         elif stationary:
             key = (
                 room,
-                round(telemetry.x),
-                round(telemetry.y),
+                round(position_x),
+                round(position_y),
                 self.last_movement,
             )
             if key == self.stationary_key:
@@ -1243,6 +1815,36 @@ class StarterPolicy:
             }
         )
         self.completed_interaction = (room, cell_x, cell_y, direction)
+        target_region = self._region((target_x, target_y))
+        visual_key = (room, *target_region)
+        visual_record = self.screen_regions.get(visual_key)
+        if visual_record is not None and visual_record.get("hypothesis") in {
+            "possible_character",
+            "possible_interactable",
+        }:
+            visual_record["guess_state"] = "confirmed"
+            visual_record["completed_tests"] = max(
+                1,
+                int(
+                    visual_record.get(
+                        "completed_tests",
+                        visual_record.get("inspections", 0),
+                    )
+                ),
+            )
+            visual_record["inspections"] = int(
+                visual_record["completed_tests"]
+            )
+            visual_record["confirmed_interactable_cell"] = [key[1], key[2]]
+            self._refresh_visual_guess_metadata(
+                (visual_key[1], visual_key[2]),
+                visual_record,
+            )
+            self.map_updates.append(
+                self._screen_region_map_update(visual_key, visual_record)
+            )
+            if self.visual_goal == visual_key:
+                self.visual_goal = None
         self.active_interaction_key = key
         self.active_interaction_dialogue_steps = 0
         self.active_interaction_cutscene_steps = 0
@@ -1413,6 +2015,7 @@ class StarterPolicy:
                 target_region == (self.visual_goal[1], self.visual_goal[2])
                 and record.get("hypothesis") in {
                     "possible_character",
+                    "possible_interactable",
                     "possible_exit",
                 }
             ):
@@ -1447,6 +2050,7 @@ class StarterPolicy:
         else:
             self.seen_regions.add(region_key)
             self.steps_without_frontier = 0
+            self.stalled_recovery_steps = 0
         recent = (room, *cell)
         if not self.recent_cells or self.recent_cells[-1] != recent:
             self.recent_cells.append(recent)
@@ -1460,6 +2064,10 @@ class StarterPolicy:
             self.unexpected_displacement = False
             self.interaction_tried = False
             self.pending_blocked_direction = None
+            self.stalled_recovery_steps = 0
+            self.recovery_direction = None
+            self.recovery_until_tick = 0
+            self.recovery_room_region = None
 
         if self.completed_interaction is not None:
             interaction_room, cell_x, cell_y, old_direction = self.completed_interaction
@@ -1613,24 +2221,25 @@ class StarterPolicy:
                 )
 
         if self.direction_steps <= 0:
-            fallback_reason, fallback_direction = self._stalled_recovery(
+            self.direction, self.direction_steps, reason = self._plan_exploration(
+                room, cell
+            )
+            stabilized, broke_loop = self._break_oscillation(
                 room, cell, self.direction
             )
-            if fallback_direction is None:
-                self.direction, self.direction_steps, reason = self._plan_exploration(
-                    room, cell
+            if broke_loop:
+                self.direction = stabilized
+                # Keep the perpendicular escape long enough to leave the
+                # repeated corridor instead of replanning into its opposite on
+                # the very next sample.
+                self.direction_steps = MOVEMENT_COMMIT_STEPS
+                self.recovery_direction = stabilized
+                self.recovery_until_tick = (
+                    self.navigation_tick + MOVEMENT_COMMIT_STEPS
                 )
-                stabilized, broke_loop = self._break_oscillation(
-                    room, cell, self.direction
-                )
-                if broke_loop:
-                    self.direction = stabilized
-                    self.direction_steps = 1
-                    reason = f"{self.loop_reason}; escape {self.direction}"
-            else:
-                self.direction = fallback_direction
-                self.direction_steps = 1
-                reason = fallback_reason
+                self.recovery_room_region = (room, *self._region(cell))
+                self.decision_visual_goal = None
+                reason = f"{self.loop_reason}; commit {self.direction} away from it"
             self.decision_history.append((room, *cell, self.direction))
         else:
             reason = f"continue clear path {self.direction}"
@@ -1788,7 +2397,7 @@ class StarterPolicy:
         if exit_route is not None:
             direction, probe = exit_route
             _probe_room, probe_x, probe_y, probe_direction = probe
-            if cell == (probe_x, probe_y):
+            if self._within_exit_probe_approach(cell, probe):
                 self.exit_probes[probe] += 1
                 return (
                     probe_direction,
@@ -1839,27 +2448,57 @@ class StarterPolicy:
         story_focus: bool = False,
         allowed_hypotheses: set[str] | None = None,
     ) -> tuple[str, str, tuple[int, int]] | None:
+        self.decision_visual_goal = None
         allowed = allowed_hypotheses or {
             "possible_exit",
             "possible_character",
+            "possible_interactable",
         }
+        # Old saved memories and tests may predate evidence-strength metadata.
+        # Enrich them lazily before filtering so a strong learned obstruction is
+        # not discarded merely because its numeric ranking was never persisted.
+        for key, record in self.screen_regions.items():
+            if (
+                key[0] == room
+                and record.get("hypothesis") in allowed
+                and "guess_confidence" not in record
+            ):
+                details = (
+                    self._region_obstruction_details(room, (key[1], key[2]))
+                    if record.get("hypothesis") == "possible_character"
+                    else None
+                )
+                self._refresh_visual_guess_metadata(
+                    (key[1], key[2]),
+                    record,
+                    details,
+                )
+                self.map_updates.append(
+                    self._screen_region_map_update(key, record)
+                )
         candidates = {
             key: record
             for key, record in self.screen_regions.items()
             if key[0] == room
             and record.get("hypothesis") in allowed
-            and (
-                key in self.current_visible_regions
-                # A stationary character lead that was genuinely on screen can
-                # be remembered after the camera moves, just as a player would
-                # remember where someone was standing.
-                or record.get("hypothesis") == "possible_character"
-            )
-            and int(record.get("inspections", 0))
+            # A player can remember any previously seen landmark after it
+            # leaves the camera. Persisted guesses therefore remain eligible,
+            # but their lifecycle and cooldown prevent blind revisiting.
+            and int(record.get("last_seen_sequence", record.get("views", 0))) > 0
+            and str(record.get("guess_state") or "proposed")
+            not in {"confirmed", "rejected", "retired"}
+            and not self._visual_goal_is_cooling(key)
+            and int(record.get("completed_tests", record.get("inspections", 0)))
             < (
                 3
                 if story_focus
                 else 2
+            )
+            and (
+                float(record.get("guess_confidence", 0.0))
+                >= MIN_VISUAL_GUESS_CONFIDENCE
+                or bool(record.get("choice_retry"))
+                or bool(record.get("path_continuation"))
             )
             and not self._visual_hypothesis_is_confirmed(
                 key,
@@ -1884,14 +2523,34 @@ class StarterPolicy:
             self.visual_goal_age = 0
             self.visual_goal_stalls = 0
             self.visual_goal_best_distance = None
+            selected = candidates[self.visual_goal]
+            selected["guess_state"] = "approaching"
+            selected["approach_attempts"] = int(
+                selected.get("approach_attempts", 0)
+            ) + 1
+            self.map_updates.append(
+                self._screen_region_map_update(self.visual_goal, selected)
+            )
         if self.visual_goal is None:
             return None
 
         goal = self.visual_goal
         record = candidates[goal]
         target_region = (goal[1], goal[2])
-        distance = abs(target_region[0] - current_region[0]) + abs(
+        region_distance = abs(target_region[0] - current_region[0]) + abs(
             target_region[1] - current_region[1]
+        )
+        anchor_value = record.get("anchor_cell")
+        anchor_cell = None
+        if isinstance(anchor_value, (list, tuple)) and len(anchor_value) == 2:
+            try:
+                anchor_cell = (int(anchor_value[0]), int(anchor_value[1]))
+            except (TypeError, ValueError):
+                pass
+        distance = (
+            abs(anchor_cell[0] - cell[0]) + abs(anchor_cell[1] - cell[1])
+            if anchor_cell is not None
+            else region_distance
         )
         self.visual_goal_age += 1
         if self.visual_goal_best_distance is None or distance < self.visual_goal_best_distance:
@@ -1903,29 +2562,51 @@ class StarterPolicy:
             self.visual_goal_age > VISUAL_GOAL_AGE_LIMIT
             or self.visual_goal_stalls > VISUAL_GOAL_STALL_LIMIT
         ):
-            self._finish_visual_goal()
+            self._finish_visual_goal(
+                "route_failed",
+                "route made no progress toward the visual anchor",
+            )
             return None
 
-        if record.get("hypothesis") == "possible_character":
+        if record.get("hypothesis") in {
+            "possible_character",
+            "possible_interactable",
+        }:
             character_probe = self._route_to_character_probe(
                 room,
                 cell,
                 target_region,
             )
             if character_probe is not None:
-                return character_probe, "possible_character", target_region
+                self.decision_visual_goal = goal
+                return character_probe, str(record["hypothesis"]), target_region
 
-        mapped_route = self._route_toward_visible_region(room, cell, target_region)
+        mapped_route = self._route_toward_visible_region(
+            room,
+            cell,
+            target_region,
+            anchor_cell=anchor_cell,
+        )
         readable_hypothesis = (
             "possible_character"
             if record.get("hypothesis") == "possible_character"
             else str(record["hypothesis"])
         )
         if mapped_route is not None:
+            if mapped_route in self._loop_avoid_directions(room, cell):
+                self._finish_visual_goal(
+                    "route_failed",
+                    "mapped route re-entered a recently detected movement loop",
+                )
+                return None
+            self.decision_visual_goal = goal
             return mapped_route, readable_hypothesis, target_region
 
         if distance == 0:
-            self._finish_visual_goal()
+            self._finish_visual_goal(
+                "reached",
+                "reached the visual anchor; waiting for a concrete test",
+            )
             return None
 
         delta_x = target_region[0] - current_region[0]
@@ -1957,8 +2638,12 @@ class StarterPolicy:
             and not self._is_entry_warp_direction(room, cell, direction)
         ]
         if not directions:
-            self._finish_visual_goal()
+            self._finish_visual_goal(
+                "route_failed",
+                "no safe learned approach remained",
+            )
             return None
+        self.decision_visual_goal = goal
         return (
             directions[0],
             readable_hypothesis,
@@ -1974,8 +2659,11 @@ class StarterPolicy:
     ) -> tuple[int, int, int, int, int, int, int, tuple[int, int]]:
         hypothesis = str(record.get("hypothesis") or "")
         interest = float(record.get("interest", 0.0))
-        inspections = int(record.get("inspections", 0))
-        views = int(record.get("views", 1))
+        guess_confidence = float(record.get("guess_confidence", interest))
+        completed_tests = int(
+            record.get("completed_tests", record.get("inspections", 0))
+        )
+        views = int(record.get("independent_views", record.get("views", 1)))
         distance = abs(key[1] - current_region[0]) + abs(key[2] - current_region[1])
         type_rank = 0 if hypothesis == "possible_character" else 1 if hypothesis == "possible_exit" else 2
         if story_focus and hypothesis == "possible_character":
@@ -1984,19 +2672,31 @@ class StarterPolicy:
             type_rank -= 1 if views >= 2 else 0
         if hypothesis == "possible_exit":
             type_rank += 1
-        confidence_bias = 0 if interest >= 0.5 else 1 if interest >= 0.2 else 2
-        if inspections >= 2:
-            confidence_bias -= 1
+        confidence_bias = (
+            0 if guess_confidence >= 0.7 else 1 if guess_confidence >= 0.45 else 2
+        )
         return (
             type_rank,
             confidence_bias,
-            inspections,
+            completed_tests,
             distance,
-            -int(interest * 1000),
+            -int(guess_confidence * 1000),
             -views,
             int(record.get("guess_misses", 0)),
             (key[1], key[2]),
         )
+
+    def _visual_goal_is_cooling(self, key: tuple[str, int, int]) -> bool:
+        expires_at = self.visual_goal_cooldowns.get(key)
+        if expires_at is None:
+            return False
+        if self.navigation_tick >= expires_at:
+            self.visual_goal_cooldowns.pop(key, None)
+            record = self.screen_regions.get(key)
+            if record is not None and record.get("guess_state") == "cooldown":
+                record["guess_state"] = "proposed"
+            return False
+        return True
 
     def _route_to_character_probe(
         self,
@@ -2088,13 +2788,35 @@ class StarterPolicy:
         record = self.screen_regions.get(self.visual_goal, {})
         if (
             self.visual_goal[0] != room
-            or record.get("hypothesis") != "possible_character"
+            or record.get("hypothesis")
+            not in {"possible_character", "possible_interactable"}
             or self._region((target_x, target_y))
             != (self.visual_goal[1], self.visual_goal[2])
         ):
             return
         probe = (room, cell_x, cell_y, direction)
         self.character_probes[probe] += 1
+        record["completed_tests"] = int(
+            record.get("completed_tests", record.get("inspections", 0))
+        ) + 1
+        record["inspections"] = int(record["completed_tests"])
+        record["last_failure_reason"] = (
+            f"interaction from ({cell_x},{cell_y}) facing {direction} produced no state change"
+        )
+        if int(record["completed_tests"]) >= VISUAL_FAILURE_LIMIT:
+            record["guess_state"] = "rejected"
+        else:
+            record["guess_state"] = "cooldown"
+            self.visual_goal_cooldowns[self.visual_goal] = (
+                self.navigation_tick + VISUAL_GOAL_COOLDOWN_STEPS
+            )
+        self._refresh_visual_guess_metadata(
+            (self.visual_goal[1], self.visual_goal[2]),
+            record,
+        )
+        self.map_updates.append(
+            self._screen_region_map_update(self.visual_goal, record)
+        )
         self.map_updates.append(
             {
                 "type": "character_probe",
@@ -2111,8 +2833,10 @@ class StarterPolicy:
         room: str,
         start: tuple[int, int],
         target_region: tuple[int, int],
+        *,
+        anchor_cell: tuple[int, int] | None = None,
     ) -> str | None:
-        """Use only learned open paths to get closer to an on-screen landmark."""
+        """Use learned paths to approach the feature, not its coarse region center."""
         adjacency = self._adjacency(room)
         left = target_region[0] * EXPLORATION_REGION_CELLS
         top = target_region[1] * EXPLORATION_REGION_CELLS
@@ -2124,17 +2848,28 @@ class StarterPolicy:
             dy = top - cell[1] if cell[1] < top else cell[1] - bottom if cell[1] > bottom else 0
             return dx + dy
 
-        start_distance = distance_to_region(start)
+        def spatial_distance(cell: tuple[int, int]) -> tuple[int, int]:
+            return (
+                (
+                    abs(cell[0] - anchor_cell[0])
+                    + abs(cell[1] - anchor_cell[1])
+                    if anchor_cell is not None
+                    else distance_to_region(cell)
+                ),
+                distance_to_region(cell),
+            )
+
+        start_distance = spatial_distance(start)
         queue = deque([(start, None, 0)])
         visited = {start}
-        routes: list[tuple[tuple[int, int, int], str]] = []
+        routes: list[tuple[tuple[int, int, int, int], str]] = []
         while queue:
             current, first_direction, route_distance = queue.popleft()
             if first_direction is not None:
                 routes.append(
                     (
                         (
-                            distance_to_region(current),
+                            *spatial_distance(current),
                             route_distance,
                             self._recent_cell_cost(room, current),
                         ),
@@ -2149,7 +2884,7 @@ class StarterPolicy:
         if not routes:
             return None
         score, direction = min(routes, key=lambda item: item[0])
-        return direction if score[0] < start_distance else None
+        return direction if score[:2] < start_distance else None
 
     def _visual_hypothesis_is_confirmed(
         self,
@@ -2187,28 +2922,68 @@ class StarterPolicy:
             ) in self.warps
         )
 
-    def _finish_visual_goal(self) -> None:
-        if self.visual_goal is not None and self.visual_goal in self.screen_regions:
-            record = self.screen_regions[self.visual_goal]
-            record["inspections"] = int(record.get("inspections", 0)) + 1
+    def _finish_visual_goal(
+        self,
+        outcome: str = "tested",
+        reason: str | None = None,
+    ) -> None:
+        """Close one guess attempt without confusing travel with a real test.
+
+        Route failures reduce route confidence; only an interaction/exit test
+        increments completed_tests. This distinction prevents an unreachable
+        guess from being repeatedly selected and reported as evidence.
+        """
+        goal = self.visual_goal
+        if goal is not None and goal in self.screen_regions:
+            record = self.screen_regions[goal]
+            if outcome in {"tested", "no_response", "confirmed"}:
+                record["completed_tests"] = int(
+                    record.get("completed_tests", record.get("inspections", 0))
+                ) + 1
+                record["inspections"] = int(record["completed_tests"])
+            elif outcome in {"route_failed", "abandoned_loop"}:
+                record["failed_approaches"] = int(
+                    record.get("failed_approaches", 0)
+                ) + 1
+            if reason:
+                record["last_failure_reason"] = reason
+            failures = int(record.get("failed_approaches", 0))
+            tests = int(
+                record.get("completed_tests", record.get("inspections", 0))
+            )
+            if outcome == "confirmed":
+                record["guess_state"] = "confirmed"
+            elif (
+                failures >= VISUAL_FAILURE_LIMIT
+                or tests >= VISUAL_FAILURE_LIMIT
+            ) and not record.get("choice_retry"):
+                record["guess_state"] = "rejected"
+            else:
+                record["guess_state"] = "cooldown"
+                self.visual_goal_cooldowns[goal] = (
+                    self.navigation_tick + VISUAL_GOAL_COOLDOWN_STEPS
+                )
+            self._refresh_visual_guess_metadata(
+                (goal[1], goal[2]),
+                record,
+            )
             self.map_updates.append(
-                {
-                    "type": "screen_region",
-                    "room": self.visual_goal[0],
-                    "region": [self.visual_goal[1], self.visual_goal[2]],
-                    "views": int(record.get("views", 1)),
-                    "interest": round(float(record.get("interest", 0.0)), 3),
-                    "hypothesis": record.get("hypothesis"),
-                    "inspections": int(record["inspections"]),
-                }
+                self._screen_region_map_update(goal, record)
             )
         self.visual_goal = None
+        self.decision_visual_goal = None
         self.visual_goal_age = 0
         self.visual_goal_stalls = 0
         self.visual_goal_best_distance = None
 
     def _possible_exit_probes(self, room: str) -> list[Edge]:
-        """Return plausible exits inferred only from the learned floor outline."""
+        """Return one plausible probe per contiguous learned boundary segment.
+
+        Every cell on a rectangular room outline is technically an unknown
+        outward edge. Treating all of them as doors caused hundreds of probes
+        along beds, walls, and the black border. A player instead reasons about
+        each continuous boundary as one lead and tests its best-supported spot.
+        """
         cells = {
             (seen_x, seen_y)
             for seen_room, seen_x, seen_y in self.seen_cells
@@ -2250,8 +3025,63 @@ class StarterPolicy:
                     or self._is_entry_warp_direction(room, (x, y), direction)
                 ):
                     continue
+                region_attempts = sum(
+                    attempts
+                    for (
+                        attempt_room,
+                        attempt_x,
+                        attempt_y,
+                        attempt_direction,
+                    ), attempts in self.exit_probes.items()
+                    if attempt_room == room
+                    and attempt_direction == direction
+                    and self._region((attempt_x, attempt_y))
+                    == self._region((x, y))
+                )
+                if region_attempts >= MAX_EXIT_PROBES:
+                    continue
                 candidates.append(probe)
-        return candidates
+
+        remaining = set(candidates)
+        representatives: list[Edge] = []
+        adjacency = self._adjacency(room)
+        while remaining:
+            seed = min(remaining)
+            remaining.remove(seed)
+            component = [seed]
+            queue = deque([seed])
+            while queue:
+                current = queue.popleft()
+                _current_room, current_x, current_y, current_direction = current
+                neighbors = [
+                    candidate
+                    for candidate in remaining
+                    if candidate[3] == current_direction
+                    and abs(candidate[1] - current_x)
+                    + abs(candidate[2] - current_y)
+                    == 1
+                ]
+                for neighbor in neighbors:
+                    remaining.remove(neighbor)
+                    component.append(neighbor)
+                    queue.append(neighbor)
+
+            representative = min(
+                component,
+                key=lambda probe: (
+                    -self._straight_approach_length(
+                        room,
+                        (probe[1], probe[2]),
+                        probe[3],
+                    ),
+                    len(adjacency.get((probe[1], probe[2]), [])),
+                    self.visits[(room, probe[1], probe[2])],
+                    probe[1],
+                    probe[2],
+                ),
+            )
+            representatives.append(representative)
+        return sorted(representatives)
 
     def _route_to_possible_exit(
         self,
@@ -2267,10 +3097,9 @@ class StarterPolicy:
             self.exit_search_goal = None
         if self.exit_search_goal is not None:
             goal = self.exit_search_goal
-            goal_cell = (goal[1], goal[2])
-            if start == goal_cell:
+            if self._within_exit_probe_approach(start, goal):
                 return goal[3], goal
-            route = self._route_to_target(adjacency, start, goal_cell)
+            route = self._route_to_exit_approach(adjacency, start, goal)
             if route is not None:
                 return route[0], goal
             self.exit_search_goal = None
@@ -2281,11 +3110,11 @@ class StarterPolicy:
         for probe in candidates:
             _probe_room, probe_x, probe_y, probe_direction = probe
             goal_cell = (probe_x, probe_y)
-            if start == goal_cell:
+            if self._within_exit_probe_approach(start, probe):
                 first_direction = probe_direction
                 distance = 0
             else:
-                route = self._route_to_target(adjacency, start, goal_cell)
+                route = self._route_to_exit_approach(adjacency, start, probe)
                 if route is None:
                     continue
                 first_direction, distance = route
@@ -2321,6 +3150,53 @@ class StarterPolicy:
         self._remember_path_continuation(probe)
         return direction, probe
 
+    @staticmethod
+    def _within_exit_probe_approach(
+        cell: tuple[int, int],
+        probe: Edge,
+    ) -> bool:
+        """Accept only an inward, direction-aligned approach to the exit."""
+        _room, probe_x, probe_y, direction = probe
+        dx, dy = DIRECTION_VECTORS[direction]
+        return cell in {
+            (
+                probe_x - dx * distance,
+                probe_y - dy * distance,
+            )
+            for distance in range(EXIT_PROBE_APPROACH_RADIUS + 1)
+        }
+
+    def _route_to_exit_approach(
+        self,
+        adjacency: dict[tuple[int, int], list[tuple[str, tuple[int, int]]]],
+        start: tuple[int, int],
+        probe: Edge,
+    ) -> tuple[str, int] | None:
+        """Route to the aligned inward ray that can actually cross the exit."""
+        _room, probe_x, probe_y, direction = probe
+        dx, dy = DIRECTION_VECTORS[direction]
+        valid_approaches = {
+            (probe_x - dx * distance, probe_y - dy * distance)
+            for distance in range(EXIT_PROBE_APPROACH_RADIUS + 1)
+        }
+        known_cells = set(adjacency)
+        known_cells.update(
+            target
+            for neighbors in adjacency.values()
+            for _direction, target in neighbors
+        )
+        approach_cells = {
+            cell
+            for cell in known_cells
+            if cell in valid_approaches
+        }
+        routes = [
+            route
+            for approach in sorted(approach_cells)
+            if (route := self._route_to_target(adjacency, start, approach)) is not None
+        ]
+        return min(routes, key=lambda route: (route[1], route[0])) if routes else None
+
     def _straight_approach_length(
         self,
         room: str,
@@ -2350,19 +3226,25 @@ class StarterPolicy:
             "path_continuation"
         )
         record["hypothesis"] = "possible_exit"
+        record.setdefault("guess_id", f"{room}@{key[1]},{key[2]}")
         record["path_continuation"] = True
+        record["anchor_cell"] = [cell_x, cell_y]
+        record["edge_hint"] = _direction
+        if str(record.get("guess_state") or "proposed") in {
+            "rejected",
+            "retired",
+        }:
+            # A path Kris actually walked up to this boundary is stronger new
+            # evidence than the earlier visual-only failure.
+            record["guess_state"] = "proposed"
+            record["failed_approaches"] = 0
+            record["completed_tests"] = 0
+            record["inspections"] = 0
+            record.pop("retired_reason", None)
+        self._refresh_visual_guess_metadata((key[1], key[2]), record)
         if changed:
             self.map_updates.append(
-                {
-                    "type": "screen_region",
-                    "room": room,
-                    "region": [key[1], key[2]],
-                    "views": int(record.get("views", 1)),
-                    "interest": round(float(record.get("interest", 0.0)), 3),
-                    "hypothesis": "possible_exit",
-                    "inspections": int(record.get("inspections", 0)),
-                    "path_continuation": True,
-                }
+                self._screen_region_map_update(key, record)
             )
 
     def _break_oscillation(
@@ -2405,7 +3287,11 @@ class StarterPolicy:
                             self.navigation_tick + LOOP_DIRECTION_COOLDOWN,
                         )
                         self.exit_search_goal = None
-                        self.visual_goal = None
+                        if self.visual_goal is not None:
+                            self._finish_visual_goal(
+                                "abandoned_loop",
+                                "visual route entered a repeated one-axis loop",
+                            )
                         self.loop_reason = loop_name
                         self.oscillation_breaks += 1
                         return escape, True
@@ -2433,6 +3319,12 @@ class StarterPolicy:
             frozenset(avoided),
             self.navigation_tick + LOOP_DIRECTION_COOLDOWN,
         )
+        self.exit_search_goal = None
+        if self.visual_goal is not None:
+            self._finish_visual_goal(
+                "abandoned_loop",
+                "visual route entered a repeated corridor loop",
+            )
         self.loop_reason = "detected repeated corridor loop"
         self.oscillation_breaks += 1
         return escape, True
@@ -3013,7 +3905,7 @@ class StarterPolicy:
         if name in DIRECTION_VECTORS and telemetry and telemetry.mode == "overworld":
             self.last_movement = name
             self.last_overworld_movement = name
-            self.last_position = (telemetry.x, telemetry.y)
+            self.last_position = self._position(telemetry)
             self.last_room = self._room_key(telemetry)
             self.last_cell = self._cell(telemetry)
             self.last_movement_sample_at = telemetry.received_at
@@ -3025,16 +3917,43 @@ class StarterPolicy:
         return ACTIONS[name]
 
     def summary(self) -> dict:
+        self.world.reconcile_warp_portals()
+        portal_roles = Counter(
+            str(record.get("role") or "unknown")
+            for record in self.world.warp_portals.values()
+        )
+        guess_states = Counter(
+            str(record.get("guess_state") or "proposed")
+            for record in self.screen_regions.values()
+            if record.get("hypothesis")
+        )
         return {
             "rooms_seen": sorted({room for room, _x, _y in self.seen_cells}),
             "mapped_cells": len(self.seen_cells),
+            "new_mapped_cells_this_run": max(
+                0,
+                len(self.seen_cells) - int(self._run_baseline["mapped_cells"]),
+            ),
             "explored_regions": len(self.seen_regions),
             "blocked_edges": sum(self.blocked.values()),
+            "blocked_failures_this_run": max(
+                0,
+                sum(self.blocked.values())
+                - int(self._run_baseline["blocked_failures"]),
+            ),
             "blocked_zones": len(self.blocked_zones),
             "learned_open_edges": len(self.open_edges),
+            "new_open_edges_this_run": max(
+                0,
+                len(self.open_edges) - int(self._run_baseline["open_edges"]),
+            ),
             "completed_interactions": len(self.interacted_zones),
             "remembered_interaction_targets": len(self.interacted_targets),
             "identified_interactables": len(self.interactables),
+            "new_interactables_this_run": max(
+                0,
+                len(self.interactables) - int(self._run_baseline["interactables"]),
+            ),
             "story_progress_events": self.story_progress_events,
             "story_epoch": self.story_epoch,
             "story_stall_steps": self.story_stall_steps,
@@ -3060,6 +3979,11 @@ class StarterPolicy:
             ),
             "choice_menus_learned": len(self.choice_trials),
             "failed_character_directions": sum(self.character_probes.values()),
+            "failed_character_directions_this_run": max(
+                0,
+                sum(self.character_probes.values())
+                - int(self._run_baseline["character_probe_attempts"]),
+            ),
             "successful_choice_patterns": sum(
                 record.get("successful_pattern") is not None
                 for record in self.choice_trials
@@ -3069,11 +3993,25 @@ class StarterPolicy:
                 bool(record.get("hypothesis"))
                 for record in self.screen_regions.values()
             ),
+            "visual_guess_states": dict(sorted(guess_states.items())),
+            "visual_route_failures": sum(
+                int(record.get("failed_approaches", 0))
+                for record in self.screen_regions.values()
+            ),
+            "visual_completed_tests": sum(
+                int(record.get("completed_tests", record.get("inspections", 0)))
+                for record in self.screen_regions.values()
+            ),
             "visual_hypotheses_inspected": sum(
                 int(record.get("inspections", 0))
                 for record in self.screen_regions.values()
             ),
             "exit_probe_attempts": sum(self.exit_probes.values()),
+            "exit_probe_attempts_this_run": max(
+                0,
+                sum(self.exit_probes.values())
+                - int(self._run_baseline["exit_probe_attempts"]),
+            ),
             "oscillation_breaks": self.oscillation_breaks,
             "suppressed_room_links": [
                 sorted(link) for link in sorted(
@@ -3100,6 +4038,28 @@ class StarterPolicy:
                     target_y,
                 ), count in sorted(self.warps.items())
             ],
+            "portal_role_counts": dict(sorted(portal_roles.items())),
+            "warp_crossings_this_run": max(
+                0,
+                sum(self.warps.values())
+                - int(self._run_baseline["warp_crossings"]),
+            ),
+            "observed_portals": [
+                {
+                    "id": portal_id,
+                    "from": record.get("from_room"),
+                    "to": record.get("to_room"),
+                    "action": record.get("action"),
+                    "role": record.get("role", "unknown"),
+                    "confidence": record.get("confidence", 0.25),
+                    "basis": list(record.get("basis", [])),
+                    "crossings": int(record.get("crossings", 0)),
+                    "source_footprint": record.get("source_footprint"),
+                    "arrival_footprint": record.get("arrival_footprint"),
+                    "aperture": record.get("aperture"),
+                }
+                for portal_id, record in sorted(self.world.warp_portals.items())
+            ],
             "transitions": [
                 {"from": source, "to": target, "count": count}
                 for (source, target), count in sorted(self.transitions.items())
@@ -3113,3 +4073,163 @@ class StarterPolicy:
         updates = self.map_updates
         self.map_updates = []
         return updates
+
+    def decision_context(self) -> dict[str, object] | None:
+        """Return structured evidence for the lead behind the current action."""
+        if self.decision_visual_goal is None:
+            return None
+        if any(
+            phrase in self.reason.lower()
+            for phrase in (
+                "loop",
+                "escape",
+                "stalled recovery",
+                "known blocked",
+                "unidentified obstacle",
+            )
+        ):
+            # The planner may have selected a visual lead before a safety or
+            # loop override replaced its action. Never attach stale evidence to
+            # the replacement move.
+            return None
+        room, region_x, region_y = self.decision_visual_goal
+        record = self.screen_regions.get(self.decision_visual_goal)
+        if not record or not record.get("hypothesis"):
+            return None
+        return {
+            "kind": "visual_guess",
+            "id": record.get("guess_id", f"{room}@{region_x},{region_y}"),
+            "room": room,
+            "region": [region_x, region_y],
+            "hypothesis": record.get("hypothesis"),
+            "label": record.get("guess_label"),
+            "confidence": float(record.get("guess_confidence", 0.0)),
+            "evidence": record.get("evidence_summary"),
+            "evidence_kind": record.get("evidence_kind"),
+            "anchor_cell": record.get("anchor_cell"),
+            "anchor_world": record.get("anchor_world"),
+            "feature_box_world": (
+                record.get("obstruction_box_world")
+                or record.get("passage_box_world")
+                or record.get("visual_box_world")
+                or record.get("feature_box_world")
+            ),
+            "status": record.get("guess_state", "proposed"),
+            "approach_attempts": int(record.get("approach_attempts", 0)),
+            "completed_tests": int(
+                record.get("completed_tests", record.get("inspections", 0))
+            ),
+            "failed_approaches": int(record.get("failed_approaches", 0)),
+            "inspections": int(record.get("inspections", 0)),
+        }
+
+    def prediction_snapshot(self) -> dict[str, object]:
+        """Describe the visible-evidence candidates considered this step.
+
+        This is audit data, not extra game knowledge. It contains only guesses
+        derived from already observed pixels and learned movement outcomes.
+        """
+        room = self.observed_room or self.last_room
+        current_region = (
+            self._region(self.observed_cell)
+            if self.observed_cell is not None
+            else (0, 0)
+        )
+        candidates: list[dict[str, object]] = []
+        if room is not None:
+            for key, record in self.screen_regions.items():
+                if key[0] != room or not record.get("hypothesis"):
+                    continue
+                state = str(record.get("guess_state") or "proposed")
+                confidence = float(record.get("guess_confidence", 0.0))
+                actionable = (
+                    state not in {"confirmed", "rejected", "retired", "cooldown"}
+                    and (
+                        confidence >= MIN_VISUAL_GUESS_CONFIDENCE
+                        or bool(record.get("path_continuation"))
+                        or bool(record.get("choice_retry"))
+                    )
+                )
+                anchor = record.get("anchor_cell")
+                distance = None
+                if isinstance(anchor, (list, tuple)) and len(anchor) == 2:
+                    try:
+                        distance = abs(int(anchor[0]) - (self.observed_cell or (0, 0))[0]) + abs(
+                            int(anchor[1]) - (self.observed_cell or (0, 0))[1]
+                        )
+                    except (TypeError, ValueError):
+                        pass
+                candidates.append(
+                    {
+                        "id": record.get("guess_id", f"{room}@{key[1]},{key[2]}"),
+                        "hypothesis": record.get("hypothesis"),
+                        "label": record.get("guess_label"),
+                        "region": [key[1], key[2]],
+                        "route_anchor_cell": anchor,
+                        "visual_anchor_world": record.get("anchor_world"),
+                        "feature_box_world": (
+                            record.get("obstruction_box_world")
+                            or record.get("passage_box_world")
+                            or record.get("visual_box_world")
+                            or record.get("feature_box_world")
+                        ),
+                        "confidence": confidence,
+                        "evidence": record.get("evidence_summary"),
+                        "evidence_kind": record.get("evidence_kind"),
+                        "state": state,
+                        "visible_now": key in self.current_visible_regions,
+                        "actionable": actionable,
+                        "selected": key == self.decision_visual_goal,
+                        "distance_cells": distance,
+                        "approach_attempts": int(record.get("approach_attempts", 0)),
+                        "completed_tests": int(
+                            record.get(
+                                "completed_tests",
+                                record.get("inspections", 0),
+                            )
+                        ),
+                        "failed_approaches": int(record.get("failed_approaches", 0)),
+                        "last_failure_reason": record.get("last_failure_reason"),
+                    }
+                )
+        candidates.sort(
+            key=lambda item: (
+                not bool(item["selected"]),
+                not bool(item["actionable"]),
+                -float(item["confidence"]),
+                int(item["distance_cells"] or 0),
+                str(item["id"]),
+            )
+        )
+        return {
+            "model_version": VISUAL_GUESS_MODEL_VERSION,
+            "room": room,
+            "player_cell": list(self.observed_cell) if self.observed_cell else None,
+            "player_region": list(current_region),
+            "selected_guess_id": (
+                self.screen_regions.get(self.decision_visual_goal, {}).get("guess_id")
+                if self.decision_visual_goal is not None
+                else None
+            ),
+            "active_visual_goal_id": (
+                self.screen_regions.get(self.visual_goal, {}).get("guess_id")
+                if self.visual_goal is not None
+                else None
+            ),
+            "exit_search_goal": list(self.exit_search_goal[1:])
+            if self.exit_search_goal is not None
+            else None,
+            "loop_avoid_directions": sorted(
+                self._loop_avoid_directions(
+                    room,
+                    self.observed_cell,
+                )
+            )
+            if room is not None and self.observed_cell is not None
+            else [],
+            "candidates": candidates[:16],
+            "candidate_count": len(candidates),
+            "actionable_count": sum(
+                bool(candidate["actionable"]) for candidate in candidates
+            ),
+        }

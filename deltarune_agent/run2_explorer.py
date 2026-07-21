@@ -16,6 +16,8 @@ from .world_model import Warp
 ROOM_LINK_COOLDOWN_STEPS = 600
 RAPID_RETURN_WINDOW_STEPS = 240
 MIN_WRITER_CHOICE_ROWS = 2
+ROOM_ENTRY_DIRECTION_GUARD_STEPS = 24
+ROOM_ENTRY_DIRECTION_GUARD_RADIUS = 2
 
 
 class Run2Explorer(ImprovedExplorer):
@@ -36,6 +38,12 @@ class Run2Explorer(ImprovedExplorer):
         self.control_lock_waits = 0
         self.rejected_writer_choices = 0
         self.rapid_room_returns = 0
+        self.entry_direction_guards: dict[
+            str,
+            tuple[str, tuple[int, int], int],
+        ] = {}
+        self.entry_direction_guard_avoids = 0
+        self._last_entry_direction_guard_avoid_at = -1
 
     def choose(
         self,
@@ -94,9 +102,20 @@ class Run2Explorer(ImprovedExplorer):
     def _observe_room(self, telemetry: TelemetrySample) -> None:
         previous_room = self.observed_room
         room = self._room_key(telemetry)
+        transition_direction = self.last_movement or self.last_overworld_movement
         super()._observe_room(telemetry)
         if previous_room is None or room == previous_room:
             return
+
+        if transition_direction in DIRECTION_VECTORS:
+            # A few room boundaries use the same direction to enter and leave.
+            # Until the destination has been sampled, continuing the held input
+            # can return immediately before a reverse warp has been learned.
+            self.entry_direction_guards[room] = (
+                transition_direction,
+                self._cell(telemetry),
+                self.navigation_tick + ROOM_ENTRY_DIRECTION_GUARD_STEPS,
+            )
 
         link = frozenset((previous_room, room))
         self.room_link_cooldowns[link] = (
@@ -151,6 +170,20 @@ class Run2Explorer(ImprovedExplorer):
     ) -> bool:
         if super()._is_entry_warp_direction(room, cell, direction):
             return True
+        guard = self.entry_direction_guards.get(room)
+        if guard is not None:
+            guarded_direction, arrival, expires_at = guard
+            if self.navigation_tick >= expires_at:
+                self.entry_direction_guards.pop(room, None)
+            elif (
+                direction == guarded_direction
+                and max(abs(cell[0] - arrival[0]), abs(cell[1] - arrival[1]))
+                <= ROOM_ENTRY_DIRECTION_GUARD_RADIUS
+            ):
+                if self._last_entry_direction_guard_avoid_at != self.navigation_tick:
+                    self.entry_direction_guard_avoids += 1
+                    self._last_entry_direction_guard_avoid_at = self.navigation_tick
+                return True
         dx, dy = DIRECTION_VECTORS[direction]
         next_cell = (cell[0] + dx, cell[1] + dy)
         for warp, _crossings in self._reliable_warps():
@@ -175,4 +208,5 @@ class Run2Explorer(ImprovedExplorer):
         summary["rejected_writer_choices"] = self.rejected_writer_choices
         summary["rapid_room_returns"] = self.rapid_room_returns
         summary["active_room_link_cooldowns"] = len(self.room_link_cooldowns)
+        summary["entry_direction_guard_avoids"] = self.entry_direction_guard_avoids
         return summary

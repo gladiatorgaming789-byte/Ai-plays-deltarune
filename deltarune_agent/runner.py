@@ -16,6 +16,7 @@ from .perception import (
 )
 from .progress import EpisodeTracker
 from .replay import print_replay, replay_run
+from .run_artifacts import write_json
 from .telemetry import TelemetryReceiver, fuse_perception
 from .window import (
     client_region,
@@ -206,7 +207,7 @@ def run(args: argparse.Namespace) -> Path:
         print(f"Visual memory warning: {detector.memory_warning}")
 
     controller = KeyboardController(args.live)
-    tracker = EpisodeTracker()
+    tracker = EpisodeTracker(config=vars(args))
     print(
         f"Mode: {'LIVE' if args.live else 'DRY RUN'} | "
         f"output: {tracker.directory}"
@@ -236,9 +237,12 @@ def run(args: argparse.Namespace) -> Path:
 
     telemetry_seen = False
     background_input = False
+    stop_reason = "step_limit"
+    stop_detail: str | None = None
     try:
         for step in range(args.steps):
             if args.stop_file is not None and args.stop_file.exists():
+                stop_reason = "gui_stop"
                 print(
                     "Stop requested by GUI; ending the run safely.",
                     flush=True,
@@ -330,6 +334,8 @@ def run(args: argparse.Namespace) -> Path:
                 policy.reason,
             )
             map_updates = policy.drain_map_updates()
+            decision_context = policy.decision_context()
+            prediction_snapshot = policy.prediction_snapshot()
             location = (
                 f" room={telemetry.room_name or telemetry.room_id} "
                 f"pos=({telemetry.x:.0f},{telemetry.y:.0f})"
@@ -352,6 +358,9 @@ def run(args: argparse.Namespace) -> Path:
                 action,
                 policy.reason,
                 args.live,
+                decision_context=decision_context,
+                map_updates=map_updates,
+                prediction_snapshot=prediction_snapshot,
             )
             if args.event_stream:
                 print(
@@ -371,6 +380,7 @@ def run(args: argparse.Namespace) -> Path:
                                 else None
                             ),
                             "map_updates": map_updates,
+                            "decision_context": decision_context,
                         },
                         separators=(",", ":"),
                     ),
@@ -383,13 +393,51 @@ def run(args: argparse.Namespace) -> Path:
                 if args.interval is None
                 else args.interval
             )
+    except KeyboardInterrupt:
+        stop_reason = "keyboard_interrupt"
+        stop_detail = "Run stopped by Ctrl+C."
+        raise
+    except BaseException as exc:
+        stop_reason = "error"
+        stop_detail = f"{type(exc).__name__}: {exc}"
+        raise
     finally:
         controller.release_all()
+        telemetry_diagnostics = (
+            telemetry_receiver.diagnostics()
+            if telemetry_receiver is not None
+            else {"disabled": True}
+        )
         if telemetry_receiver:
             telemetry_receiver.close()
         policy.save_memory()
         detector.save_memory()
-        tracker.finish(policy.summary())
+        write_json(
+            tracker.directory / "telemetry_diagnostics.json",
+            telemetry_diagnostics,
+        )
+        policy_summary = policy.summary()
+        policy_summary["telemetry_diagnostics"] = telemetry_diagnostics
+        extra_files = {
+            name: path
+            for name, path in {
+                "visual_states.json": args.visual_memory,
+                "window_titles.json": args.window_memory,
+            }.items()
+            if Path(path).is_file()
+        }
+        extra_files["telemetry_diagnostics.json"] = (
+            tracker.directory / "telemetry_diagnostics.json"
+        )
+        tracker.finish(
+            policy_summary,
+            stop_reason=stop_reason,
+            stop_detail=stop_detail,
+            config=vars(args),
+            navigation_path=args.memory,
+            room_views_path=args.memory.parent / "room_views",
+            extra_files=extra_files,
+        )
         if args.stop_file is not None:
             args.stop_file.unlink(missing_ok=True)
     return tracker.directory

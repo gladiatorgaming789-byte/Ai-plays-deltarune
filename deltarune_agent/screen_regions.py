@@ -6,6 +6,7 @@ from math import floor, sqrt
 from PIL import Image
 
 from .telemetry import TelemetrySample
+from .viewport import camera_viewport_box
 from .world_model import CELL_SIZE, EXPLORATION_REGION_CELLS
 
 
@@ -24,6 +25,155 @@ class ScreenRegionObservation:
     dark_ratio: float
     hypothesis: str | None = None
     appearance_signature: str = ""
+    focus_world_x: float | None = None
+    focus_world_y: float | None = None
+    feature_box_world: tuple[float, float, float, float] | None = None
+    edge_hint: str | None = None
+    feature_summary: str = ""
+    edge_opening_score: float = 0.0
+    edge_width_ratio: float = 0.0
+    passage_box_world: tuple[float, float, float, float] | None = None
+
+
+def edge_opening_profile(
+    gray: list[float],
+    width: int,
+    height: int,
+    edge: str,
+) -> tuple[float, float, tuple[int, int, int, int] | None]:
+    """Score a localized dark channel connected to one side of a view crop.
+
+    A broad room-art-to-black seam touches almost every lane and is deliberately
+    weak. A plausible opening occupies a bounded span, has scenery on at least
+    one flank, and continues inward for multiple samples.
+    """
+    if width < 3 or height < 3 or edge not in {"top", "right", "bottom", "left"}:
+        return 0.0, 0.0, None
+    mean = sum(gray) / max(1, len(gray))
+    threshold = min(82.0, max(24.0, mean * 0.58))
+    dark = [value <= threshold for value in gray]
+    lanes = width if edge in {"top", "bottom"} else height
+    depth = height if edge in {"top", "bottom"} else width
+
+    def at(lane: int, level: int) -> bool:
+        if edge == "top":
+            x, y = lane, level
+        elif edge == "bottom":
+            x, y = lane, height - 1 - level
+        elif edge == "left":
+            x, y = level, lane
+        else:
+            x, y = width - 1 - level, lane
+        return dark[y * width + x]
+
+    probe_depth = max(3, min(depth, round(depth * 0.55)))
+    channel_depths: list[int] = []
+    for lane in range(lanes):
+        continuous = 0
+        for level in range(probe_depth):
+            if not at(lane, level):
+                break
+            continuous += 1
+        channel_depths.append(continuous)
+    minimum_depth = max(2, round(probe_depth * 0.55))
+    channel_lanes = {
+        lane for lane, continuous in enumerate(channel_depths) if continuous >= minimum_depth
+    }
+    if not channel_lanes:
+        return 0.0, 0.0, None
+
+    runs: list[tuple[int, int]] = []
+    start = previous = min(channel_lanes)
+    for lane in sorted(channel_lanes)[1:]:
+        if lane != previous + 1:
+            runs.append((start, previous + 1))
+            start = lane
+        previous = lane
+    runs.append((start, previous + 1))
+
+    scored: list[tuple[float, float, int, int, int]] = []
+    for start, end in runs:
+        span = (end - start) / lanes
+        if span < 0.08:
+            continue
+        average_depth = sum(channel_depths[start:end]) / max(1, end - start)
+        continuity = min(1.0, average_depth / probe_depth)
+        # Passage-like spans peak near one third of the edge. Full-width dark
+        # bands are letterbox/background seams, not specific openings.
+        localization = max(0.0, 1.0 - abs(span - 0.34) / 0.42)
+        left_flank = start > 0 and channel_depths[start - 1] < minimum_depth
+        right_flank = end < lanes and channel_depths[end] < minimum_depth
+        flank_score = (int(left_flank) + int(right_flank)) / 2
+        score = continuity * 0.48 + localization * 0.34 + flank_score * 0.18
+        if span >= 0.78:
+            score *= 0.18
+        elif span >= 0.66:
+            score *= 0.55
+        if not left_flank and not right_flank:
+            score *= 0.55
+        max_depth = max(channel_depths[start:end])
+        scored.append((score, span, start, end, max_depth))
+    if not scored:
+        return 0.0, 0.0, None
+    score, span, start, end, connected_depth = max(
+        scored,
+        key=lambda item: (item[0], item[4], -item[2]),
+    )
+    if edge == "top":
+        box = (start, 0, end, connected_depth)
+    elif edge == "bottom":
+        box = (start, height - connected_depth, end, height)
+    elif edge == "left":
+        box = (0, start, connected_depth, end)
+    else:
+        box = (width - connected_depth, start, width, end)
+    return min(1.0, score), span, box
+
+
+def _strongest_salient_component(
+    salience: list[tuple[float, int, int]],
+    width: int,
+    height: int,
+) -> list[tuple[float, int, int]]:
+    """Keep one coherent visible feature instead of boxing unrelated pixels."""
+    if not salience:
+        return []
+    ranked_scores = sorted((score for score, _x, _y in salience), reverse=True)
+    threshold_index = min(len(ranked_scores) - 1, max(3, len(salience) // 8) - 1)
+    threshold = ranked_scores[threshold_index]
+    scores = {
+        (x, y): score
+        for score, x, y in salience
+        if score >= threshold and score > 1e-6
+    }
+    if not scores:
+        return []
+    remaining = set(scores)
+    components: list[list[tuple[float, int, int]]] = []
+    while remaining:
+        seed = min(remaining)
+        remaining.remove(seed)
+        pending = [seed]
+        component = []
+        while pending:
+            x, y = pending.pop()
+            component.append((scores[(x, y)], x, y))
+            for neighbor_y in range(max(0, y - 1), min(height, y + 2)):
+                for neighbor_x in range(max(0, x - 1), min(width, x + 2)):
+                    neighbor = (neighbor_x, neighbor_y)
+                    if neighbor in remaining:
+                        remaining.remove(neighbor)
+                        pending.append(neighbor)
+        components.append(component)
+    return max(
+        components,
+        key=lambda component: (
+            sum(score for score, _x, _y in component),
+            len(component),
+            -min(y for _score, _x, y in component),
+            -min(x for _score, x, _y in component),
+        ),
+    )
 
 
 def visible_region_coordinates(
@@ -83,8 +233,19 @@ def analyze_screen_regions(
     camera_width = float(telemetry.camera_width)
     camera_height = float(telemetry.camera_height)
     image = frame.convert("RGB")
+    viewport_box = camera_viewport_box(
+        image.size,
+        (camera_width, camera_height),
+    )
+    if viewport_box is None:
+        return []
+    image = image.crop(viewport_box)
     width, height = image.size
     observations: list[ScreenRegionObservation] = []
+    opening_profiles: dict[
+        tuple[int, int],
+        dict[str, tuple[float, float, tuple[float, float, float, float] | None]],
+    ] = {}
     for region_x, region_y in sorted(coordinates):
         world_left = max(region_x * REGION_PIXELS, camera_x, 0.0)
         world_top = max(region_y * REGION_PIXELS, camera_y, 0.0)
@@ -137,6 +298,141 @@ def analyze_screen_regions(
         # so a crop wholly inside that narrow band cannot become a landmark.
         if bottom <= height * 0.10:
             interest = 0.0
+        salience: list[tuple[float, int, int]] = []
+        for sample_y in range(sample_height):
+            for sample_x in range(sample_width):
+                index = sample_y * sample_width + sample_x
+                local_edges = []
+                if sample_x:
+                    local_edges.append(abs(gray[index] - gray[index - 1]) / 255)
+                if sample_x + 1 < sample_width:
+                    local_edges.append(abs(gray[index] - gray[index + 1]) / 255)
+                if sample_y:
+                    local_edges.append(
+                        abs(gray[index] - gray[index - sample_width]) / 255
+                    )
+                if sample_y + 1 < sample_height:
+                    local_edges.append(
+                        abs(gray[index] - gray[index + sample_width]) / 255
+                    )
+                pixel_color = (max(pixels[index]) - min(pixels[index])) / 255
+                score = (
+                    abs(gray[index] - mean) / 255 * 0.55
+                    + (sum(local_edges) / max(1, len(local_edges))) * 0.30
+                    + pixel_color * 0.15
+                )
+                salience.append((score, sample_x, sample_y))
+        strongest = _strongest_salient_component(
+            salience,
+            sample_width,
+            sample_height,
+        )
+        if not strongest:
+            strongest = [
+                (
+                    1.0,
+                    max(0, (sample_width - 1) // 2),
+                    max(0, (sample_height - 1) // 2),
+                )
+            ]
+        focus_weight = sum(score for score, _x, _y in strongest)
+        if focus_weight <= 1e-9:
+            focus_sample_x = (sample_width - 1) / 2
+            focus_sample_y = (sample_height - 1) / 2
+        else:
+            focus_sample_x = sum(score * x for score, x, _y in strongest) / focus_weight
+            focus_sample_y = sum(score * y for score, _x, y in strongest) / focus_weight
+        focus_world_x = world_left + (focus_sample_x + 0.5) / sample_width * (
+            world_right - world_left
+        )
+        focus_world_y = world_top + (focus_sample_y + 0.5) / sample_height * (
+            world_bottom - world_top
+        )
+        feature_left = world_left + min(x for _score, x, _y in strongest) / sample_width * (
+            world_right - world_left
+        )
+        feature_top = world_top + min(y for _score, _x, y in strongest) / sample_height * (
+            world_bottom - world_top
+        )
+        feature_right = world_left + (
+            max(x for _score, x, _y in strongest) + 1
+        ) / sample_width * (world_right - world_left)
+        feature_bottom = world_top + (
+            max(y for _score, _x, y in strongest) + 1
+        ) / sample_height * (world_bottom - world_top)
+        feature_width = (
+            max(x for _score, x, _y in strongest)
+            - min(x for _score, x, _y in strongest)
+            + 1
+        ) / sample_width
+        feature_height = (
+            max(y for _score, _x, y in strongest)
+            - min(y for _score, _x, y in strongest)
+            + 1
+        ) / sample_height
+        if feature_width >= feature_height * 1.7 and feature_width >= 0.25:
+            shape = "wide"
+        elif feature_height >= feature_width * 1.7 and feature_height >= 0.25:
+            shape = "tall"
+        elif max(feature_width, feature_height) <= 0.45:
+            shape = "compact"
+        else:
+            shape = "broad"
+        qualities = [shape]
+        if contrast >= 0.28:
+            qualities.append("high-contrast")
+        if edge_density >= 0.28:
+            qualities.append("detailed")
+        if colorfulness >= 0.18:
+            qualities.append("colorful")
+        if mean >= 180:
+            qualities.append("bright")
+        elif mean <= 55:
+            qualities.append("dark")
+        relative_x = (focus_world_x - world_left) / max(1e-6, world_right - world_left)
+        relative_y = (focus_world_y - world_top) / max(1e-6, world_bottom - world_top)
+        horizontal_position = (
+            "left" if relative_x < 0.34 else "right" if relative_x > 0.66 else "center"
+        )
+        vertical_position = (
+            "upper" if relative_y < 0.34 else "lower" if relative_y > 0.66 else "middle"
+        )
+        position = (
+            f"{vertical_position}-{horizontal_position}"
+            if horizontal_position != "center" and vertical_position != "middle"
+            else horizontal_position
+            if vertical_position == "middle"
+            else vertical_position
+        )
+        feature_summary = (
+            f"{' '.join(qualities[:4])} feature toward the {position} of its view region"
+        )
+        profiles: dict[
+            str,
+            tuple[float, float, tuple[float, float, float, float] | None],
+        ] = {}
+        for edge_name in ("top", "right", "bottom", "left"):
+            opening_score, opening_width, sample_box = edge_opening_profile(
+                gray,
+                sample_width,
+                sample_height,
+                edge_name,
+            )
+            world_box = None
+            if sample_box is not None:
+                sample_left, sample_top, sample_right, sample_bottom = sample_box
+                world_box = (
+                    world_left
+                    + sample_left / sample_width * (world_right - world_left),
+                    world_top
+                    + sample_top / sample_height * (world_bottom - world_top),
+                    world_left
+                    + sample_right / sample_width * (world_right - world_left),
+                    world_top
+                    + sample_bottom / sample_height * (world_bottom - world_top),
+                )
+            profiles[edge_name] = (opening_score, opening_width, world_box)
+        opening_profiles[(region_x, region_y)] = profiles
         observations.append(
             ScreenRegionObservation(
                 region_x,
@@ -149,12 +445,31 @@ def analyze_screen_regions(
                 appearance_signature="".join(
                     format(min(3, int(value) // 64), "x") for value in gray
                 ),
+                focus_world_x=focus_world_x,
+                focus_world_y=focus_world_y,
+                feature_box_world=(
+                    feature_left,
+                    feature_top,
+                    feature_right,
+                    feature_bottom,
+                ),
+                feature_summary=feature_summary,
             )
         )
 
+    player_x = (
+        telemetry.player_foot_x
+        if telemetry.player_foot_x is not None
+        else telemetry.x
+    )
+    player_y = (
+        telemetry.player_foot_y
+        if telemetry.player_foot_y is not None
+        else telemetry.y
+    )
     player_region = (
-        floor(telemetry.x / REGION_PIXELS),
-        floor(telemetry.y / REGION_PIXELS),
+        floor(player_x / REGION_PIXELS),
+        floor(player_y / REGION_PIXELS),
     )
     eligible = [
         observation
@@ -167,10 +482,7 @@ def analyze_screen_regions(
         and observation.interest >= 0.12
         and observation.dark_ratio < 0.96
     ]
-    ranked = sorted(
-        eligible,
-        key=lambda item: (-item.interest, item.region_y, item.region_x),
-    )
+    ranked = sorted(eligible, key=lambda item: (item.region_y, item.region_x))
 
     def edge_names(observation: ScreenRegionObservation) -> set[str]:
         left = observation.region_x * REGION_PIXELS
@@ -207,13 +519,29 @@ def analyze_screen_regions(
     # separately form a static character candidate after Kris has mapped a
     # compact obstruction from more than one approach direction.
     candidates: set[tuple[int, int]] = set()
+    candidate_edges: dict[tuple[int, int], str] = {}
     for edge_name in ("top", "right", "bottom", "left"):
-        for observation in [
-            item for item in ranked if edge_name in edge_names(item)
-        ][:2]:
+        edge_ranked = sorted(
+            (
+                item
+                for item in ranked
+                if edge_name in edge_names(item)
+                and opening_profiles[(item.region_x, item.region_y)][edge_name][0]
+                >= 0.44
+            ),
+            key=lambda item: (
+                -opening_profiles[(item.region_x, item.region_y)][edge_name][0],
+                -item.interest,
+                item.region_y,
+                item.region_x,
+            ),
+        )
+        for observation in edge_ranked[:1]:
             if len(candidates) >= MAX_VISUAL_HYPOTHESES:
                 break
-            candidates.add((observation.region_x, observation.region_y))
+            key = (observation.region_x, observation.region_y)
+            candidates.add(key)
+            candidate_edges.setdefault(key, edge_name)
     result: list[ScreenRegionObservation] = []
     for observation in observations:
         key = (observation.region_x, observation.region_y)
@@ -225,6 +553,17 @@ def analyze_screen_regions(
             bottom = top + REGION_PIXELS
             near_room_edge = bool(edge_names(observation))
             hypothesis = "possible_exit" if near_room_edge else "possible_interactable"
+        edge_hint = candidate_edges.get(key)
+        feature_summary = observation.feature_summary
+        opening_score = 0.0
+        opening_width = 0.0
+        passage_box = None
+        if edge_hint:
+            opening_score, opening_width, passage_box = opening_profiles[key][edge_hint]
+            feature_summary = (
+                f"localized {opening_width:.0%}-wide dark opening connected to "
+                f"the {edge_hint} edge; {feature_summary}"
+            )
         result.append(
             ScreenRegionObservation(
                 observation.region_x,
@@ -236,6 +575,14 @@ def analyze_screen_regions(
                 observation.dark_ratio,
                 hypothesis,
                 observation.appearance_signature,
+                observation.focus_world_x,
+                observation.focus_world_y,
+                observation.feature_box_world,
+                edge_hint,
+                feature_summary,
+                opening_score,
+                opening_width,
+                passage_box,
             )
         )
     return result

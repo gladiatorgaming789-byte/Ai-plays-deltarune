@@ -65,17 +65,19 @@ def test_viewport_uses_full_matching_frame_and_centered_letterbox_crop():
     assert camera_viewport_box((1400, 960), (320, 240)) == (60, 0, 1340, 960)
 
 
-def test_capture_persists_only_seen_camera_tiles_and_skips_player_region():
+def test_capture_keeps_seen_tiles_but_masks_only_the_player_pixels():
     with TemporaryDirectory() as directory:
         memory = RoomViewMemory(Path(directory) / "room_views")
         changed = memory.capture(_colored_regions(), _telemetry(), step=10)
 
-        assert len(changed) == 6
+        assert len(changed) == 8
         assert {(tile.region_x, tile.region_y) for tile in changed} == {
             (0, 0),
             (1, 0),
             (2, 0),
             (3, 0),
+            (0, 1),
+            (1, 1),
             (2, 1),
             (3, 1),
         }
@@ -87,11 +89,11 @@ def test_capture_persists_only_seen_camera_tiles_and_skips_player_region():
         index = json.loads(memory.index_path.read_text(encoding="utf-8"))
         room_data = index["rooms"]["room_test"]
         tiles = room_data["tiles"]
-        assert not (memory.root / room_data["directory"] / "0_1.png").exists()
-        assert "0,1" not in tiles
-        assert "1,1" not in tiles
+        assert (memory.root / room_data["directory"] / "0_1.png").exists()
+        assert 0 < float(tiles["0,1"]["coverage"]) < 1
+        assert float(tiles["1,1"]["coverage"]) == 1
         assert "4,0" not in tiles
-        assert len(tiles) == 6
+        assert len(tiles) == 8
 
 
 def test_identical_camera_frame_does_not_rewrite_unchanged_tiles():
@@ -121,6 +123,27 @@ def test_complete_scene_tile_stays_stable_when_animation_changes():
         assert (3, 0) not in {(tile.region_x, tile.region_y) for tile in changed}
         with Image.open(selected.path) as tile:
             assert tile.convert("RGB").getpixel((64, 64)) == (130, 20, 30)
+
+
+def test_two_matching_clean_views_repair_a_stale_opaque_scene_pixel():
+    with TemporaryDirectory() as directory:
+        memory = RoomViewMemory(Path(directory) / "room_views")
+        original = Image.new("RGB", (32, 32), (180, 20, 20))
+        clean = Image.new("RGB", (32, 32), (20, 80, 180))
+        away = _telemetry(
+            x=999,
+            y=999,
+            camera_width=32,
+            camera_height=32,
+        )
+        first = memory.capture(original, away, step=0)[0]
+
+        assert memory.capture(clean, away, step=5) == []
+        repaired = memory.capture(clean, away, step=10)
+
+        assert len(repaired) == 1
+        with Image.open(first.path) as tile:
+            assert tile.convert("RGB").getpixel((64, 64)) == (20, 80, 180)
 
 
 def test_partial_tile_fills_only_pixels_that_were_not_seen_before():
@@ -178,8 +201,10 @@ def test_scrolling_camera_extends_memory_without_filling_gap_or_unseen_room():
         tiles = index["rooms"]["room_test"]["tiles"]
         assert "4,0" in tiles
         assert "5,0" in tiles
-        assert "4,1" not in tiles  # Kris's conservative footprint covered it.
-        assert "5,1" not in tiles
+        assert "4,1" in tiles
+        assert "5,1" in tiles
+        assert float(tiles["4,1"]["coverage"]) < 1
+        assert float(tiles["5,1"]["coverage"]) < 1
         assert "6,0" not in tiles
 
 
@@ -264,5 +289,6 @@ def test_room_view_memory_ignores_broken_tile_data_and_still_keeps_index(tmp_pat
 
     changed = memory.capture(frame, telemetry, step=1)
 
-    assert changed == []
+    assert len(changed) == 1
+    assert changed[0].coverage == 0.5
     assert memory.index_path.exists()

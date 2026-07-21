@@ -4,6 +4,7 @@ from deltarune_agent.telemetry import (
     TelemetrySample,
     facing_from_sprite,
     fuse_perception,
+    merge_samples,
     parse_packet,
 )
 
@@ -94,6 +95,27 @@ def test_v4_parses_collision_and_nearby_interaction_context():
     assert sample.nearest_interactable_name == "obj_interactablesolid"
     assert sample.nearest_interactable_distance == 20
     assert sample.player_x == 120
+
+
+def test_receiver_redacts_legacy_hidden_object_fields_before_policy_use():
+    receiver = TelemetryReceiver.__new__(TelemetryReceiver)
+    receiver.socket = _PacketSocket(
+        [
+            b"DRTEL|4|overworld|7|room_home|120|42|obj_mainchara|320|240|"
+            b"spr_kris|2|270|4|0|4|0.2|100001|116|42|112|30|128|50|"
+            b"-100|1|1|30|54321|obj_interactablesolid|100099|140|42|20|end"
+        ]
+    )
+    receiver.latest = None
+    receiver.by_mode = {}
+
+    sample = receiver.poll()
+
+    assert sample is not None
+    assert sample.bbox_right == 128
+    assert sample.nearest_interactable_name is None
+    assert sample.nearest_interactable_id is None
+    assert sample.nearest_interactable_x is None
 
 
 def test_v5_minimal_fallback_packet_is_accepted():
@@ -230,6 +252,207 @@ def test_v8_control_packet_survives_without_optional_collision_fields():
     assert sample.instance_id is None
     assert sample.interaction_state == 0
     assert sample.player_controlled is True
+
+
+def test_v9_named_motion_packet_parses_camera_control_and_player_origin():
+    packet = (
+        b"DRTEL|9|overworld|7|room_home|120|42|obj_mainchara|"
+        b"part=motion|seq=31|room_width=540|room_height=240|"
+        b"sprite=spr_krisr_dark|image_index=2|direction=0|hspeed=4|"
+        b"vspeed=0|speed=4|image_speed=0.2|camera_x=32|camera_y=16|"
+        b"camera_width=320|camera_height=240|camera_angle=0|control=0|end"
+    )
+
+    sample = parse_packet(packet, received_at=10.0)
+
+    assert sample is not None
+    assert sample.version == 9
+    assert sample.packet_sequence == 31
+    assert sample.packet_parts == ("motion",)
+    assert sample.camera_x == 32
+    assert sample.camera_width == 320
+    assert sample.player_controlled is True
+    assert sample.player_origin_x == 120
+    assert sample.player_origin_y == 42
+    assert sample.player_foot_x is None
+    assert sample.facing_direction == "right"
+
+
+def test_v9_collision_and_render_fields_are_parsed_without_hidden_objects():
+    collision = parse_packet(
+        b"DRTEL|9|overworld|7|room_home|120|42|obj_mainchara|"
+        b"part=collision|seq=31|instance_id=100001|bbox_left=112|"
+        b"bbox_top=30|bbox_right=128|bbox_bottom=50|end",
+        received_at=10.01,
+    )
+    render = parse_packet(
+        b"DRTEL|9|overworld|7|room_home|120|42|obj_mainchara|"
+        b"part=render|seq=31|depth=-100|image_xscale=1|image_yscale=1|"
+        b"image_alpha=1|visible=1|sprite_width=40|sprite_height=56|"
+        b"sprite_xoffset=20|sprite_yoffset=44|end",
+        received_at=10.02,
+    )
+
+    assert collision is not None
+    assert collision.player_instance_id == 100001
+    assert collision.player_foot_x == 120
+    assert collision.player_foot_y == 50
+    assert collision.nearest_interactable_name is None
+    assert render is not None
+    assert render.visible is True
+    assert render.sprite_width == 40
+    assert render.sprite_yoffset == 44
+
+
+def test_v9_bad_optional_values_do_not_discard_valid_core_fields():
+    sample = parse_packet(
+        b"DRTEL|9|overworld|7|room_home|120|42|obj_mainchara|"
+        b"part=motion|seq=4|camera_x=oops|camera_width=nan|"
+        b"camera_height=-1|control=not-a-number|future_field=accepted|end"
+    )
+
+    assert sample is not None
+    assert sample.room_name == "room_home"
+    assert sample.x == 120
+    assert sample.camera_x is None
+    assert sample.camera_width is None
+    assert sample.camera_height is None
+    assert sample.player_controlled is None
+
+
+def test_same_sequence_layers_merge_without_mixing_later_frames():
+    core = parse_packet(
+        b"DRTEL|9|overworld|7|room_home|120|42|obj_mainchara|"
+        b"part=core|seq=31|end",
+        received_at=10.0,
+    )
+    motion = parse_packet(
+        b"DRTEL|9|overworld|7|room_home|120|42|obj_mainchara|"
+        b"part=motion|seq=31|sprite=spr_krisd|camera_x=0|camera_y=0|"
+        b"camera_width=320|camera_height=240|control=0|end",
+        received_at=10.01,
+    )
+    collision = parse_packet(
+        b"DRTEL|9|overworld|7|room_home|120|42|obj_mainchara|"
+        b"part=collision|seq=31|bbox_left=112|bbox_top=30|"
+        b"bbox_right=128|bbox_bottom=50|end",
+        received_at=10.02,
+    )
+    next_core = parse_packet(
+        b"DRTEL|9|overworld|7|room_home|124|42|obj_mainchara|"
+        b"part=core|seq=32|end",
+        received_at=10.04,
+    )
+
+    assert core is not None
+    assert motion is not None
+    assert collision is not None
+    assert next_core is not None
+    merged = merge_samples(merge_samples(core, motion), collision)
+    assert merged.packet_parts == ("core", "motion", "collision")
+    assert merged.camera_width == 320
+    assert merged.player_foot_x == 120
+
+    next_sample = merge_samples(merged, next_core)
+    assert next_sample.packet_sequence == 32
+    assert next_sample.camera_width is None
+    assert next_sample.sample_previous_x == 120
+    assert next_sample.sample_delta_x == 4
+
+
+def test_receiver_keeps_one_ordered_trace_sample_per_v9_sequence():
+    receiver = TelemetryReceiver.__new__(TelemetryReceiver)
+    receiver.socket = _PacketSocket(
+        [
+            b"DRTEL|9|overworld|7|room_home|120|42|obj_mainchara|"
+            b"part=core|seq=31|end",
+            b"DRTEL|9|overworld|7|room_home|120|42|obj_mainchara|"
+            b"part=motion|seq=31|camera_x=0|camera_y=0|"
+            b"camera_width=320|camera_height=240|control=0|end",
+            b"DRTEL|9|overworld|7|room_home|120|42|obj_mainchara|"
+            b"part=collision|seq=31|bbox_left=112|bbox_top=30|"
+            b"bbox_right=128|bbox_bottom=50|end",
+            b"DRTEL|9|overworld|7|room_home|124|42|obj_mainchara|"
+            b"part=core|seq=32|end",
+        ]
+    )
+    receiver.latest = None
+    receiver.by_mode = {}
+
+    sample = receiver.poll()
+    trace = receiver.drain_overworld_trace()
+
+    assert sample is not None and sample.packet_sequence == 32
+    assert len(trace) == 2
+    assert trace[0].packet_parts == ("core", "motion", "collision")
+    assert trace[0].player_foot_x == 120
+    assert trace[1].sample_delta_x == 4
+    assert receiver.diagnostics() == {
+        "received_packets": 4,
+        "valid_packets": 4,
+        "invalid_packets": 0,
+        "unstable_room_packets": 0,
+        "merged_layer_packets": 2,
+        "out_of_order_packets": 0,
+        "latest_version": 9,
+        "latest_sequence": 32,
+        "latest_parts": ["core"],
+    }
+
+
+def test_room_transition_records_the_last_observed_source_position_and_foot():
+    receiver = TelemetryReceiver.__new__(TelemetryReceiver)
+    receiver.socket = _PacketSocket(
+        [
+            b"DRTEL|9|overworld|5|room_torbathroom|300|120|obj_mainchara|"
+            b"part=core|seq=80|end",
+            b"DRTEL|9|overworld|5|room_torbathroom|300|120|obj_mainchara|"
+            b"part=collision|seq=80|bbox_left=294|bbox_top=100|"
+            b"bbox_right=306|bbox_bottom=126|end",
+            b"DRTEL|9|overworld|6|room_torhouse|20|120|obj_mainchara|"
+            b"part=core|seq=81|end",
+        ]
+    )
+    receiver.latest = None
+    receiver.by_mode = {}
+
+    destination = receiver.poll()
+    trace = receiver.drain_overworld_trace()
+
+    assert destination is not None
+    assert destination.room_name == "room_torhouse"
+    assert destination.transition_from_room_name == "room_torbathroom"
+    assert destination.transition_from_x == 300
+    assert destination.transition_from_y == 120
+    assert destination.transition_from_foot_x == 300
+    assert destination.transition_from_foot_y == 126
+    assert destination.transition_sequence == 81
+    assert [item.room_name for item in trace] == [
+        "room_torbathroom",
+        "room_torhouse",
+    ]
+
+
+def test_out_of_order_v9_layers_cannot_replace_a_newer_sequence():
+    receiver = TelemetryReceiver.__new__(TelemetryReceiver)
+    receiver.socket = _PacketSocket(
+        [
+            b"DRTEL|9|overworld|7|room_home|124|42|obj_mainchara|"
+            b"part=core|seq=32|end",
+            b"DRTEL|9|overworld|7|room_home|120|42|obj_mainchara|"
+            b"part=motion|seq=31|camera_width=320|camera_height=240|end",
+        ]
+    )
+    receiver.latest = None
+    receiver.by_mode = {}
+
+    sample = receiver.poll()
+
+    assert sample is not None
+    assert sample.packet_sequence == 32
+    assert sample.x == 124
+    assert sample.camera_width is None
+    assert receiver.out_of_order_packets == 1
 
 
 def test_facing_uses_verified_kris_sprite_names_and_variants():

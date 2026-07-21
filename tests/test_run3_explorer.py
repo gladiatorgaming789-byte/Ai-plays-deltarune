@@ -23,30 +23,68 @@ def test_doorway_actions_are_canonicalized_from_room_geometry():
     assert explorer.warps[matching[0]] == 5
 
 
-def test_known_warp_is_deferred_while_local_exit_probe_exists():
-    explorer = Run3Explorer()
+def _add_reachable_warp(explorer, room="room_a"):
     explorer.seen_cells.update(
         {
-            ("room_a", 10, 10),
-            ("room_a", 10, 11),
-            ("room_a", 10, 12),
+            (room, 10, 10),
+            (room, 10, 11),
+            (room, 10, 12),
         }
     )
     explorer.open_edges.update(
         {
-            ("room_a", 10, 11, "up", 10, 10),
-            ("room_a", 10, 10, "down", 10, 11),
-            ("room_a", 10, 12, "up", 10, 11),
-            ("room_a", 10, 11, "down", 10, 12),
+            (room, 10, 11, "up", 10, 10),
+            (room, 10, 10, "down", 10, 11),
+            (room, 10, 12, "up", 10, 11),
+            (room, 10, 11, "down", 10, 12),
         }
     )
-    warp = ("room_a", 10, 12, "down", "room_b", 10, 10)
+    warp = (room, 10, 12, "down", "room_b", 10, 10)
     explorer.warps = Counter({warp: 5})
+    return warp
+
+
+def test_known_warp_is_not_deferred_by_unconfirmed_outline_probe():
+    explorer = Run3Explorer()
+    warp = _add_reachable_warp(explorer)
 
     route = explorer._route_to_learned_warp("room_a", (10, 11))
 
-    assert route is None
+    assert route == ("down", warp)
+    assert explorer.deferred_warps_for_local_leads == 0
+
+
+def test_known_warp_is_deferred_for_actionable_character_lead():
+    explorer = Run3Explorer()
+    _add_reachable_warp(explorer)
+    explorer.screen_regions[("room_a", 2, 2)] = {
+        "hypothesis": "possible_character",
+        "guess_state": "proposed",
+        "guess_confidence": 0.72,
+        "completed_tests": 0,
+        "failed_approaches": 0,
+    }
+
+    assert explorer._route_to_learned_warp("room_a", (10, 11)) is None
     assert explorer.deferred_warps_for_local_leads == 1
+
+
+def test_rejected_or_exhausted_visual_lead_does_not_defer_warp():
+    explorer = Run3Explorer()
+    warp = _add_reachable_warp(explorer)
+    explorer.screen_regions[("room_a", 2, 2)] = {
+        "hypothesis": "possible_character",
+        "guess_state": "rejected",
+        "guess_confidence": 0.92,
+        "completed_tests": 0,
+        "failed_approaches": 2,
+    }
+
+    assert explorer._route_to_learned_warp("room_a", (10, 11)) == (
+        "down",
+        warp,
+    )
+    assert explorer.deferred_warps_for_local_leads == 0
 
 
 def test_repeated_room_link_increases_cooldown_backoff():

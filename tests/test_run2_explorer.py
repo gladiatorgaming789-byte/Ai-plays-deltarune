@@ -82,3 +82,21 @@ def test_recent_room_link_is_temporarily_blocked():
 
     explorer.navigation_tick = 500
     assert not explorer._link_is_cooling_down("room_a", "room_b")
+
+
+def test_first_room_entry_temporarily_blocks_continuing_same_direction():
+    explorer = Run2Explorer()
+    source = sample(room="room_a")
+    destination = sample(room="room_b")
+    explorer._observe_room(source)
+    explorer._select("up", "enter room", source)
+
+    explorer._observe_room(destination)
+    arrival = explorer._cell(destination)
+
+    assert explorer._is_entry_warp_direction("room_b", arrival, "up")
+    assert not explorer._is_entry_warp_direction("room_b", arrival, "down")
+    assert explorer.entry_direction_guard_avoids == 1
+
+    explorer.navigation_tick += 24
+    assert not explorer._is_entry_warp_direction("room_b", arrival, "up")

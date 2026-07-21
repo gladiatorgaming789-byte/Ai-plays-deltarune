@@ -9,9 +9,12 @@ from .world_model import Warp
 
 
 MAX_LINK_BACKOFF_MULTIPLIER = 4
-LOCAL_LEAD_INSPECTION_LIMIT = 3
+LOCAL_LEAD_TEST_LIMIT = 2
+LOCAL_LEAD_FAILURE_LIMIT = 2
+LOCAL_LEAD_MIN_CONFIDENCE = 0.45
 GEOMETRY_MIN_CELLS = 12
 WARP_CLUSTER_RADIUS = 2
+FINAL_GUESS_STATES = {"confirmed", "rejected", "retired"}
 
 
 class Run3Explorer(Run2Explorer):
@@ -133,13 +136,64 @@ class Run3Explorer(Run2Explorer):
         observed = Counter(warp[3] for warp, count in cluster for _ in range(count))
         return max(choices, key=lambda direction: (observed[direction], direction))
 
-    def _has_local_lead(self, room: str) -> bool:
-        if self._possible_exit_probes(room):
+    def _visual_lead_is_actionable(
+        self,
+        key: tuple[str, int, int],
+        record: dict[str, object],
+        *,
+        hypotheses: set[str],
+    ) -> bool:
+        """Return whether a learned visual lead can still produce a new test.
+
+        ``inspections`` was the old, coarse lifecycle counter.  New memories
+        distinguish a completed test from an approach that never reached its
+        target, so prefer those fields while retaining old-memory support.
+        """
+
+        hypothesis = str(record.get("hypothesis") or "")
+        if hypothesis not in hypotheses:
+            return False
+        state = str(record.get("guess_state") or "proposed")
+        if state in FINAL_GUESS_STATES:
+            return False
+        cooldown_until = max(
+            int(record.get("cooldown_until_tick", 0) or 0),
+            int(self.visual_goal_cooldowns.get(key, 0)),
+        )
+        if state == "cooldown" and self.navigation_tick < cooldown_until:
+            return False
+        completed_tests = int(
+            record.get("completed_tests", record.get("inspections", 0)) or 0
+        )
+        failed_approaches = int(record.get("failed_approaches", 0) or 0)
+        if (
+            completed_tests >= LOCAL_LEAD_TEST_LIMIT
+            or failed_approaches >= LOCAL_LEAD_FAILURE_LIMIT
+        ):
+            return False
+        if record.get("choice_retry"):
             return True
+        confidence = float(
+            record.get("guess_confidence", record.get("interest", 0.0)) or 0.0
+        )
+        return confidence >= LOCAL_LEAD_MIN_CONFIDENCE
+
+    def _has_local_lead(self, room: str) -> bool:
+        """Keep a known warp waiting only for an actionable local story lead.
+
+        A visual seam or an arbitrary outline cell is not stronger evidence
+        than a room transition the agent has already observed.  Exit evidence
+        is ranked separately by :class:`Run4Explorer`; this gate is reserved
+        for nearby character/object hypotheses that may advance dialogue.
+        """
+
         return any(
             key[0] == room
-            and record.get("hypothesis") in {"possible_exit", "possible_character"}
-            and int(record.get("inspections", 0)) < LOCAL_LEAD_INSPECTION_LIMIT
+            and self._visual_lead_is_actionable(
+                key,
+                record,
+                hypotheses={"possible_character", "possible_interactable"},
+            )
             for key, record in self.screen_regions.items()
         )
 
@@ -148,10 +202,13 @@ class Run3Explorer(Run2Explorer):
         room: str,
         start: tuple[int, int],
     ) -> tuple[str, Warp] | None:
+        route = super()._route_to_learned_warp(room, start)
+        if route is None:
+            return None
         if self._has_local_lead(room):
             self.deferred_warps_for_local_leads += 1
             return None
-        return super()._route_to_learned_warp(room, start)
+        return route
 
     def summary(self) -> dict:
         summary = super().summary()

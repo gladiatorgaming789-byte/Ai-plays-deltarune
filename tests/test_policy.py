@@ -11,6 +11,7 @@ from deltarune_agent.policy import (
     COLLISION_CONFIRM_SAMPLES,
     DIRECTION_VECTORS,
     EXIT_PROBE_COMMIT_STEPS,
+    MIN_VISUAL_GUESS_CONFIDENCE,
     STORY_SEARCH_STEPS,
     StarterPolicy,
     WARP_SEEK_STEPS,
@@ -325,6 +326,38 @@ def test_manual_sideways_displacement_is_not_learned_as_attempted_direction():
 
     assert not policy.failed_movement
     assert not policy.open_edges
+
+
+def test_v9_movement_learning_uses_collision_foot_not_sprite_origin():
+    policy = StarterPolicy()
+    initial = TelemetrySample(
+        "overworld",
+        1,
+        "room_test",
+        100,
+        88,
+        "obj_mainchara",
+        1,
+        version=9,
+        facing_direction="down",
+        player_foot_x=100,
+        player_foot_y=100,
+    )
+    policy._select("down", "test movement", initial)
+
+    # Animation may shift the instance/sprite origin without moving Kris's
+    # collision point. That must count as stationary rather than an open edge.
+    animated_origin = replace(
+        initial,
+        x=102,
+        y=90,
+        received_at=2,
+    )
+    policy._learn_movement_result(animated_origin)
+
+    assert policy.stationary_streak == 1
+    assert not policy.open_edges
+    assert not policy.unexpected_displacement
 
 
 def test_route_ignores_edges_that_do_not_match_the_recorded_action():
@@ -1271,7 +1304,37 @@ def test_static_compact_obstacle_with_multiple_approaches_builds_character_candi
     assert record["hypothesis"] == "possible_character"
 
 
-def test_compact_static_obstacle_can_become_a_lead_from_one_approach():
+def test_retired_character_scenery_is_not_recreated_by_same_visual_evidence():
+    policy = StarterPolicy()
+    policy.room_view = None
+    policy.visits[("room_test", 12, 8)] = 1
+    policy.seen_cells.add(("room_test", 12, 8))
+    policy.blocked[("room_test", 12, 9, "right")] = 1
+    policy.blocked[("room_test", 13, 10, "up")] = 1
+    sample = TelemetrySample(
+        "overworld", 1, "room_test", 16, 144, "obj_mainchara", 0,
+        version=7, room_width=224, room_height=160,
+        camera_x=0, camera_y=0, camera_width=224, camera_height=160,
+    )
+    frame = Image.new("RGB", (224, 160), (90, 90, 90))
+    pixels = frame.load()
+    for y in range(68, 92):
+        for x in range(104, 120):
+            pixels[x, y] = (40, 60, 140)
+
+    policy._observe_screen(Observation(frame, 0), sample)
+    record = policy.screen_regions[("room_test", 3, 2)]
+    assert record["hypothesis"] == "possible_character"
+    record["hypothesis"] = None
+    record["inspections"] = 3
+    record["retired_reason"] = "exit evidence outranked weak scenery lead"
+
+    policy._observe_screen(Observation(frame, 5), sample)
+
+    assert record.get("hypothesis") != "possible_character"
+
+
+def test_compact_static_obstacle_stays_an_object_lead_from_one_approach():
     policy = StarterPolicy()
     policy.room_view = None
     policy.visits[("room_test", 12, 8)] = 1
@@ -1294,7 +1357,7 @@ def test_compact_static_obstacle_can_become_a_lead_from_one_approach():
     record = policy.screen_regions[("room_test", 3, 2)]
     assert record["entity_approach_directions"] == 1
     assert record["obstruction_target_cells"] == 1
-    assert record["hypothesis"] == "possible_character"
+    assert record["hypothesis"] == "possible_interactable"
 
 
 def test_character_goal_routes_to_exact_known_interaction_side():
@@ -1729,14 +1792,63 @@ def test_room_transition_keeps_last_overworld_direction_through_unknown_frame():
     assert ("room_a", 10, 10, "down", "room_b", 2, 10) in policy.warps
 
 
+def test_v9_transition_uses_exact_source_foot_and_discovery_is_not_progression():
+    policy = StarterPolicy()
+    source = TelemetrySample(
+        "overworld", 1, "room_a", 80, 72, "obj_mainchara", 0,
+        version=9, player_foot_x=88, player_foot_y=96,
+    )
+    target = TelemetrySample(
+        "overworld", 2, "room_b", 16, 24, "obj_mainchara", 1,
+        version=9,
+        player_foot_x=24,
+        player_foot_y=40,
+        transition_from_room_name="room_a",
+        transition_from_x=80,
+        transition_from_y=72,
+        transition_from_foot_x=104,
+        transition_from_foot_y=112,
+        transition_from_facing="down",
+    )
+    policy._observe_room(source)
+    policy.last_overworld_movement = "down"
+    policy._observe_room(target)
+
+    warp = ("room_a", 13, 14, "down", "room_b", 3, 5)
+    assert policy.warps[warp] == 1
+    portal = policy.world.portal_metadata(warp)
+    assert portal is not None
+    assert portal["role"] == "new_area"
+    assert portal["non_discovery_progress_outcomes"] == 0
+
+
+def test_observed_story_outcome_can_promote_recent_portal_to_progression():
+    policy = StarterPolicy()
+    source = TelemetrySample("overworld", 1, "room_a", 80, 80, "obj_mainchara", 0)
+    target = TelemetrySample("overworld", 2, "room_b", 16, 80, "obj_mainchara", 1)
+    policy._observe_room(source)
+    policy.last_overworld_movement = "right"
+    policy._observe_room(target)
+
+    policy.navigation_tick += 10
+    policy._record_story_progress("interaction caused a scripted sequence", target)
+
+    assert policy.last_portal_id is not None
+    portal = policy.world.portal_metadata(policy.last_portal_id)
+    assert portal is not None
+    assert portal["role"] == "progression"
+    assert portal["non_discovery_progress_outcomes"] == 1
+
+
 def test_exit_search_keeps_a_learned_outline_goal_until_it_is_probed():
     policy = StarterPolicy()
     room = "room_test"
     policy._remember_open_path(room, (2, 5), "right", (5, 5))
     policy.seen_cells.update((room, x, 5) for x in range(2, 6))
     policy.steps_without_frontier = WARP_SEEK_STEPS
+    policy.exit_search_goal = (room, 2, 5, "left")
 
-    direction, commitment, reason = policy._plan_exploration(room, (3, 5))
+    direction, commitment, reason = policy._plan_exploration(room, (4, 5))
 
     assert direction == "left"
     assert commitment == 1
@@ -1745,15 +1857,37 @@ def test_exit_search_keeps_a_learned_outline_goal_until_it_is_probed():
 
     # Even after the other endpoint becomes closer, the active goal remains
     # stable instead of producing another left/right choice reversal.
-    direction, commitment, reason = policy._plan_exploration(room, (4, 5))
+    direction, commitment, reason = policy._plan_exploration(room, (5, 5))
     assert direction == "left"
     assert policy.exit_search_goal == (room, 2, 5, "left")
 
-    direction, commitment, reason = policy._plan_exploration(room, (2, 5))
+    # Movement pulses can skip the exact target cell. One adjacent cell is close
+    # enough for the committed input to reach and test the same learned edge.
+    direction, commitment, reason = policy._plan_exploration(room, (3, 5))
     assert direction == "left"
     assert commitment == EXIT_PROBE_COMMIT_STEPS
     assert "probe possible room exit" in reason
     assert policy.exit_probes[(room, 2, 5, "left")] == 1
+
+
+def test_retired_character_reason_survives_restart():
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "navigation.json"
+        policy = StarterPolicy(memory_path=path)
+        key = ("room_test", 3, 2)
+        policy.screen_regions[key] = {
+            "views": 4,
+            "interest": 0.5,
+            "hypothesis": None,
+            "inspections": 3,
+            "retired_reason": "exit evidence outranked weak scenery lead",
+        }
+        policy.save_memory()
+        reloaded = StarterPolicy(memory_path=path)
+
+    assert reloaded.screen_regions[key]["retired_reason"] == (
+        "exit evidence outranked weak scenery lead"
+    )
 
 
 def test_story_search_prefers_plain_path_continuation_over_visual_door_guess():
@@ -1780,7 +1914,7 @@ def test_story_search_prefers_plain_path_continuation_over_visual_door_guess():
     direction, _commitment, reason = policy._plan_exploration(room, (3, 5))
 
     assert direction == "left"
-    assert "search room edge" in reason
+    assert "possible room exit" in reason
     assert "visual passage" not in reason
     assert policy.screen_regions[(room, 0, 1)]["path_continuation"] is True
     assert policy.screen_regions[(room, 0, 1)]["hypothesis"] == "possible_exit"
@@ -1835,7 +1969,8 @@ def test_static_character_hypothesis_survives_without_legacy_motion_evidence():
 
         reloaded = StarterPolicy(memory_path=path)
 
-    assert reloaded.screen_regions[("room_test", 3, 2)] == {
+    record = reloaded.screen_regions[("room_test", 3, 2)]
+    expected_legacy_fields = {
         "views": 4,
         "interest": 0.71,
         "hypothesis": "possible_character",
@@ -1850,6 +1985,14 @@ def test_static_character_hypothesis_survives_without_legacy_motion_evidence():
         "path_continuation": False,
         "guess_misses": 0,
     }
+    assert {
+        key: record[key] for key in expected_legacy_fields
+    } == expected_legacy_fields
+    assert record["guess_label"] == "Possible character-sized 1-cell obstacle"
+    assert record["evidence_kind"] == "compact_obstruction"
+    assert "2 learned sides" in record["evidence_summary"]
+    assert len(record["anchor_cell"]) == 2
+    assert record["guess_confidence"] > 0.5
 
 
 def test_backtrack_avoidance_covers_approach_to_jittery_warp_endpoint():
@@ -1893,9 +2036,9 @@ def test_low_area_vertical_loop_gets_horizontal_cooldown():
 def test_camera_regions_create_visual_hypotheses_and_guide_direction():
     frame = Image.new("RGB", (128, 64), (90, 90, 90))
     pixels = frame.load()
-    for y in range(0, 32):
-        for x in range(96, 128):
-            pixels[x, y] = (245, 220, 40) if (x + y) % 4 < 2 else (15, 20, 45)
+    for y in range(8, 24):
+        for x in range(108, 128):
+            pixels[x, y] = (8, 12, 18)
     telemetry = TelemetrySample(
         "overworld",
         1,
@@ -1926,6 +2069,199 @@ def test_camera_regions_create_visual_hypotheses_and_guide_direction():
     assert visual_plan is not None
     assert visual_plan[0] == "right"
     assert visual_plan[1] == "possible_exit"
+    assert policy.visual_goal is not None
+    record = policy.screen_regions[policy.visual_goal]
+    assert "opening" in record["guess_label"].lower()
+    assert record["evidence_kind"] == "visual_edge_landmark"
+    assert record["guess_confidence"] >= 0.32
+    assert len(record["anchor_cell"]) == 2
+    assert len(record["feature_box_world"]) == 4
+    context = policy.decision_context()
+    assert context is not None
+    assert context["region"] == list(policy.visual_goal[1:])
+    assert context["label"] == record["guess_label"]
+    assert context["anchor_cell"] == record["anchor_cell"]
+
+
+def test_visual_route_uses_precise_anchor_inside_a_coarse_region():
+    policy = StarterPolicy()
+    room = "room_test"
+    policy._remember_open_path(room, (8, 4), "right", (9, 4))
+    policy._remember_open_path(room, (9, 4), "right", (10, 4))
+
+    assert policy._route_toward_visible_region(room, (8, 4), (2, 1)) is None
+    assert (
+        policy._route_toward_visible_region(
+            room,
+            (8, 4),
+            (2, 1),
+            anchor_cell=(11, 4),
+        )
+        == "right"
+    )
+
+
+def test_exit_probe_approach_must_align_with_its_outward_direction():
+    policy = StarterPolicy()
+    probe = ("room_test", 10, 10, "right")
+
+    assert policy._within_exit_probe_approach((10, 10), probe)
+    assert policy._within_exit_probe_approach((9, 10), probe)
+    assert not policy._within_exit_probe_approach((10, 9), probe)
+    assert not policy._within_exit_probe_approach((9, 9), probe)
+    assert not policy._within_exit_probe_approach((11, 10), probe)
+
+    adjacency = {
+        (9, 9): [("right", (10, 9)), ("down", (9, 10))],
+        (10, 9): [("left", (9, 9))],
+        (9, 10): [("up", (9, 9)), ("right", (10, 10))],
+        (10, 10): [("left", (9, 10))],
+    }
+    assert policy._route_to_exit_approach(adjacency, (9, 9), probe) == (
+        "down",
+        1,
+    )
+
+
+def test_finishing_visual_guess_refreshes_its_evidence_score_and_gui_update():
+    policy = StarterPolicy()
+    key = ("room_test", 3, 0)
+    record = {
+        "views": 4,
+        "interest": 0.8,
+        "hypothesis": "possible_exit",
+        "inspections": 0,
+        "edge_hint": "right",
+        "visual_summary": "tall bright feature",
+    }
+    policy.screen_regions[key] = record
+    policy._refresh_visual_guess_metadata((3, 0), record)
+    previous_score = record["guess_confidence"]
+    policy.visual_goal = key
+
+    policy._finish_visual_goal()
+    update = policy.drain_map_updates()[-1]
+
+    assert record["inspections"] == 1
+    assert record["guess_confidence"] < previous_score
+    assert update["guess_confidence"] == record["guess_confidence"]
+    assert update["guess_label"] == "Possible right opening (0% edge span)"
+    assert update["evidence_summary"] == (
+        "tall bright feature; opening-shape score 0%"
+    )
+
+
+def test_route_failures_do_not_pretend_the_guess_was_tested_and_eventually_reject_it():
+    policy = StarterPolicy()
+    key = ("room_test", 3, 0)
+    record = {
+        "views": 3,
+        "last_seen_sequence": 3,
+        "interest": 0.8,
+        "hypothesis": "possible_exit",
+        "edge_opening_score": 0.8,
+        "edge_width_ratio": 0.3,
+        "guess_state": "approaching",
+    }
+    policy.screen_regions[key] = record
+    policy._refresh_visual_guess_metadata((3, 0), record)
+
+    for attempt in range(2):
+        policy.visual_goal = key
+        policy._finish_visual_goal("route_failed", f"failed route {attempt + 1}")
+
+    assert record["completed_tests"] == 0
+    assert record["failed_approaches"] == 2
+    assert record["guess_state"] == "rejected"
+
+
+def test_loop_recovery_never_reports_a_stale_visual_lead():
+    policy = StarterPolicy()
+    key = ("room_test", 3, 0)
+    policy.screen_regions[key] = {
+        "hypothesis": "possible_exit",
+        "guess_id": "room_test@3,0",
+        "guess_label": "Possible right opening",
+    }
+    policy.decision_visual_goal = key
+    policy.reason = "detected up/down loop in a small area; commit left away from it"
+
+    assert policy.decision_context() is None
+
+
+def test_prediction_snapshot_identifies_the_exact_visual_feature_and_lifecycle():
+    policy = StarterPolicy()
+    key = ("room_test", 3, 0)
+    policy.observed_room = "room_test"
+    policy.observed_cell = (2, 6)
+    policy.screen_regions[key] = {
+        "hypothesis": "possible_exit",
+        "guess_id": "room_test@3,0",
+        "guess_label": "Possible right opening",
+        "guess_confidence": 0.77,
+        "guess_state": "approaching",
+        "last_seen_sequence": 2,
+        "anchor_cell": [12, 2],
+        "anchor_world": [110.0, 16.0],
+        "passage_box_world": [108.0, 8.0, 128.0, 24.0],
+    }
+    policy.decision_visual_goal = key
+
+    snapshot = policy.prediction_snapshot()
+
+    assert snapshot["selected_guess_id"] == "room_test@3,0"
+    candidate = snapshot["candidates"][0]
+    assert candidate["id"] == "room_test@3,0"
+    assert candidate["feature_box_world"] == [108.0, 8.0, 128.0, 24.0]
+    assert candidate["selected"] is True
+
+
+def test_startup_enrichment_is_sent_to_an_already_open_gui():
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "navigation.json"
+        writer = StarterPolicy(memory_path=path)
+        key = ("room_test", 3, 0)
+        writer.screen_regions[key] = {
+            "views": 4,
+            "interest": 0.8,
+            "hypothesis": "possible_exit",
+            "inspections": 0,
+        }
+        writer.save_memory()
+
+        reloaded = StarterPolicy(memory_path=path)
+        updates = reloaded.drain_map_updates()
+
+    update = next(item for item in updates if item.get("region") == [3, 0])
+    assert update["guess_label"] == "Possible localized boundary opening"
+    assert update["evidence_kind"] == "visual_edge_landmark"
+    # Legacy edge guesses without an opening profile remain visible for
+    # inspection, but are deliberately too weak to drive navigation.
+    assert 0 < update["guess_confidence"] < MIN_VISUAL_GUESS_CONFIDENCE
+    assert len(update["anchor_cell"]) == 2
+
+
+def test_non_overworld_action_does_not_report_lingering_visual_goal():
+    observation = Observation(Image.new("RGB", (2, 2)), step=0)
+    perception = Perception(
+        GameState.DIALOGUE,
+        0.99,
+        VisualFeatures(0, 0, 0, 0, 0, 0),
+        "telemetry",
+    )
+    policy = StarterPolicy()
+    key = ("room_test", 3, 0)
+    policy.screen_regions[key] = {
+        "hypothesis": "possible_exit",
+        "guess_label": "Possible room-edge passage",
+    }
+    policy.visual_goal = key
+    policy.decision_visual_goal = key
+
+    action = policy.choose(observation, perception)
+
+    assert action.name == "confirm"
+    assert policy.decision_context() is None
 
 
 def test_camera_observation_emits_persistent_room_view_tile_updates():
@@ -1956,7 +2292,7 @@ def test_camera_observation_emits_persistent_room_view_tile_updates():
         view_updates = [
             update for update in updates if update["type"] == "room_view_tile"
         ]
-        assert len(view_updates) == 6
+        assert len(view_updates) == 8
         assert all(Path(str(update["path"])).is_file() for update in view_updates)
         assert (memory_path.parent / "room_views" / "index.json").is_file()
 
@@ -1983,9 +2319,9 @@ def test_repeated_walkable_counter_evidence_retires_false_exit_guess():
     policy.seen_cells.add((room, 12, 2))
     landmark = Image.new("RGB", (128, 64), (90, 90, 90))
     pixels = landmark.load()
-    for y in range(0, 32):
-        for x in range(96, 128):
-            pixels[x, y] = (245, 220, 40) if (x + y) % 4 < 2 else (15, 20, 45)
+    for y in range(8, 24):
+        for x in range(108, 128):
+            pixels[x, y] = (8, 12, 18)
     policy._observe_screen(Observation(landmark, step=0), telemetry)
     candidates = [
         key for key, record in policy.screen_regions.items()
@@ -1993,10 +2329,20 @@ def test_repeated_walkable_counter_evidence_retires_false_exit_guess():
     ]
     assert candidates
     guess = candidates[0]
+    original_feature = {
+        field: policy.screen_regions[guess][field]
+        for field in ("focus_world", "feature_box_world", "visual_summary")
+    }
 
     ordinary = Image.new("RGB", (128, 64), (90, 90, 90))
-    for step in (10, 20, 30):
+    for step in (10, 20):
         policy._observe_screen(Observation(ordinary, step=step), telemetry)
+    assert policy.screen_regions[guess]["hypothesis"] == "possible_exit"
+    assert {
+        field: policy.screen_regions[guess][field] for field in original_feature
+    } == original_feature
+
+    policy._observe_screen(Observation(ordinary, step=30), telemetry)
 
     assert policy.screen_regions[guess]["hypothesis"] is None
     assert policy.screen_regions[guess]["guess_misses"] >= 3

@@ -12,14 +12,15 @@ progress. It does **not** patch or modify the game.
 - Optionally consumes authoritative localhost telemetry for rooms and positions.
 - Chooses state-specific actions through a replaceable policy.
 - Sends controls only when `--live` is supplied.
-- Records JSONL episode events and periodic screenshots under `runs/`.
+- Records buffered events, ranked AI predictions, navigation updates, periodic
+  screenshots, diagnostics, memory snapshots, and exported maps under `runs/`.
 - Includes an emergency stop: move the mouse to the upper-left corner, or press
   `Ctrl+C` in the controller terminal.
 
 The starter policy advances dialogue, navigates menus, and moves during
-battles. With telemetry v8 enabled, dialogue and choices are authoritative
+battles. With telemetry v9 enabled, dialogue and choices are authoritative
 states rather than screen guesses. Overworld navigation systematically maps
-position cells and attempted edges, tries interaction once at genuine
+collision-foot position cells and attempted edges, tries interaction once at genuine
 collisions, remembers obstacles, seeks unexplored frontiers, and records room
 transitions with their confirmed source cells and observed arrival positions. A blockage is accepted only after
 three distinct, fresh stationary telemetry samples; later successful movement
@@ -37,9 +38,11 @@ learned path graph, and starts seeking a previously crossed room warp after a
 short period without new room coverage. Known exits to less-explored rooms are
 preferred. If exact sampled paths contain small gaps, the agent can route across
 coarse regions Kris has actually visited; it does not invent unseen walkable
-space. If broad exploration stalls without a known useful exit, it chooses a
-plausible opening from the outline of paths it has actually walked, keeps that
-goal while routing there, and remembers unsuccessful edge probes.
+space. If broad exploration stalls without a known useful exit, it groups the
+outline of paths it has actually walked into continuous boundary sections and
+tests one best-supported point per section. It keeps that goal while routing
+there and remembers unsuccessful probes, so one wall is not mistaken for
+dozens of different exits.
 This search receives no undiscovered warp coordinates from the game. Graph routes replan after each telemetry sample so Kris stops
 at intermediate frontiers instead of walking past them, and a repeated
 two-endpoint corridor loop triggers a perpendicular escape. After entering a
@@ -81,6 +84,12 @@ continuations of paths Kris has walked, especially straight corridor or boundary
 approaches, and sweeps distinct learned outline regions before falling back to
 visual edge landmarks. A plain path, opening, or invisible trigger strip can
 therefore be discovered through movement alone.
+In a well-sampled room, completion search runs as a bounded episode rather than
+staying active forever: observed non-return portals rank first by learned
+outcome, strong mapped corridor geometry ranks next, and only localized,
+high-confidence visual openings rank after that. A failed episode cools down
+before another attempt, preventing one false seam from owning hundreds of
+decisions.
 
 High contrast alone no longer creates an interior interaction target. After an
 interaction, a target that only produced ordinary dialogue is classified as a
@@ -99,7 +108,7 @@ Some responses are drawn inside ordinary `obj_writer` dialogue instead of a
 choicer object. The controller recognizes the repeated visible option markers in
 that panel without reading hidden option text. If a response returns to the
 overworld without progress, the NPC remains the active objective and is
-re-engaged for the next untested pattern, up to three attempts. Existing long
+re-engaged for the next untested pattern from a bounded response set. Existing long
 dialogue records receive one migration retry so this works without clearing the
 learned map.
 These objectives are learned from visible scenes and observed consequences; no
@@ -107,11 +116,16 @@ room-specific route, NPC position, required response, or story coordinate is
 supplied.
 Camera telemetry tells the controller which 32-pixel world regions are
 currently on screen. The screenshot is scored for anonymous visual structure
-inside those regions, allowing the policy to form and test unconfirmed
-possible-exit and possible-interactable guesses. It is not given room-warp
-coordinates or nearby interactable identities/positions. Screen visibility,
-visual guesses, inspections, and failed exit probes persist separately from
-confirmed paths and objects.
+inside those regions, allowing the policy to form and test unconfirmed passage
+guesses. A possible stationary-character lead is created only when a visible
+feature also matches a compact obstruction Kris has learned through movement.
+Each guess keeps a stable ID, its exact visible or collision-derived extent, a
+separate routing anchor, evidence type, ranking score, and lifecycle. Reaching
+a region, failing to route there, and actually testing it are distinct outcomes;
+repeated route failures cool down and then reject the lead. It is not given
+room-warp coordinates or nearby interactable
+identities/positions. Screen visibility, visual guesses, lifecycle outcomes, and failed
+exit probes persist separately from confirmed paths and objects.
 
 The controller also builds a persistent visual memory under
 `memory/room_views/`. Each captured camera frame is projected into the camera's
@@ -119,8 +133,10 @@ reported world coordinates and saved as small 32-pixel scene tiles. Scrolling
 reveals and joins new tiles while anything that has never appeared on screen
 remains transparent. The room's full art, undiscovered objects, and off-camera
 areas are never read from game assets or filled from room dimensions. The tile
-currently containing Kris is deferred until movement reveals it without
-freezing the player sprite into the scenery.
+currently containing Kris is retained with only Kris's reported rectangle
+masked. A stale sprite or camera seam is replaced only after two matching clean
+observations, filling old holes without letting animation flicker through the
+remembered scene.
 
 ## Setup
 
@@ -155,6 +171,15 @@ Each run automatically reloads and updates `memory/navigation.json` and
 telemetry, then remains usable if telemetry is temporarily unavailable. Delete
 these files only when you intentionally want the controller to forget what it
 has learned and begin a clean evaluation.
+
+Every new run folder is self-contained enough for later diagnosis. Alongside
+`events.jsonl`, it includes `predictions.jsonl` with the exact selected guess
+and ranked player-observed candidates, `navigation_updates.jsonl`, `run.json`,
+`run_report.json`, `summary.json`, learned-navigation and scene snapshots, and
+rendered room maps with exact guess boxes and learned portal-role badges. A
+`telemetry_diagnostics.json` file records packet counts, rejected/out-of-order
+parts, and the latest v9 sequence health. Logs stay open and flush in small batches rather than
+reopening a file on every step.
 
 `--live` is intentionally required every time. At startup, the controller looks
 for `deltarune` in both the executable name and the visible window title,
@@ -198,26 +223,33 @@ The map loads persistent navigation and scene memory, follows the current room
 by default, and shows the actual camera pixels the AI has seen behind visited
 cells, observed paths, weighted blocked edges, unconfirmed visual guesses,
 discovered interactables, confirmed room exits, and Kris's current cell. An
-outlined **VISIBLE NOW** rectangle shows the exact telemetry camera footprint. Separate
-toggles show or hide the remembered scene, navigation evidence, and guesses.
+outlined **VISIBLE NOW** rectangle shows the exact telemetry camera footprint.
+The **Layers** menu independently controls the scene, paths and walls, visit
+heat, detail grid, learned objects and exits, guesses, and current camera.
 Use the mouse wheel to zoom around the pointer, drag with the middle or right
-mouse button to move freely around the room, and press **Fit room** to restore
+mouse button to move freely around the room, and press **Fit** to restore
 the automatic overview.
-Unseen space stays blank. Dashed blue outlines are used as a fallback for older
-screen observations that do not yet have image tiles, and cyan question marks
-are the AI's own visual guesses; neither means the area is walkable or contains an object. Gold
-`I` markers are interactables that produced dialogue or a menu, and numbered
-purple diamonds are exits the AI has crossed. Nearby transition samples are
-combined into one marker. The destination spawn position is kept as an arrival
-observation and is not drawn as another exit. Click a mapped cell to inspect its
-visit count, wall confidence, learned interaction approaches, and warp
-destination. Frequently revisited cells become brighter, making navigation
-loops visible, and Kris's marker points in the current facing direction. Its
-prominent key identifies each mark, and **Clear learned map** deletes both
-persistent navigation knowledge and remembered room images for a clean
-exploration run.
-Remembered scene tiles use four captured pixels per in-game world pixel and are
-kept stable after completion, avoiding animation flicker and camera-edge tears.
+Unseen space stays blank. Numbered `E`, `C`, and `O` pins identify possible
+exits, possible characters, and one-sided object leads. Their rows separate the
+visual anchor from the route anchor and explain the stable lead ID, exact
+extent, evidence, ranking strength, and lifecycle. Selecting a guess centers it
+and outlines the complete remembered feature or learned obstruction; coarse
+storage buckets are available only as an optional diagnostic layer. Adjacent
+regions belonging to one feature are grouped under one marker, and the pursued
+guess is highlighted. These remain unconfirmed guesses, not object identities.
+Gold `I` markers are confirmed interactables. Confirmed exit apertures use
+outcome-learned badges: `P` progression, `N` new area, `O` likely optional, `R`
+return/backtrack, `L` loop-suppressed, and `?` not learned yet. A newly visited
+room alone never earns a progression label. Nearby transition samples combine
+into one aperture, while the destination spawn stays an arrival observation
+rather than another exit. Click a mapped cell to inspect its visit count, wall confidence,
+learned interaction approaches, and warp destination. The **AI guesses**,
+**Selected area**, and **Map key** tabs keep these details outside the pannable
+scene so map art cannot cover the text. The **Map data** menu can clear all
+learned map data or rebuild only remembered scene images.
+Remembered scene tiles use four captured pixels per in-game world pixel and
+require repeated matching evidence before replacing known scenery, avoiding
+animation flicker, sprite ghosts, and camera-edge tears.
 **Rebuild scene images** deletes only those pictures while retaining learned
 paths, walls, interactions, and exits; use it once if older low-resolution or
 glitched tiles are still present.
@@ -233,9 +265,11 @@ requiring one unchanging window handle.
 ## Optional telemetry mod
 
 The external controller works without modifying Deltarune, but visual state
-detection can be fooled. The optional v8 patch in `mods/telemetry/` sends room,
-position, camera view, collision/motion/animation details, dialogue, choices,
-the game's player-control gate, and authoritative overworld/battle mode to
+detection can be fooled. The optional v9 patch in `mods/telemetry/` sends named,
+sequenced localhost packet parts containing room, instance origin, collision
+foot, exact transition source, camera geometry, collision/motion/render details,
+sample timing, dialogue, choices, the game's player-control gate, and
+authoritative overworld/battle mode to
 `127.0.0.1:42069`. See its README for the backup-first installation procedure.
 It deliberately does not look up or transmit nearby interactable objects.
 The controller listens automatically; use `--no-telemetry` to run vision-only.
@@ -251,15 +285,20 @@ python -m deltarune_agent telemetry --seconds 30
 `observer.py` captures frames, `room_view.py` stitches only observed camera
 pixels into persistent room memory, `perception.py` recognizes the current game
 state, `visual_model.py` learns visual state prototypes from telemetry,
-`policy.py` selects actions, `world_model.py` persists learned navigation,
-`controller.py` sends keys, `progress.py` logs the episode, and `runner.py`
+`screen_regions.py` extracts anonymous localized openings, `map_guesses.py`
+turns observations into feature-sized stable leads, `policy.py` selects actions,
+`navigation_semantics.py` classifies observed portal outcomes, `world_model.py`
+persists learned navigation, `controller.py` sends keys, `progress.py` and
+`run_artifacts.py` package the episode, and `runner.py`
 coordinates the loop. These boundaries let us later add OCR, a multimodal
 planner, or reinforcement learning without changing capture or input code.
 
 ## Next milestones
 
-1. Validate telemetry v8 camera/control visibility and its invisible native autosave on a clean Chapter 1 patch.
-2. Use the persistent room graph to plan routes toward unexplored frontiers.
-3. Add OCR and a semantic goal planner for dialogue and objectives.
-4. Add policy evaluation and learned-progress metrics.
-5. Add battle-phase and projectile-aware control.
+1. Validate telemetry v9 packet health, exact transition sources, and its
+   invisible native autosave on a clean Chapter 1 patch.
+2. Compare the next live run's prediction report with actual story progress and
+   tune only evidence-backed thresholds.
+3. Add optional on-screen text understanding for richer dialogue goals without
+   reading hidden game state.
+4. Add battle-phase and projectile-aware control.

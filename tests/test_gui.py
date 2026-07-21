@@ -3,10 +3,14 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from deltarune_agent.gui import (
+    MapTransform,
+    RoomMap,
     WallMapModel,
     decision_parts,
     format_ai_decision,
     format_telemetry_event,
+    warp_role_badge,
+    visual_guess_entries,
 )
 from deltarune_agent.runner import build_parser
 
@@ -350,6 +354,315 @@ def test_gui_tracks_current_camera_regions_and_unconfirmed_visual_guesses():
     assert model.current_camera == ("room_test", 0.0, 0.0, 128.0, 64.0)
 
 
+def test_map_transform_keeps_scene_regions_navigation_and_clicks_aligned():
+    transform = MapTransform(5, 3, 2.5, 10.0, 20.0)
+
+    region_box = transform.region_box((2, 1))
+    assert region_box[:2] == transform.cell_boundary((8, 4))
+    assert region_box[2:] == transform.cell_boundary((12, 8))
+    assert transform.world_point((64, 32)) == region_box[:2]
+    assert transform.canvas_cell(transform.cell_center((10, 6))) == (10, 6)
+
+
+def test_warp_role_badges_are_explicit_and_unknown_is_safe():
+    assert warp_role_badge("progression")[0] == "P"
+    assert warp_role_badge("likely_optional")[0] == "O"
+    assert warp_role_badge("return/backtrack")[0] == "R"
+    assert warp_role_badge("not-a-role")[0] == "?"
+
+
+def test_gui_loads_canonical_portal_extent_and_observed_role(tmp_path: Path):
+    data = {
+        "version": 3,
+        "cell_size": 8,
+        "warp_portals": [
+            {
+                "id": "portal_test",
+                "from_room": "room_a",
+                "to_room": "room_b",
+                "action": "down",
+                "role": "progression",
+                "confidence": 0.92,
+                "basis": ["scripted sequence followed the crossing"],
+                "crossings": 3,
+                "source_footprint": {
+                    "center": [11, 14],
+                    "bounds": [10, 14, 12, 14],
+                },
+                "arrival_footprint": {
+                    "center": [5, 2],
+                    "bounds": [5, 2, 5, 2],
+                },
+                "aperture": {"axis": "horizontal", "span_cells": 3},
+            }
+        ],
+    }
+    path = tmp_path / "navigation.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    model = WallMapModel()
+
+    model.load_memory(path)
+
+    record = model.rooms["room_a"].warps[(11, 14, "room_b")]
+    assert record["portal_id"] == "portal_test"
+    assert record["role"] == "progression"
+    assert record["role_confidence"] == 0.92
+    assert record["source_footprint"]["bounds"] == [10, 14, 12, 14]
+
+
+def test_live_warp_role_update_changes_existing_portal_without_new_marker():
+    model = WallMapModel()
+    event = _event()
+    event["map_updates"] = [
+        {
+            "type": "warp",
+            "portal_id": "portal_test",
+            "from_room": "room_a",
+            "from_cell": [11, 14],
+            "to_room": "room_b",
+            "to_cell": [5, 2],
+            "action": "down",
+            "count": 1,
+            "role": "new_area",
+        }
+    ]
+    model.update(event)
+    role_update = _event()
+    role_update["map_updates"] = [
+        {
+            "type": "warp_role",
+            "portal_id": "portal_test",
+            "role": "progression",
+            "role_confidence": 0.9,
+            "role_basis": ["observed scripted sequence"],
+            "crossings": 1,
+        }
+    ]
+
+    model.update(role_update)
+
+    assert len(model.rooms["room_a"].warps) == 1
+    record = next(iter(model.rooms["room_a"].warps.values()))
+    assert record["role"] == "progression"
+    assert record["role_basis"] == ["observed scripted sequence"]
+
+
+def test_player_marker_uses_kris_bounds_only_for_overworld_packets():
+    model = WallMapModel()
+    overworld = _event(48, 64)
+    overworld["telemetry"].update(
+        {
+            "bbox_left": 42,
+            "bbox_top": 54,
+            "bbox_right": 58,
+            "bbox_bottom": 76,
+        }
+    )
+    model.update(overworld)
+    assert model.current_display_position == (50.0, 76.0)
+
+    dialogue = _event(0, 0, mode="dialogue", player=(52, 68))
+    dialogue["telemetry"].update(
+        {
+            # These are the writer object's bounds, not Kris's bounds.
+            "bbox_left": 180,
+            "bbox_top": 120,
+            "bbox_right": 240,
+            "bbox_bottom": 210,
+        }
+    )
+    model.update(dialogue)
+    assert model.current_world_position == (52.0, 68.0)
+    assert model.current_display_position == (52.0, 68.0)
+
+
+def test_v9_player_foot_drives_both_marker_and_navigation_cell():
+    model = WallMapModel()
+    event = _event(48, 64)
+    event["telemetry"].update(
+        {"player_foot_x": 71, "player_foot_y": 87}
+    )
+
+    model.update(event)
+
+    assert model.current_world_position == (48.0, 64.0)
+    assert model.current_display_position == (71.0, 87.0)
+    assert model.current_cell == (8, 10)
+
+
+def test_specific_visual_guesses_are_grouped_and_keep_story_retry_status():
+    room = RoomMap()
+    room.screen_regions[(2, 0)] = {
+        "hypothesis": "possible_exit",
+        "guess_label": "Possible passage at top",
+        "guess_confidence": 0.56,
+        "evidence_summary": "wide bright feature; near the top room edge",
+        "edge_hint": "top",
+        "anchor_cell": [10, 1],
+        "feature_box_world": [88, 4, 96, 20],
+        "inspections": 0,
+    }
+    room.screen_regions[(3, 0)] = {
+        "hypothesis": "possible_exit",
+        "guess_label": "Possible passage at top",
+        "guess_confidence": 0.72,
+        "evidence_summary": "wide detailed feature; near the top room edge",
+        "edge_hint": "top",
+        "anchor_cell": [13, 1],
+        "feature_box_world": [96, 5, 104, 21],
+        "inspections": 0,
+    }
+    room.screen_regions[(5, 2)] = {
+        "hypothesis": "possible_character",
+        "guess_label": "Possible stationary character",
+        "guess_confidence": 0.81,
+        "evidence_summary": "compact 2-cell obstruction approached from left/up",
+        "anchor_cell": [21, 10],
+        "inspections": 2,
+    }
+
+    guesses = visual_guess_entries(
+        "room_test",
+        room,
+        {("room_test", 3, 0)},
+    )
+
+    assert [guess.marker for guess in guesses] == ["C1", "E1"]
+    assert guesses[0].anchor_cell == (21.0, 10.0)
+    assert guesses[0].status == "proposed; 2 completed tests"
+    assert guesses[1].regions == ((2, 0), (3, 0))
+    assert guesses[1].feature_box_world == (88.0, 4.0, 104.0, 21.0)
+    assert guesses[1].anchor_world == (96.0, 12.5)
+    assert guesses[1].status.endswith("visible now")
+
+
+def test_adjacent_legacy_exit_guesses_without_shared_feature_stay_separate():
+    room = RoomMap()
+    for region in ((2, 0), (3, 0)):
+        room.screen_regions[region] = {
+            "hypothesis": "possible_exit",
+            "interest": 0.6,
+            "inspections": 0,
+        }
+
+    guesses = visual_guess_entries("room_test", room)
+
+    assert [guess.regions for guess in guesses] == [((2, 0),), ((3, 0),)]
+
+
+def test_sparse_live_guess_updates_preserve_specific_evidence_and_active_target():
+    model = WallMapModel()
+    event = _event(48, 48)
+    event["decision_context"] = {
+        "kind": "visual_guess",
+        "id": "room_test@3,0",
+        "room": "room_test",
+        "region": [3, 0],
+    }
+    event["map_updates"] = [
+        {
+            "type": "screen_region",
+            "room": "room_test",
+            "region": [3, 0],
+            "views": 4,
+            "interest": 0.7,
+            "hypothesis": "possible_exit",
+            "inspections": 0,
+            "guess_label": "Possible passage at right",
+            "evidence_kind": "visual_edge_landmark",
+            "evidence_summary": "tall detailed feature near the right edge",
+            "guess_confidence": 0.68,
+            "anchor_cell": [14, 2],
+            "feature_box_world": [108, 8, 124, 28],
+        }
+    ]
+    model.update(event)
+
+    sparse = _event(48, 48)
+    sparse["decision_context"] = event["decision_context"]
+    sparse["map_updates"] = [
+        {
+            "type": "screen_region",
+            "room": "room_test",
+            "region": [3, 0],
+            "inspections": 1,
+        }
+    ]
+    model.update(sparse)
+
+    record = model.rooms["room_test"].screen_regions[(3, 0)]
+    assert record["guess_label"] == "Possible passage at right"
+    assert record["evidence_summary"].startswith("tall detailed")
+    assert record["anchor_cell"] == [14, 2]
+    assert record["feature_box_world"] == [108, 8, 124, 28]
+    assert record["inspections"] == 1
+    assert model.current_guess_region == ("room_test", 3, 0)
+    assert model.current_guess_id == "room_test@3,0"
+
+
+def test_gui_loads_specific_guess_evidence_from_persistent_memory():
+    data = {
+        "version": 2,
+        "cell_size": 8,
+        "screen_regions": [
+            {
+                "room": "room_test",
+                "region_x": 3,
+                "region_y": 0,
+                "views": 5,
+                "interest": 0.74,
+                "hypothesis": "possible_exit",
+                "inspections": 1,
+                "guess_label": "Possible passage at right",
+                "evidence_kind": "visual_edge_landmark",
+                "evidence_summary": "tall bright feature near the right edge",
+                "guess_confidence": 0.66,
+                "anchor_cell": [14, 2],
+                "focus_world": [116, 18],
+                "feature_box_world": [108, 8, 124, 28],
+                "edge_hint": "right",
+            }
+        ],
+    }
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "navigation.json"
+        path.write_text(json.dumps(data), encoding="utf-8")
+        model = WallMapModel()
+        model.load_memory(path)
+
+    record = model.rooms["room_test"].screen_regions[(3, 0)]
+    assert record["guess_label"] == "Possible passage at right"
+    assert record["evidence_kind"] == "visual_edge_landmark"
+    assert record["guess_confidence"] == 0.66
+    assert record["anchor_cell"] == [14, 2]
+    assert record["feature_box_world"] == [108, 8, 124, 28]
+
+
+def test_decision_explanation_names_the_exact_visual_lead_and_evidence():
+    payload = _event(reason="investigate possible exit seen on screen")
+    payload.update(
+        {
+            "state": "overworld",
+            "action": "right",
+            "decision_context": {
+                "kind": "visual_guess",
+                "label": "Possible passage at right",
+                "anchor_cell": [14, 2],
+                "evidence": "tall bright feature near the right room edge",
+                "confidence": 0.68,
+            },
+        }
+    )
+
+    category, _action, explanation = decision_parts(payload)
+
+    assert category == "VISUAL GUESS"
+    assert "Possible passage at right" in explanation
+    assert "map cell (14, 2)" in explanation
+    assert "tall bright feature" in explanation
+    assert "68% evidence score" in explanation
+
+
 def test_camera_view_updates_during_cutscene_without_player_coordinates():
     model = WallMapModel()
     initial = _event(48, 48)
@@ -402,6 +715,39 @@ def test_telemetry_output_uses_plain_labels_and_cutscene_state():
     assert "Kris: (160, 128)" in text
     assert "Facing: up" in text
     assert "Camera: (0, 80) 320x240" in text
+
+
+def test_telemetry_output_explains_v9_packet_motion_and_player_geometry():
+    payload = _event(80, 72)
+    payload["telemetry"].update(
+        {
+            "version": 9,
+            "packet_sequence": 44,
+            "packet_parts": ["core", "motion", "render"],
+            "player_foot_x": 88,
+            "player_foot_y": 96,
+            "sample_delta_x": 0,
+            "sample_delta_y": 4,
+            "sample_interval_ms": 16.7,
+            "hspeed": 0,
+            "vspeed": 4,
+            "player_sprite_name": "spr_krisd",
+            "player_bbox_left": 80,
+            "player_bbox_top": 72,
+            "player_bbox_right": 96,
+            "player_bbox_bottom": 96,
+            "image_index": 2,
+            "fps": 30,
+        }
+    )
+
+    text = format_telemetry_event(payload)
+
+    assert "Packet: v9  #44" in text
+    assert "Parts: core, motion, render" in text
+    assert "Motion sample: delta (0.0, 4.0) in 16.7 ms" in text
+    assert "Render: spr_krisd" in text
+    assert "player bounds (80, 72)-(96, 96)" in text
 
 
 def test_gui_loads_and_updates_persistent_remembered_room_tiles():
@@ -471,8 +817,8 @@ def test_ai_decision_output_explains_visual_guesses_as_unconfirmed():
 
     category, _action, explanation = decision_parts(payload)
 
-    assert category == "VISUAL GUESS"
-    assert "visually distinctive scenery" in explanation
+    assert category == "OBJECT GUESS"
+    assert "one collision side" in explanation
 
 
 def test_ai_decision_output_explains_current_character_guess():
