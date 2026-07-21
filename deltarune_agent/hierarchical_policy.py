@@ -5,10 +5,10 @@ from pathlib import Path
 from .actions import Action
 from .battle import BattleController
 from .dialogue import DialogueReader
-from .improved_explorer import ImprovedExplorer
 from .objectives import ObjectiveManager
 from .observer import Observation
 from .perception import GameState, Perception
+from .run2_explorer import Run2Explorer
 from .telemetry import TelemetrySample
 from .visual_freshness import VisualFreshnessGuard
 
@@ -17,7 +17,7 @@ class HierarchicalPolicy:
     """Specialized reflex controllers wrapped around the proven explorer."""
 
     def __init__(self, seed: int = 0, memory_path: Path | None = None):
-        self.explorer = ImprovedExplorer(seed, memory_path)
+        self.explorer = Run2Explorer(seed, memory_path)
         self.objectives = ObjectiveManager()
         self.dialogue = DialogueReader()
         self.battle = BattleController()
