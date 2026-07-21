@@ -4,10 +4,11 @@ import time
 from pathlib import Path
 
 from .controller import KeyboardController
+from .hierarchical_policy import HierarchicalPolicy
 from .observer import ScreenObserver
 from .perception import CutsceneTracker, VisualStateDetector
-from .policy import StarterPolicy
 from .progress import EpisodeTracker
+from .replay import print_replay, replay_run
 from .telemetry import TelemetryReceiver, fuse_perception
 from .window import (
     client_region,
@@ -63,6 +64,15 @@ def build_parser() -> argparse.ArgumentParser:
     listen = sub.add_parser("telemetry", help="print telemetry without controlling the game")
     listen.add_argument("--port", type=int, default=42069)
     listen.add_argument("--seconds", type=float, default=30.0)
+    replay = sub.add_parser("replay", help="evaluate a recorded run without opening the game")
+    replay.add_argument("run_directory", type=Path)
+    replay.add_argument(
+        "--visual-memory",
+        type=Path,
+        default=Path("memory/visual_states.json"),
+        help="visual model used to reclassify saved frames",
+    )
+    replay.add_argument("--no-save", action="store_true", help="do not write metrics.json and replay.json")
     sub.add_parser("gui", help="open the desktop controller and wall-map viewer")
     return parser
 
@@ -128,7 +138,7 @@ def run(args: argparse.Namespace) -> Path:
     detector = VisualStateDetector(args.visual_memory)
     cutscene_tracker = CutsceneTracker()
     telemetry_receiver = None if args.no_telemetry else TelemetryReceiver(args.telemetry_port)
-    policy = StarterPolicy(args.seed, args.memory)
+    policy = HierarchicalPolicy(args.seed, args.memory)
     if policy.memory_warning:
         print(f"Memory warning: {policy.memory_warning}")
     if detector.memory_warning:
@@ -170,8 +180,7 @@ def run(args: argparse.Namespace) -> Path:
                         _runtime_status(
                             args.event_stream,
                             "background",
-                            "Deltarune lost focus; continuing with input targeted "
-                            "only to its window.",
+                            "Deltarune lost focus; continuing with input targeted only to its window.",
                         )
                     else:
                         _runtime_status(
@@ -189,10 +198,7 @@ def run(args: argparse.Namespace) -> Path:
                 if observation.visual_valid:
                     detector.learn_from_telemetry(observation.frame, telemetry.mode)
             elif telemetry_receiver is not None and step == 15 and not telemetry_seen:
-                print(
-                    "Telemetry warning: no packets received; continuing with the "
-                    "learned visual model."
-                )
+                print("Telemetry warning: no packets received; continuing with the learned visual model.")
             perception = cutscene_tracker.update(
                 fuse_perception(visual, telemetry),
                 telemetry,
@@ -252,6 +258,14 @@ def main() -> None:
         run(args)
     elif args.command == "telemetry":
         listen(args)
+    elif args.command == "replay":
+        print_replay(
+            replay_run(
+                args.run_directory,
+                args.visual_memory,
+                save_report=not args.no_save,
+            )
+        )
     elif args.command == "gui":
         from .gui import launch_gui
 
