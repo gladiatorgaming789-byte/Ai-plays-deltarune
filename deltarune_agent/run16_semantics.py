@@ -14,6 +14,7 @@ from .world_model import CELL_SIZE, WorldModel
 CARDINAL_DIRECTIONS = {"up", "down", "left", "right"}
 SCREEN_EXTENSION_FIELDS = (
     "animated_bonus_applied",
+    "animated_sprite_evidence",
     "doorway_failed_story_epoch",
     "doorway_story_retry_epoch",
     "story_sensitive_doorway",
@@ -526,6 +527,31 @@ def repair_portal_action_conflicts(world: WorldModel) -> int:
         primary["canonicalized_action_variants"] = max(1, len(aliases) - 1)
         world._refresh_portal(primary)
         used.add(primary_id)
+
+    # Older memories only marked the reverse portal as a return leg. Transfer
+    # that observation to the outbound direction as round-trip evidence so a
+    # visited side room can become likely optional without assuming its purpose.
+    portals = list(world.warp_portals.values())
+    for outbound in portals:
+        if str(outbound.get("action") or "") not in CARDINAL_DIRECTIONS:
+            refresh_portal_classification(outbound)
+            continue
+        reverse_returns = max(
+            (
+                _safe_int(reverse.get("return_backtracks"))
+                for reverse in portals
+                if reverse.get("from_room") == outbound.get("to_room")
+                and reverse.get("to_room") == outbound.get("from_room")
+                and str(reverse.get("action") or "") in CARDINAL_DIRECTIONS
+            ),
+            default=0,
+        )
+        if reverse_returns:
+            outbound["round_trip_returns"] = max(
+                _safe_int(outbound.get("round_trip_returns")),
+                reverse_returns,
+            )
+        refresh_portal_classification(outbound)
     return repaired
 
 
