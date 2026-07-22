@@ -1,1 +1,1 @@
-AGENT_REVISION = "run14-classroom-doorway-bounded-leads-v1"
+AGENT_REVISION = "run15-story-sensitive-doors-frontier-first-v1"
