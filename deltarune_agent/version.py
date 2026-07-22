@@ -1,1 +1,1 @@
-AGENT_REVISION = "run8-screenshot-grounded-guessing-v1"
+AGENT_REVISION = "run9-narrow-pinch-grounded-motion-v1"
