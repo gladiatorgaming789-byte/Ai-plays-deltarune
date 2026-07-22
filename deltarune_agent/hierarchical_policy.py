@@ -10,10 +10,17 @@ from .dialogue import DialogueReader
 from .objectives import ObjectiveManager
 from .observer import Observation
 from .perception import GameState, Perception
-from .run15_explorer import Run15Explorer
 from .run15_screen_regions import install_run15_screen_region_analyzer
+from .run16_semantics import install_run16_semantics
 from .telemetry import TelemetrySample
 from .visual_freshness import VisualFreshnessGuard
+
+
+# Install persistence and portal classification before importing the explorer
+# inheritance chain. Older explorer modules import the classification helper by
+# value, so this order ensures they all observe Run 16 semantics.
+install_run16_semantics()
+from .run16_explorer import Run16Explorer  # noqa: E402
 
 
 # runner.py imports this module before progress.py. Install the exact-room-bounds
@@ -27,7 +34,7 @@ class HierarchicalPolicy:
     """Specialized reflex controllers wrapped around the proven explorer."""
 
     def __init__(self, seed: int = 0, memory_path: Path | None = None):
-        self.explorer = Run15Explorer(seed, memory_path)
+        self.explorer = Run16Explorer(seed, memory_path)
         self.objectives = ObjectiveManager()
         self.dialogue = DialogueReader()
         self.battle = BattleController()
