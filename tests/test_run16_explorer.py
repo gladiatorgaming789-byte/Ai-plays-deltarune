@@ -3,11 +3,15 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 
-from deltarune_agent.run16_explorer import Run16Explorer
 from deltarune_agent.run16_semantics import (
     classify_portal,
+    install_run16_semantics,
     repair_portal_action_conflicts,
 )
+
+install_run16_semantics()
+
+from deltarune_agent.run16_explorer import Run16Explorer
 from deltarune_agent.world_model import WorldModel
 
 
