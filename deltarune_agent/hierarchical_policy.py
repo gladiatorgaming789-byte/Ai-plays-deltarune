@@ -20,7 +20,7 @@ from .visual_freshness import VisualFreshnessGuard
 # inheritance chain. Older explorer modules import the classification helper by
 # value, so this order ensures they all observe Run 16 semantics.
 install_run16_semantics()
-from .run16_explorer import Run16Explorer  # noqa: E402
+from .run16_warp_guard import Run16GuardedExplorer  # noqa: E402
 
 
 # runner.py imports this module before progress.py. Install the exact-room-bounds
@@ -34,7 +34,7 @@ class HierarchicalPolicy:
     """Specialized reflex controllers wrapped around the proven explorer."""
 
     def __init__(self, seed: int = 0, memory_path: Path | None = None):
-        self.explorer = Run16Explorer(seed, memory_path)
+        self.explorer = Run16GuardedExplorer(seed, memory_path)
         self.objectives = ObjectiveManager()
         self.dialogue = DialogueReader()
         self.battle = BattleController()
