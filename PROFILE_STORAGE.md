@@ -1,12 +1,17 @@
-# Save Profiles and Safe Testing Launcher
+# Save Profiles and Integrated Build Safety
 
-The desktop command now opens a profile launcher before the controller:
+The desktop command opens one controller window:
 
 ```powershell
 python -m deltarune_agent gui
 ```
 
-`Start AI GUI.bat` opens the same launcher.
+`Start AI GUI.bat` opens the same integrated GUI. The main window contains two tabs:
+
+- **Controller** — the live map, run controls, decisions, and telemetry;
+- **Profiles & Build** — save-profile management and development-version checks.
+
+There is no separate profile-launcher window.
 
 ## AppData storage
 
@@ -24,7 +29,7 @@ Set `DELTARUNE_AGENT_DATA_DIR` to use a different data root while developing or 
 
 ## First-launch migration
 
-When the launcher first sees real `memory` or `runs` directories in the project, it:
+When the integrated GUI first sees real `memory` or `runs` directories in the project, it:
 
 1. copies them into the active profile;
 2. verifies every copied file by relative path and size;
@@ -36,25 +41,25 @@ The repository still sees `memory/` and `runs/` at their normal paths, so existi
 
 ## Profile actions
 
-The launcher supports creating empty profiles, duplicating a profile (including its memory and runs), renaming profiles, deleting profiles, and opening a profile's AppData folder.
+The **Profiles & Build** tab supports creating empty profiles, duplicating a profile (including its memory and runs), renaming profiles, deleting profiles, and opening a profile's AppData folder.
 
-Close the controller before selecting another profile. A selected profile becomes the active target for both the GUI and later direct command-line runs from that repository folder.
+Profile switching is disabled while the AI is running. After a profile changes, the controller reloads that profile's learned navigation and remembered room views immediately.
 
 ## Branch and update safety
 
-The launcher uses GitHub Desktop's bundled Git when regular `git` is not on PATH. It fetches `origin`, displays the current branch and installed revision, and warns before opening the controller when the checkout is:
+The **Profiles & Build** tab uses GitHub Desktop's bundled Git when regular `git` is not on PATH. It fetches `origin`, displays the current branch and installed revision, and warns before starting the AI when the checkout is:
 
-- on a branch other than `agent/hierarchical-agent-improvements`;
+- on a branch other than `development`;
 - behind the remote development branch;
 - diverged from origin; or
 - unable to verify the remote state.
 
-The controller window title keeps the profile, development-branch state, freshness, and agent revision visible during a run.
+The active profile, development-branch state, freshness, and agent revision remain visible in the main GUI header and window title while testing.
 
-On first launch, the app also creates this untracked file in the repository:
+The persistent untracked shortcut remains supported:
 
 ```text
 Start Deltarune Agent Safe.cmd
 ```
 
-It is added to `.git/info/exclude`, so GitHub Desktop does not list it as a change, and it remains in the folder when branches switch.
+It verifies the checkout before opening the same integrated GUI. It is added to `.git/info/exclude`, so GitHub Desktop does not list it as a change, and it remains in the folder when branches switch.
