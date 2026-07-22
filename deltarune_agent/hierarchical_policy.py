@@ -10,8 +10,8 @@ from .dialogue import DialogueReader
 from .objectives import ObjectiveManager
 from .observer import Observation
 from .perception import GameState, Perception
-from .run14_explorer import Run14Explorer
-from .run14_screen_regions import install_run14_screen_region_analyzer
+from .run15_explorer import Run15Explorer
+from .run15_screen_regions import install_run15_screen_region_analyzer
 from .telemetry import TelemetrySample
 from .visual_freshness import VisualFreshnessGuard
 
@@ -20,14 +20,14 @@ from .visual_freshness import VisualFreshnessGuard
 # exporter before EpisodeTracker captures its export helper. Install the newest
 # screen analyzer before the explorer observes its first screenshot.
 install_aligned_navigation_exporter()
-install_run14_screen_region_analyzer()
+install_run15_screen_region_analyzer()
 
 
 class HierarchicalPolicy:
     """Specialized reflex controllers wrapped around the proven explorer."""
 
     def __init__(self, seed: int = 0, memory_path: Path | None = None):
-        self.explorer = Run14Explorer(seed, memory_path)
+        self.explorer = Run15Explorer(seed, memory_path)
         self.objectives = ObjectiveManager()
         self.dialogue = DialogueReader()
         self.battle = BattleController()
