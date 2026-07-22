@@ -8,11 +8,12 @@ from .build_status import BuildStatus
 from .gui import AgentGUI, WallMapModel
 from .profile_panel import ProfileBuildPanel
 from .profiles import MigrationResult, Profile, ProfileStore
+from .reinforcement_panel import ReinforcementSettingsPanel
 from .version import AGENT_REVISION
 
 
 class IntegratedAgentGUI(AgentGUI):
-    """The existing controller plus an in-window profiles and build-safety tab."""
+    """Controller with profile, build-safety, and reinforcement settings tabs."""
 
     def __init__(
         self,
@@ -32,7 +33,9 @@ class IntegratedAgentGUI(AgentGUI):
         self.main_tabs: ttk.Notebook
         self.controller_tab: ttk.Frame
         self.profile_tab: ttk.Frame
+        self.reinforcement_tab: ttk.Frame
         self.profile_panel: ProfileBuildPanel
+        self.reinforcement_panel: ReinforcementSettingsPanel
         super().__init__(root)
         self._update_window_title()
 
@@ -56,8 +59,10 @@ class IntegratedAgentGUI(AgentGUI):
         self.main_tabs.pack(fill="both", expand=True, padx=10, pady=(6, 10))
         self.controller_tab = ttk.Frame(self.main_tabs)
         self.profile_tab = ttk.Frame(self.main_tabs)
+        self.reinforcement_tab = ttk.Frame(self.main_tabs)
         self.main_tabs.add(self.controller_tab, text="Controller")
         self.main_tabs.add(self.profile_tab, text="Profiles & Build")
+        self.main_tabs.add(self.reinforcement_tab, text="Reinforcement")
 
         self.root = self.controller_tab  # type: ignore[assignment]
         try:
@@ -74,6 +79,11 @@ class IntegratedAgentGUI(AgentGUI):
             on_profile_activated=self._profile_activated,
             on_build_status=self._build_status_changed,
         )
+        self.reinforcement_panel = ReinforcementSettingsPanel(
+            self.reinforcement_tab,
+            project_root=self.project_root,
+        )
+        self.reinforcement_panel.pack(fill="both", expand=True)
 
     def _can_switch_profile(self) -> bool:
         return self.process is None or self.process.poll() is not None
@@ -109,6 +119,8 @@ class IntegratedAgentGUI(AgentGUI):
             self.ai_output,
             f'--- Active save profile: {profile.name} ---\n',
         )
+        if hasattr(self, "reinforcement_panel"):
+            self.reinforcement_panel.reload()
         self._update_window_title()
 
     def _build_status_changed(self, status: BuildStatus) -> None:
