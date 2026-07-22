@@ -49,3 +49,43 @@ def test_known_old_title_finds_same_executable_after_title_changes():
             match = window_module.find_window("OLD_SURVEY_TITLE", path)
 
     assert match == current
+
+
+def test_untitled_game_window_can_be_found_by_executable():
+    game = WindowInfo(200, "", "DELTARUNE.exe")
+
+    with patch.object(window_module, "visible_windows", return_value=[game]):
+        match = window_module.find_window("deltarune")
+
+    assert match == game
+
+
+def test_blank_identifier_auto_detects_remembered_untitled_window():
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "window_titles.json"
+        remember_window(path, WindowInfo(100, "", "DELTARUNE.exe"))
+        current = WindowInfo(200, "", "DELTARUNE.exe")
+        unrelated = WindowInfo(300, "Notes", "notepad.exe")
+
+        with patch.object(
+            window_module,
+            "visible_windows",
+            return_value=[current, unrelated],
+        ):
+            match = window_module.find_window("", path)
+
+    assert match == current
+
+
+def test_blank_identifier_does_not_guess_among_unrelated_windows():
+    first = WindowInfo(200, "Notes", "notepad.exe")
+    second = WindowInfo(300, "Browser", "chrome.exe")
+
+    with patch.object(
+        window_module,
+        "visible_windows",
+        return_value=[first, second],
+    ):
+        match = window_module.find_window("")
+
+    assert match is None
