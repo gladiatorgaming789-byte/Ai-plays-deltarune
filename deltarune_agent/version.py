@@ -1,1 +1,1 @@
-AGENT_REVISION = "run16-persistent-evidence-warp-semantics-v1"
+AGENT_REVISION = "run17-configurable-reinforcement-v1"
