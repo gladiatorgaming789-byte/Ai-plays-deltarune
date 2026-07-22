@@ -1,1 +1,1 @@
-AGENT_REVISION = "run11-appdata-profiles-build-safety-v1"
+AGENT_REVISION = "run12-integrated-profile-build-tab-v1"
