@@ -8,7 +8,7 @@ import subprocess
 import sys
 
 
-DEVELOPMENT_BRANCH = "agent/hierarchical-agent-improvements"
+DEVELOPMENT_BRANCH = "development"
 SAFE_LAUNCHER_NAME = "Start Deltarune Agent Safe.cmd"
 
 
