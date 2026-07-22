@@ -2,9 +2,9 @@ import sys
 
 
 if len(sys.argv) >= 2 and sys.argv[1] == "gui":
-    from .profile_launcher import launch_profile_launcher
+    from .integrated_gui import launch_integrated_gui
 
-    launch_profile_launcher()
+    launch_integrated_gui()
 else:
     from .runner import main
 
