@@ -10,24 +10,24 @@ from .dialogue import DialogueReader
 from .objectives import ObjectiveManager
 from .observer import Observation
 from .perception import GameState, Perception
-from .run13_explorer import Run13Explorer
-from .run13_screen_regions import install_run13_screen_region_analyzer
+from .run14_explorer import Run14Explorer
+from .run14_screen_regions import install_run14_screen_region_analyzer
 from .telemetry import TelemetrySample
 from .visual_freshness import VisualFreshnessGuard
 
 
 # runner.py imports this module before progress.py. Install the exact-room-bounds
-# exporter before EpisodeTracker captures its export helper. Install the run-13
+# exporter before EpisodeTracker captures its export helper. Install the newest
 # screen analyzer before the explorer observes its first screenshot.
 install_aligned_navigation_exporter()
-install_run13_screen_region_analyzer()
+install_run14_screen_region_analyzer()
 
 
 class HierarchicalPolicy:
     """Specialized reflex controllers wrapped around the proven explorer."""
 
     def __init__(self, seed: int = 0, memory_path: Path | None = None):
-        self.explorer = Run13Explorer(seed, memory_path)
+        self.explorer = Run14Explorer(seed, memory_path)
         self.objectives = ObjectiveManager()
         self.dialogue = DialogueReader()
         self.battle = BattleController()
