@@ -1,1 +1,1 @@
-AGENT_REVISION = "run17-configurable-reinforcement-v1"
+AGENT_REVISION = "run18-configurable-reinforcement-v1"
