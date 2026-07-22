@@ -12,6 +12,8 @@ user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 CONTROLLER_TITLES = {"deltarune ai controller"}
+CONTROLLER_EXECUTABLES = {"python.exe", "pythonw.exe", "py.exe"}
+GAME_EXECUTABLE_HINTS = ("deltarune", "survey_program", "survey-program")
 kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
 kernel32.OpenProcess.restype = wintypes.HANDLE
 kernel32.QueryFullProcessImageNameW.argtypes = (
@@ -96,13 +98,20 @@ def _process_id(hwnd: int) -> int:
 
 
 def visible_windows() -> list[WindowInfo]:
+    """Return visible top-level windows, including windows with blank titles."""
     windows: list[WindowInfo] = []
 
     @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
     def callback(hwnd: int, _lparam: int) -> bool:
+        if not user32.IsWindowVisible(hwnd):
+            return True
         title = _title(hwnd).strip()
-        if user32.IsWindowVisible(hwnd) and title:
-            windows.append(WindowInfo(hwnd, title, _executable(hwnd)))
+        executable = _executable(hwnd).strip()
+        # Untitled GameMaker windows are valid targets. Keep them when their
+        # executable can identify the process; discard only truly anonymous
+        # handles that cannot be selected safely.
+        if title or executable:
+            windows.append(WindowInfo(hwnd, title, executable))
         return True
 
     user32.EnumWindows(callback, 0)
@@ -157,13 +166,83 @@ def remember_window(path: Path | None, window: WindowInfo) -> None:
     temporary.replace(path)
 
 
-def find_window(identifier: str, known_path: Path | None = None) -> WindowInfo | None:
-    needle = identifier.casefold()
-    windows = [
+def _candidate_windows() -> list[WindowInfo]:
+    return [
         window
         for window in visible_windows()
         if window.title.casefold() not in CONTROLLER_TITLES
+        and not (
+            not window.title
+            and window.executable.casefold() in CONTROLLER_EXECUTABLES
+        )
     ]
+
+
+def _find_known_window(
+    windows: list[WindowInfo],
+    known_path: Path | None,
+    *,
+    identifier: str | None = None,
+) -> WindowInfo | None:
+    needle = identifier.casefold() if identifier else None
+    records = load_known_windows(known_path)
+    for record in reversed(records):
+        known_title = str(record.get("title", "")).casefold()
+        known_executable = str(record.get("executable", "")).casefold()
+        if needle is not None and not (
+            needle in known_title or needle in known_executable
+        ):
+            continue
+        for window in windows:
+            if (
+                known_executable
+                and window.executable.casefold() == known_executable
+            ) or (known_title and window.title.casefold() == known_title):
+                return window
+    return None
+
+
+def _auto_detect_window(
+    windows: list[WindowInfo],
+    known_path: Path | None,
+) -> WindowInfo | None:
+    known = _find_known_window(windows, known_path)
+    if known is not None:
+        return known
+
+    hinted = [
+        window
+        for window in windows
+        if any(
+            hint in window.executable.casefold()
+            or hint in window.title.casefold()
+            for hint in GAME_EXECUTABLE_HINTS
+        )
+    ]
+    if len(hinted) == 1:
+        return hinted[0]
+    if hinted:
+        return max(
+            hinted,
+            key=lambda window: (
+                "deltarune" in window.executable.casefold(),
+                bool(window.executable),
+                bool(window.title),
+            ),
+        )
+
+    # Do not guess among unrelated applications. A single remaining untitled
+    # non-controller window is safe enough to select by process identity.
+    untitled = [window for window in windows if not window.title and window.executable]
+    return untitled[0] if len(untitled) == 1 else None
+
+
+def find_window(identifier: str, known_path: Path | None = None) -> WindowInfo | None:
+    needle = identifier.strip().casefold()
+    windows = _candidate_windows()
+    if not needle:
+        return _auto_detect_window(windows, known_path)
+
     direct_matches: list[tuple[int, WindowInfo]] = []
     for window in windows:
         title = window.title.casefold()
@@ -181,32 +260,21 @@ def find_window(identifier: str, known_path: Path | None = None) -> WindowInfo |
             direct_matches.append((score, window))
     if direct_matches:
         return max(direct_matches, key=lambda item: item[0])[1]
-    matching_records = [
-        item
-        for item in load_known_windows(known_path)
-        if needle in str(item.get("title", "")).casefold()
-        or needle in str(item.get("executable", "")).casefold()
-    ]
-    for record in reversed(matching_records):
-        known_title = str(record.get("title", "")).casefold()
-        known_executable = str(record.get("executable", "")).casefold()
-        for window in windows:
-            if (
-                known_executable
-                and window.executable.casefold() == known_executable
-            ) or (known_title and window.title.casefold() == known_title):
-                return window
-    return None
+    return _find_known_window(windows, known_path, identifier=needle)
+
+
+def _window_label(window: WindowInfo) -> str:
+    return f'{window.executable or "unknown"}: {window.title or "<untitled>"}'
 
 
 def focus_window(identifier: str, known_path: Path | None = None) -> WindowInfo:
     window = find_window(identifier, known_path)
     if window is None:
-        choices = "\n".join(
-            f'  {item.executable or "unknown"}: {item.title}' for item in visible_windows()
-        )
+        choices = "\n".join(f"  {_window_label(item)}" for item in visible_windows())
+        requested = identifier.strip()
+        target = f'containing "{requested}"' if requested else "by auto-detection"
         raise RuntimeError(
-            f'No visible window or executable containing "{identifier}" was found.\n'
+            f"No visible game window could be selected {target}.\n"
             f"Available windows:\n{choices}"
         )
     user32.ShowWindow(window.hwnd, 9)  # SW_RESTORE
