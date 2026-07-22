@@ -34,8 +34,9 @@ def test_promotion_only_region_is_neutralized(tmp_path: Path):
     record = explorer.screen_regions[("room_test", 2, 4)]
 
     assert record["hypothesis"] is None
-    assert record["guess_state"] == "retired"
     assert "motion_sprite_candidate" not in record
+    assert "motion_sprite_tested" not in record
+    assert "source_evidence_kind" not in record
     assert explorer.removed_promoted_regions == 1
 
 
