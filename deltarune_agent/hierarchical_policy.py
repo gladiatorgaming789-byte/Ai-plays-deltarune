@@ -10,7 +10,7 @@ from .dialogue import DialogueReader
 from .objectives import ObjectiveManager
 from .observer import Observation
 from .perception import GameState, Perception
-from .run8_explorer import Run8Explorer
+from .run9_explorer import Run9Explorer
 from .telemetry import TelemetrySample
 from .visual_freshness import VisualFreshnessGuard
 
@@ -24,7 +24,7 @@ class HierarchicalPolicy:
     """Specialized reflex controllers wrapped around the proven explorer."""
 
     def __init__(self, seed: int = 0, memory_path: Path | None = None):
-        self.explorer = Run8Explorer(seed, memory_path)
+        self.explorer = Run9Explorer(seed, memory_path)
         self.objectives = ObjectiveManager()
         self.dialogue = DialogueReader()
         self.battle = BattleController()
