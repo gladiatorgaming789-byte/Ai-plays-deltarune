@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 from .room_view import RoomViewMemory, RoomViewTile
 from .telemetry import TelemetrySample
@@ -57,6 +58,11 @@ def player_render_box(
 class AlignedRoomViewMemory(RoomViewMemory):
     """Room-view memory with full-sprite masking and exact room dimensions."""
 
+    def __init__(self, root: Path):
+        super().__init__(root)
+        self.capture_failures = 0
+        self.last_capture_error: str | None = None
+
     def capture(
         self,
         frame,
@@ -74,7 +80,18 @@ class AlignedRoomViewMemory(RoomViewMemory):
                 player_bbox_bottom=render_box[3],
             )
 
-        changed = super().capture(frame, capture_sample, step)
+        # A partial camera rectangle can occasionally round to an invalid Pillow
+        # tile at a room edge. Scene memory is useful evidence, but it must never
+        # be able to terminate the controller. Skip only the malformed capture
+        # and expose the error through the run summary for later diagnosis.
+        try:
+            changed = super().capture(frame, capture_sample, step)
+            self.last_capture_error = None
+        except (OSError, ValueError, SystemError) as exc:
+            self.capture_failures += 1
+            self.last_capture_error = f"{type(exc).__name__}: {exc}"
+            changed = []
+
         room = telemetry.room_name or str(telemetry.room_id)
         rooms = self._rooms()
         room_data = rooms.get(room)
