@@ -1,1 +1,1 @@
-AGENT_REVISION = "run15-story-sensitive-doors-frontier-first-v1"
+AGENT_REVISION = "run16-persistent-evidence-warp-semantics-v1"
