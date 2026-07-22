@@ -1,1 +1,1 @@
-AGENT_REVISION = "run9-narrow-pinch-grounded-motion-v1"
+AGENT_REVISION = "run10-untitled-window-telemetry-warning-v1"
