@@ -7,7 +7,7 @@ import shutil
 import subprocess
 
 
-DEVELOPMENT_BRANCH = "agent/hierarchical-agent-improvements"
+DEVELOPMENT_BRANCH = "development"
 
 
 @dataclass(frozen=True)
