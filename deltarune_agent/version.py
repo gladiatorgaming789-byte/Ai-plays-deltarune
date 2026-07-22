@@ -1,1 +1,1 @@
-AGENT_REVISION = "run12-integrated-profile-build-tab-v1"
+AGENT_REVISION = "run13-screenshot-grounded-exits-wide-pinch-v1"
