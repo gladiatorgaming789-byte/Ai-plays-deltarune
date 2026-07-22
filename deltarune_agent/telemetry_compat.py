@@ -6,18 +6,17 @@ from typing import Callable
 from . import telemetry as telemetry_module
 
 
-EXPECTED_TELEMETRY_BUILD = "v9-run10-window-autodetect-v1"
-_BUILD_PREFIX = "build="
 _INSTALLED_FLAG = "_ai_telemetry_compatibility_guard_installed"
 _reported_warnings: set[str] = set()
 
 
 def telemetry_update_warning(packet: bytes) -> str | None:
-    """Return a clear update warning for an old installed telemetry patch.
+    """Return an update warning only when the telemetry protocol is incompatible.
 
-    Only core packets are expected to carry the build marker. Optional motion,
-    collision, render, and timing packets may arrive before the matching core
-    datagram on UDP, so they must not cause a false warning by themselves.
+    The Python controller revision and telemetry protocol are separate. A run's
+    ``agent_revision`` comes from Python and cannot be made stale by an old
+    ``data.win`` patch. The telemetry installer needs reapplying only when this
+    protocol changes or a game update replaces the modified chapter file.
     """
 
     start = packet.find(telemetry_module.MAGIC)
@@ -47,31 +46,7 @@ def telemetry_update_warning(packet: bytes) -> str | None:
             f"(v{version}) than this controller (v{telemetry_module.PROTOCOL_VERSION}). "
             "Update the Python project before running live input."
         )
-
-    values: dict[str, str] = {}
-    for token in fields[8:]:
-        if token == "end":
-            break
-        key, separator, value = token.partition("=")
-        if separator and key:
-            values[key] = value
-    if values.get("part", "core") != "core":
-        return None
-
-    installed_build = values.get("build", "")
-    if installed_build == EXPECTED_TELEMETRY_BUILD:
-        return None
-    if installed_build:
-        detail = f"installed build {installed_build!r}"
-    else:
-        detail = "an older v9 patch with no build marker"
-    return (
-        "Telemetry mod update required: the game is using "
-        f"{detail}, while this controller expects {EXPECTED_TELEMETRY_BUILD!r}. "
-        "Updating or pulling the project folder alone does not modify the chapter's "
-        "data.win. Restore the clean chapter backup, run the current "
-        "mods/telemetry/AiTelemetry.csx, and save the newly patched data.win."
-    )
+    return None
 
 
 def _report_once(message: str) -> None:
@@ -82,7 +57,7 @@ def _report_once(message: str) -> None:
 
 
 def install_telemetry_compatibility_guard() -> None:
-    """Wrap packet parsing once so GUI and CLI runs surface patch mismatches."""
+    """Wrap packet parsing once so GUI and CLI runs surface protocol mismatches."""
 
     if getattr(telemetry_module, _INSTALLED_FLAG, False):
         return
