@@ -41,7 +41,7 @@ jobs:
       - name: Compile all Python files
         run: python -m compileall -q deltarune_agent tests
 
-      - name: Import every package module
+      - name: Import every library module
         shell: pwsh
         run: |
           @'
@@ -49,10 +49,13 @@ jobs:
           import pkgutil
           import deltarune_agent
 
+          executable_modules = {"deltarune_agent.__main__"}
           failures = []
           for module in pkgutil.walk_packages(
               deltarune_agent.__path__, deltarune_agent.__name__ + "."
           ):
+              if module.name in executable_modules:
+                  continue
               try:
                   importlib.import_module(module.name)
               except BaseException as exc:
