@@ -26,7 +26,8 @@ class KeyboardController:
         if enabled == self.background_input:
             return
         # Release through the old backend before changing where future key
-        # messages are sent.
+        # messages are sent. If release fails, keep the old backend selected so
+        # a later cleanup can retry the correct destination.
         self.release_all()
         self.background_input = enabled
 
@@ -55,40 +56,97 @@ class KeyboardController:
         if not action.keys:
             time.sleep(action.duration)
             return
-        for key in action.keys:
-            self._key_down(key)
+
+        pressed: list[str] = []
+        action_error: BaseException | None = None
         try:
+            for key in action.keys:
+                self._key_down(key)
+                pressed.append(key)
             time.sleep(action.duration)
+        except BaseException as exc:
+            action_error = exc
+            raise
         finally:
-            for key in reversed(action.keys):
+            release_error = self._release_temporary(pressed)
+            if action_error is None and release_error is not None:
+                raise release_error
+
+    def _release_temporary(self, keys: list[str]) -> BaseException | None:
+        first_error: BaseException | None = None
+        for key in reversed(keys):
+            try:
                 self._key_up(key)
+            except BaseException as exc:
+                if first_error is None:
+                    first_error = exc
+        return first_error
 
     def _hold(self, keys: tuple[str, ...]) -> None:
-        for key in reversed(self.held_keys):
-            if key not in keys:
-                self._key_up(key)
-        for key in keys:
-            if key not in self.held_keys:
+        # Preserve order while preventing duplicate key transitions.
+        requested = tuple(dict.fromkeys(keys))
+        current = list(self.held_keys)
+
+        # Release obsolete keys one at a time and update the tracked state only
+        # after the real backend confirms the release.
+        for key in tuple(reversed(current)):
+            if key in requested:
+                continue
+            self._key_up(key)
+            current.remove(key)
+            self.held_keys = tuple(current)
+
+        newly_pressed: list[str] = []
+        try:
+            for key in requested:
+                if key in current:
+                    continue
                 self._key_down(key)
-        self.held_keys = keys
+                current.append(key)
+                newly_pressed.append(key)
+                self.held_keys = tuple(current)
+        except BaseException:
+            # Roll back only keys pressed by this transition. Existing held keys
+            # remain tracked and can still be released normally.
+            for key in reversed(newly_pressed):
+                try:
+                    self._key_up(key)
+                except BaseException:
+                    continue
+                if key in current:
+                    current.remove(key)
+            self.held_keys = tuple(current)
+            raise
+
+        self.held_keys = requested
 
     def release_all(self) -> None:
         if not self.held_keys:
             return
-        keys = self.held_keys
-        self.held_keys = ()
         if not self.live:
+            self.held_keys = ()
             return
-        if self.background_input:
-            for key in reversed(keys):
-                self._key_up(key)
-            return
+
         # Foreground cleanup must still work after the mouse-triggered
-        # emergency stop.
+        # emergency stop. Keep failed keys in held_keys so a later cleanup can
+        # retry them instead of silently forgetting a potentially stuck key.
         failsafe = pyautogui.FAILSAFE
+        first_error: BaseException | None = None
+        remaining = list(self.held_keys)
         try:
-            pyautogui.FAILSAFE = False
-            for key in reversed(keys):
-                self._key_up(key)
+            if not self.background_input:
+                pyautogui.FAILSAFE = False
+            for key in tuple(reversed(remaining)):
+                try:
+                    self._key_up(key)
+                except BaseException as exc:
+                    if first_error is None:
+                        first_error = exc
+                    continue
+                remaining.remove(key)
+                self.held_keys = tuple(remaining)
         finally:
             pyautogui.FAILSAFE = failsafe
+
+        if first_error is not None:
+            raise first_error
