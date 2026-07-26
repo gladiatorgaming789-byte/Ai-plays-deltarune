@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+from uuid import uuid4
 
 
 DEVELOPMENT_BRANCH = "development"
@@ -55,6 +56,8 @@ def verify_checkout(project_root: Path) -> tuple[bool, str]:
     git = _find_git()
     if git is None:
         return False, "GitHub Desktop's bundled Git could not be found."
+    # Worktrees and some linked checkouts store .git as a text file rather than
+    # a directory. Existence is the correct repository preflight here.
     if not (project_root / ".git").exists():
         return False, "This folder is not a cloned Git repository."
     try:
@@ -84,6 +87,8 @@ def verify_checkout(project_root: Path) -> tuple[bool, str]:
             "--count",
             f"HEAD...origin/{DEVELOPMENT_BRANCH}",
         ).split()
+        if len(counts) != 2:
+            raise ValueError(f"unexpected rev-list output: {counts!r}")
         ahead, behind = (int(value) for value in counts)
     except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
         return (
@@ -105,8 +110,18 @@ def verify_checkout(project_root: Path) -> tuple[bool, str]:
     return True, "Development branch verified and up to date."
 
 
+def _atomic_write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    try:
+        temporary.write_text(content, encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def install_safe_bootstrap(project_root: Path) -> None:
-    if os.name != "nt" or not (project_root / ".git").is_dir():
+    if os.name != "nt" or not (project_root / ".git").exists():
         return
     local_app_data = os.environ.get("LOCALAPPDATA")
     if not local_app_data:
@@ -117,7 +132,14 @@ def install_safe_bootstrap(project_root: Path) -> None:
     source = Path(__file__).resolve()
     try:
         if source != installed_script.resolve():
-            shutil.copy2(source, installed_script)
+            temporary_script = installed_script.with_name(
+                f".{installed_script.name}.{uuid4().hex}.tmp"
+            )
+            try:
+                shutil.copy2(source, temporary_script)
+                os.replace(temporary_script, installed_script)
+            finally:
+                temporary_script.unlink(missing_ok=True)
         command_path = project_root / SAFE_LAUNCHER_NAME
         command = (
             "@echo off\r\n"
@@ -129,8 +151,11 @@ def install_safe_bootstrap(project_root: Path) -> None:
             ")\r\n"
             "if errorlevel 1 pause\r\n"
         )
-        command_path.write_text(command, encoding="utf-8")
+        _atomic_write_text(command_path, command)
         exclude = project_root / ".git" / "info" / "exclude"
+        # A linked worktree has a .git file, so its exclude file is owned by the
+        # common repository and cannot be derived safely here. The launcher is
+        # still installed; only the convenience ignore entry is skipped.
         if exclude.is_file():
             current = exclude.read_text(encoding="utf-8", errors="replace")
             entry = f"/{SAFE_LAUNCHER_NAME}"
@@ -152,9 +177,17 @@ def main() -> int:
     if not safe:
         _message("Deltarune Agent testing blocked", detail, error=True)
         return 1
-    os.chdir(project_root)
-    command = [sys.executable, "-m", "deltarune_agent", "gui"]
-    return subprocess.call(command)
+    try:
+        os.chdir(project_root)
+        command = [sys.executable, "-m", "deltarune_agent", "gui"]
+        return subprocess.call(command)
+    except OSError as exc:
+        _message(
+            "Deltarune Agent launch failed",
+            f"The verified checkout could not start the GUI.\n\n{exc}",
+            error=True,
+        )
+        return 1
 
 
 if __name__ == "__main__":
