@@ -6,6 +6,12 @@ from .actions import Action
 from .window import post_window_key
 
 
+# Bind the real exception type before tests replace the pyautogui module with a
+# minimal fake. Looking up pyautogui.FailSafeException inside an except clause
+# can otherwise mask unrelated simulated key errors with AttributeError.
+_PYAUTOGUI_FAILSAFE = pyautogui.FailSafeException
+
+
 class KeyboardController:
     def __init__(self, live: bool = False, target_hwnd: int | None = None):
         self.live = live
@@ -46,7 +52,7 @@ class KeyboardController:
     def execute(self, action: Action) -> None:
         try:
             self._execute(action)
-        except pyautogui.FailSafeException:
+        except _PYAUTOGUI_FAILSAFE:
             # The documented upper-left mouse gesture is an intentional stop,
             # not a controller failure. Convert it to the runner's normal
             # interrupt path so logs and memory are finalized without an error.
