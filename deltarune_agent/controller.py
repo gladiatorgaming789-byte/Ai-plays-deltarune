@@ -44,6 +44,15 @@ class KeyboardController:
             pyautogui.keyUp(key)
 
     def execute(self, action: Action) -> None:
+        try:
+            self._execute(action)
+        except pyautogui.FailSafeException:
+            # The documented upper-left mouse gesture is an intentional stop,
+            # not a controller failure. Convert it to the runner's normal
+            # interrupt path so logs and memory are finalized without an error.
+            raise KeyboardInterrupt("mouse-corner emergency stop") from None
+
+    def _execute(self, action: Action) -> None:
         if not self.live:
             time.sleep(action.duration)
             return
