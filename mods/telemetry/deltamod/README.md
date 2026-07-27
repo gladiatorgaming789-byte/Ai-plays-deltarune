@@ -1,55 +1,42 @@
-# DeltaMod packaging for AI telemetry
+# DeltaMod telemetry package
 
-DeltaMod 2.x installs mods into its own copied Deltarune installation and applies
-package instructions from `modding.xml`. That model is compatible with the
-telemetry patch in principle because `AiTelemetry.csx` appends code to the
-selected chapter's `data.win` rather than replacing the complete game archive.
+This directory follows the official DeltaMod Modding Standard.
 
-This directory intentionally does **not** include a guessed `modding.xml`.
-DeltaMod's official MiscTools generator is the authoritative way to create that
-instruction file, and an incorrect hand-written patch could corrupt a copied
-archive or silently install incomplete telemetry.
+A finished ZIP must contain these files directly at the archive root:
 
-## Safe package workflow
+```text
+meta.json
+modding.xml
+ChapterNDataPatch.xdelta
+```
 
-1. Begin with the exact clean chapter build that will be declared by the package.
-2. Apply `../AiTelemetry.csx` to a temporary copy with the supported
-   UndertaleModTool version.
-3. Validate telemetry with:
+Do not use `_deltamodInfo.json`, `.disable_gb1click_deltahub`, or an enclosing
+folder. Those are not part of the standard.
 
-   ```powershell
-   python -m deltarune_agent telemetry --seconds 30
-   ```
+## Build process
 
-4. Use DeltaMod MiscTools to generate `modding.xml` from the clean and validated
-   patched archives. Prefer an additive G3M patch; do not package a complete
-   replacement `data.win` unless DeltaMod's generated instruction explicitly
-   requires it.
-5. Generate `_deltamodInfo.json` with the exact Deltarune target version and the
-   SHA-256 checksum of every required clean source file. The template in this
-   directory is not installable until all placeholders are replaced.
-6. Keep `.disable_gb1click_deltahub` in test packages until the package has been
-   validated on a fresh DeltaMod copy.
-7. Test installation, removal, reinstall, and coexistence with at least one
-   unrelated additive mod before publishing.
+1. Apply `../AiTelemetry.csx` to a clean chapter `data.win` and save the patched
+   result separately.
+2. Use MiscTools or another xdelta/VCDIFF creator to generate an `.xdelta` file
+   from the clean file to the telemetry-patched file.
+3. Build the DeltaMod ZIP:
 
-## Compatibility rules
+```powershell
+python mods/telemetry/deltamod/build_package.py `
+  --target-version 1.05 `
+  --patch 5=path\to\Chapter5DataPatch.xdelta `
+  --output dist\AI-Plays-Deltarune-Telemetry-Ch5.zip
+```
 
-- Never layer telemetry v9 over telemetry v1-v8. The installer already refuses
-  this condition.
-- Never declare one chapter's checksum for another chapter.
-- Do not use checksums from a telemetry-patched archive in `neededFiles`; those
-  checks are meant to validate the clean input that DeltaMod will patch.
-- Preserve the telemetry privacy boundary: do not add nearby interactable
-  identities, positions, room-warp coordinates, hidden choice text, selection
-  indexes, or option counts.
-- DeltaMod compatibility does not change the Python controller protocol. The
-  patched game still sends telemetry only to UDP `127.0.0.1:42069`.
+Repeat `--patch` for more chapters. The builder writes `meta.json`, writes one
+`modding.xml` instruction per chapter, calculates every patch checksum, and keeps
+all files at the ZIP root.
 
-## Current status
+A Chapter 5 instruction is:
 
-The repository now contains a standards-aligned package scaffold and validation
-procedure. Full one-click compatibility remains unconfirmed until an official
-MiscTools-generated `modding.xml` is produced and tested against the exact
-current Deltarune archives. Do not rename the scaffold ZIP as a finished
-DeltaMod package before that validation passes.
+```xml
+<patch type="xdelta" patch="./Chapter5DataPatch.xdelta" to="./chapter5_windows/data.win"/>
+```
+
+Use the exact Deltarune version from the clean files used to create the patches.
+Test the finished ZIP in a fresh DeltaMod game copy before publishing it.
