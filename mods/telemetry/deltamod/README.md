@@ -1,28 +1,29 @@
 # DeltaMod telemetry package
 
-> **Compatibility warning:** the currently generated Chapter 5 payload is stale and should not be distributed. It was built against an older Chapter 5 `data.win`. Deltarune Chapter 5 was updated after that source file was captured, so current installations can reject it as the wrong xdelta source. Regenerate the Chapter 5 payload and all-chapters ZIP from a clean current Chapter 5 file before release.
-
-The intended user-facing release artifact is:
+The current user-facing release artifact is:
 
 ```text
-AI-Telemetry-DeltaMod.zip
+AI-Telemetry-DeltaMod-v9.0.1.zip
 ```
 
-Once regenerated for the current game build, it should be ready to import into DeltaMod. **Do not extract it, do not run UndertaleModTool, and do not manually patch any `data.win` file.** Import the ZIP itself, then enable or disable the mod through DeltaMod.
+Import that ZIP directly into DeltaMod, then enable or disable the mod there. **Do not extract it, do not run UndertaleModTool, and do not manually patch any `data.win` file.**
 
-## What “patch” means here
+## Fixed in 9.0.1
 
-DeltaMod handles the game-file operation automatically. End users do not run a patcher and do not replace their game files by hand.
+The original generated payloads used valid VCDIFF data but placed each optional Adler-32 checksum at the end of its window. Standard xdelta3/DeltaMod expects the four checksum bytes immediately after the VCDIFF window-length fields and before the data, instruction, and address sections. DeltaMod therefore misread the old payload and reported that the xdelta was being applied to the wrong source file.
 
-Because telemetry modifies GML code stored inside each chapter's `data.win`, the importable ZIP contains compact `.xdelta` payloads. When the mod is enabled, DeltaMod reads `modding.xml` and applies those payloads inside its managed game copy. Disabling the mod removes that modification through DeltaMod's normal mod-management workflow.
+Version 9.0.1 moves every checksum into the standard position without changing the reconstructed telemetry targets.
 
-In other words:
+Validation performed for all five chapters:
 
-- **User workflow:** import one ZIP and toggle the mod.
-- **Package internals:** DeltaMod automatically applies the included binary differences.
-- **Manual/non-DeltaMod workflow:** a user would need to patch or replace `data.win` themselves.
+- The supplied clean `data.win` hashes match the expected source hashes.
+- Every corrected payload passes strict standard VCDIFF window-layout parsing.
+- Every corrected payload decodes against its matching clean chapter file.
+- Each decoded result matches the previously verified UndertaleModTool telemetry target SHA-256.
+- The decoder was cross-checked by successfully decoding the known-working Telegraphed Mew-Mew Bombs DeltaMod payload.
+- ZIP entries, metadata checksums, `meta.json`, and `modding.xml` were validated.
 
-The ZIP contains these files directly at its archive root, with no enclosing folder:
+The ZIP contains these files directly at its archive root:
 
 ```text
 Chapter1DataPatch.xdelta
@@ -34,10 +35,10 @@ meta.json
 modding.xml
 ```
 
-`ready_packages.json` records the exact clean-file, patched-file, payload, and package SHA-256 values used for the generated test packages. Those payloads were round-trip verified against those exact supplied source files, but that does not make them compatible with later game updates. The recorded Chapter 5 source SHA-256 is `7e3e9c4a0ef84f0129b6a1c9e9f81091e83abbafbf66eb09893c2082cf5618de`.
+## DeltaMod behavior
 
-The telemetry-patched targets were produced with the official UndertaleModTool 0.9.1.2 CLI by applying `../AiTelemetry.csx`. The maintainer builder only assembles already-created payloads into the importable ZIP; it is not part of installation.
+DeltaMod handles the game-file operation automatically. End users only import and toggle the mod. The `.xdelta` files are internal package payloads used by DeltaMod; users do not run a patcher themselves.
 
-Before releasing a regenerated package, test it in a fresh DeltaMod game copy with no other Chapter 5 mods enabled. If it works alone but not alongside another mod, treat that as a merge conflict rather than a source-version failure.
+The telemetry GML remains version 9 and was not changed for this package repair. Only the VCDIFF/xdelta container layout and package metadata version changed.
 
-Do not add `_deltamodInfo.json`, `.disable_gb1click_deltahub`, or another enclosing folder to this package layout.
+Use `validate_vcdiff_layout.py` before packaging any future payloads so non-standard checksum placement is rejected before release.
