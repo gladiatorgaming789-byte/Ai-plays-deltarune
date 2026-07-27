@@ -1,0 +1,129 @@
+{
+  "format": "DeltaMod xdelta/VCDIFF",
+  "deltarune_target_version": "1.05",
+  "telemetry_version": "9",
+  "undertale_mod_tool": "0.9.1.2 official CLI",
+  "verification": "Each payload was decoded from its exact clean chapter file; reconstructed SHA-256 equals the UndertaleModTool-patched target SHA-256.",
+  "chapters": [
+    {
+      "chapter": 1,
+      "clean_size": 13072876,
+      "patched_size": 13098092,
+      "patch_size": 1217217,
+      "clean_sha256": "82c2bb61b8d78cd287120f6301588fecba34ec5a890bac711b7a8774c760ec70",
+      "patched_sha256": "c823936152eec0c0313cd6a96294b0f9573941faabfba07de00b9292e1bf5d2b",
+      "patch_sha256": "ec701e5a30fb471e9b4dc5e63c81ecf3f0dbc6d19fe61a103525a59e28cc6f46",
+      "roundtrip_sha256": "c823936152eec0c0313cd6a96294b0f9573941faabfba07de00b9292e1bf5d2b",
+      "roundtrip_verified": true,
+      "vcdiff_magic": "d6c3c400",
+      "window_count": 2
+    },
+    {
+      "chapter": 2,
+      "clean_size": 66951062,
+      "patched_size": 66976022,
+      "patch_size": 8870020,
+      "clean_sha256": "116dcb1dda3517634571417fbe1db862d6381008526a4bf8ebde8ca88b7dc5f1",
+      "patched_sha256": "0faea7c5d1e0ba2e322470d7274afc1adc727ed330b7adf07b181e9cd5a1c32f",
+      "patch_sha256": "35a0fb578005419a09b455f800088067f727b96dbbe7a43687abb6882a849d40",
+      "roundtrip_sha256": "0faea7c5d1e0ba2e322470d7274afc1adc727ed330b7adf07b181e9cd5a1c32f",
+      "roundtrip_verified": true,
+      "vcdiff_magic": "d6c3c400",
+      "window_count": 8
+    },
+    {
+      "chapter": 3,
+      "clean_size": 126244594,
+      "patched_size": 126269554,
+      "patch_size": 10582043,
+      "clean_sha256": "f24458adcd1faf8d8ba432addea03fc265adf831e7fd92c130d92a87bb858dc5",
+      "patched_sha256": "8b6927830bb08a697a54cb60f9f3b4ad60def7e240ec5d1e3d860af4e064571e",
+      "patch_sha256": "ee520f548db1f00e39f25df9c98cfadccaa1715928aba595b07acc2b02dba69a",
+      "roundtrip_sha256": "8b6927830bb08a697a54cb60f9f3b4ad60def7e240ec5d1e3d860af4e064571e",
+      "roundtrip_verified": true,
+      "vcdiff_magic": "d6c3c400",
+      "window_count": 16
+    },
+    {
+      "chapter": 4,
+      "clean_size": 132041022,
+      "patched_size": 132065982,
+      "patch_size": 15467547,
+      "clean_sha256": "8d2396a6a18cfb6c75fa6a1f59ed539ae0d528294d936d025b9231197cb8d798",
+      "patched_sha256": "b2788099a9e4db9d43df2a42d47fe17a4b2a6f18960fe957b168cd6e0c157cea",
+      "patch_sha256": "6275496c4ecd302390649fa73658dff1b1d46e847e3a47afaa5ba587c2f50f03",
+      "roundtrip_sha256": "b2788099a9e4db9d43df2a42d47fe17a4b2a6f18960fe957b168cd6e0c157cea",
+      "roundtrip_verified": true,
+      "vcdiff_magic": "d6c3c400",
+      "window_count": 16
+    },
+    {
+      "chapter": 5,
+      "clean_size": 165309084,
+      "patched_size": 165334172,
+      "patch_size": 16637056,
+      "clean_sha256": "7e3e9c4a0ef84f0129b6a1c9e9f81091e83abbafbf66eb09893c2082cf5618de",
+      "patched_sha256": "01b8958a83371e0f7c127ec3f0268242a1946dd33c7844a2475ad54f5b9f1105",
+      "patch_sha256": "5fa529a7915dcede051e5b37d045fe2092d8210a5ca95eea88e117cfc6fc5045",
+      "roundtrip_sha256": "01b8958a83371e0f7c127ec3f0268242a1946dd33c7844a2475ad54f5b9f1105",
+      "roundtrip_verified": true,
+      "vcdiff_magic": "d6c3c400",
+      "window_count": 20
+    }
+  ],
+  "packages": [
+    {
+      "file": "AI-Telemetry-Chapter-1-DeltaMod.zip",
+      "size": 313279,
+      "sha256": "e5c7b1943bccd583a6b13a42e041a5d99d281df61e054102d5b558324ee1a5ac",
+      "root_entries": ["Chapter1DataPatch.xdelta", "meta.json", "modding.xml"],
+      "package_id": "github.ai-plays-deltarune.gladiatorgaming789-byte.telemetry.chapter1",
+      "target_version": "1.05"
+    },
+    {
+      "file": "AI-Telemetry-Chapter-2-DeltaMod.zip",
+      "size": 1559185,
+      "sha256": "c9fb96f11ed6d4a4b8e2fc8bab3850e5aaf297fb986ba34087e1b9a1439be0e5",
+      "root_entries": ["Chapter2DataPatch.xdelta", "meta.json", "modding.xml"],
+      "package_id": "github.ai-plays-deltarune.gladiatorgaming789-byte.telemetry.chapter2",
+      "target_version": "1.05"
+    },
+    {
+      "file": "AI-Telemetry-Chapter-3-DeltaMod.zip",
+      "size": 2394078,
+      "sha256": "0e24e04be75fe768cb27f251132040c069e86fa28811d4efa95ab4e0c603e50d",
+      "root_entries": ["Chapter3DataPatch.xdelta", "meta.json", "modding.xml"],
+      "package_id": "github.ai-plays-deltarune.gladiatorgaming789-byte.telemetry.chapter3",
+      "target_version": "1.05"
+    },
+    {
+      "file": "AI-Telemetry-Chapter-4-DeltaMod.zip",
+      "size": 2704011,
+      "sha256": "7a6c05f25735b2ecc3f9b1b9776697aa6f63f3a0840b50a7bef3790717bef1b2",
+      "root_entries": ["Chapter4DataPatch.xdelta", "meta.json", "modding.xml"],
+      "package_id": "github.ai-plays-deltarune.gladiatorgaming789-byte.telemetry.chapter4",
+      "target_version": "1.05"
+    },
+    {
+      "file": "AI-Telemetry-Chapter-5-DeltaMod.zip",
+      "size": 3429040,
+      "sha256": "e9f47f44b5937994512236a2be6bdc38d9d18802a4ece96d2110c8624a80457f",
+      "root_entries": ["Chapter5DataPatch.xdelta", "meta.json", "modding.xml"],
+      "package_id": "github.ai-plays-deltarune.gladiatorgaming789-byte.telemetry.chapter5",
+      "target_version": "1.05"
+    },
+    {
+      "file": "AI-Telemetry-All-Chapters-DeltaMod.zip",
+      "size": 10396877,
+      "sha256": "de6a700f692c6f1d05bfaa741bf73884aecdee16cd7b8a826063763c224dd430",
+      "root_entries": ["Chapter1DataPatch.xdelta", "Chapter2DataPatch.xdelta", "Chapter3DataPatch.xdelta", "Chapter4DataPatch.xdelta", "Chapter5DataPatch.xdelta", "meta.json", "modding.xml"],
+      "package_id": "github.ai-plays-deltarune.gladiatorgaming789-byte.telemetry.all",
+      "target_version": "1.05"
+    }
+  ],
+  "bundle": {
+    "file": "AI-Telemetry-DeltaMod-Ready-Packages.zip",
+    "sha256": "02e55f25816bb419943cf9d51c2fd2cbe09c0e43a6a76dc34decad19c5f82b28",
+    "size": 20196867
+  }
+}
