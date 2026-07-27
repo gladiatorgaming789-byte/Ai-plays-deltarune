@@ -1,8 +1,8 @@
 # DeltaMod telemetry package
 
-This directory follows the official DeltaMod Modding Standard.
+Finished, ready-to-import DeltaMod ZIPs should live in `dist/` once they are generated from the exact clean and telemetry-patched chapter files.
 
-A finished ZIP must contain these files directly at the archive root:
+A DeltaMod package must contain these files directly at the ZIP root:
 
 ```text
 meta.json
@@ -10,33 +10,14 @@ modding.xml
 ChapterNDataPatch.xdelta
 ```
 
-Do not use `_deltamodInfo.json`, `.disable_gb1click_deltahub`, or an enclosing
-folder. Those are not part of the standard.
+The repository includes a builder for reproducibility, but end users should not need to run it. Release artifacts should already include the generated ZIPs.
 
-## Build process
+## Maintainer-only generation
 
-1. Apply `../AiTelemetry.csx` to a clean chapter `data.win` and save the patched
-   result separately.
-2. Use MiscTools or another xdelta/VCDIFF creator to generate an `.xdelta` file
-   from the clean file to the telemetry-patched file.
-3. Build the DeltaMod ZIP:
+1. Apply `../AiTelemetry.csx` to each exact clean chapter `data.win` and save the patched result separately.
+2. Generate an xdelta/VCDIFF payload from the clean file to the telemetry-patched file.
+3. Run `build_package.py` to produce the finished DeltaMod ZIP.
+4. Test the ZIP in a fresh DeltaMod game copy.
+5. Commit or attach the finished package as a release artifact.
 
-```powershell
-python mods/telemetry/deltamod/build_package.py `
-  --target-version 1.05 `
-  --patch 5=path\to\Chapter5DataPatch.xdelta `
-  --output dist\AI-Plays-Deltarune-Telemetry-Ch5.zip
-```
-
-Repeat `--patch` for more chapters. The builder writes `meta.json`, writes one
-`modding.xml` instruction per chapter, calculates every patch checksum, and keeps
-all files at the ZIP root.
-
-A Chapter 5 instruction is:
-
-```xml
-<patch type="xdelta" patch="./Chapter5DataPatch.xdelta" to="./chapter5_windows/data.win"/>
-```
-
-Use the exact Deltarune version from the clean files used to create the patches.
-Test the finished ZIP in a fresh DeltaMod game copy before publishing it.
+Do not use `_deltamodInfo.json`, `.disable_gb1click_deltahub`, or an enclosing folder. Those are not part of the official standard.
