@@ -1,8 +1,19 @@
-# DeltaMod telemetry package
+# DeltaMod telemetry packages
 
-Finished, ready-to-import DeltaMod ZIPs should live in `dist/` once they are generated from the exact clean and telemetry-patched chapter files.
+Ready-to-import DeltaMod packages have been generated for Deltarune Chapters 1–5 from the exact clean `data.win` files supplied for Deltarune version 1.05.
 
-A DeltaMod package must contain these files directly at the ZIP root:
+Available release artifacts:
+
+```text
+AI-Telemetry-Chapter-1-DeltaMod.zip
+AI-Telemetry-Chapter-2-DeltaMod.zip
+AI-Telemetry-Chapter-3-DeltaMod.zip
+AI-Telemetry-Chapter-4-DeltaMod.zip
+AI-Telemetry-Chapter-5-DeltaMod.zip
+AI-Telemetry-All-Chapters-DeltaMod.zip
+```
+
+Each package contains these files directly at its ZIP root:
 
 ```text
 meta.json
@@ -10,14 +21,12 @@ modding.xml
 ChapterNDataPatch.xdelta
 ```
 
-The repository includes a builder for reproducibility, but end users should not need to run it. Release artifacts should already include the generated ZIPs.
+The all-chapters package contains all five chapter payloads plus one `meta.json` and one `modding.xml`.
 
-## Maintainer-only generation
+`ready_packages.json` records the clean-file, patched-file, payload, and package SHA-256 values. Every payload was decoded against its exact clean chapter file, and the reconstructed file matched the UndertaleModTool-patched target byte-for-byte.
 
-1. Apply `../AiTelemetry.csx` to each exact clean chapter `data.win` and save the patched result separately.
-2. Generate an xdelta/VCDIFF payload from the clean file to the telemetry-patched file.
-3. Run `build_package.py` to produce the finished DeltaMod ZIP.
-4. Test the ZIP in a fresh DeltaMod game copy.
-5. Commit or attach the finished package as a release artifact.
+The telemetry-patched targets were produced with the official UndertaleModTool 0.9.1.2 CLI by applying `../AiTelemetry.csx`. The package builder remains available for maintainers and reproducibility; end users should install the finished ZIPs rather than run it themselves.
 
-Do not use `_deltamodInfo.json`, `.disable_gb1click_deltahub`, or an enclosing folder. Those are not part of the official standard.
+These patches target the exact supplied Deltarune 1.05 files. A changed Steam build or different game-file revision may require regenerated patches.
+
+Do not add `_deltamodInfo.json`, `.disable_gb1click_deltahub`, or an enclosing folder. Those are not part of the supported package layout.
