@@ -293,9 +293,10 @@ The separate mod in `mods/speed/` starts at 2x, supports 1x through 10x, and
 controls the whole GameMaker simulation without changing audio pitch. Enable
 its Chapters 1-5 DeltaMod package beside the separate telemetry v9.0.2 package.
 Multi-code-patch merging requires G3MTool 1.2.5 or newer; the included
-backup-first updater replaces DeltaMod 2.0.1's affected 1.2.1 merge tool
-without modifying Deltarune. Optional per-chapter speed archives and a manual
-UndertaleModTool script are included. There is no combined package.
+backup-first updater in `mods/speed/tools/` replaces DeltaMod 2.0.1's affected
+1.2.1 merge tool without modifying Deltarune. Optional per-chapter speed
+archives and a manual UndertaleModTool script are included. There is no
+combined package.
 
 After installing the patch on one chapter, test its output without controls:
 

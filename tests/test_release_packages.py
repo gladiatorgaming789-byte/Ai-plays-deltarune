@@ -12,7 +12,8 @@ from deltarune_agent.deltamod_package import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SPEED_DIRECTORY = ROOT / "mods" / "speed" / "deltamod"
+SPEED_ROOT = ROOT / "mods" / "speed"
+SPEED_DIRECTORY = SPEED_ROOT / "deltamod"
 TELEMETRY_DIRECTORY = ROOT / "mods" / "telemetry" / "deltamod"
 
 
@@ -22,7 +23,7 @@ def _sha256(path: Path) -> str:
 
 def test_built_speed_release_records_match_every_archive():
     release = json.loads(
-        (SPEED_DIRECTORY / "ready_packages.json").read_text(encoding="utf-8")
+        (SPEED_ROOT / "release_1.1.0.json").read_text(encoding="utf-8")
     )
     assert release["clean_chapter_sha256"] == {
         str(chapter): checksum
@@ -30,7 +31,9 @@ def test_built_speed_release_records_match_every_archive():
     }
     assert release["default_multiplier"] == 2
     assert release["supported_multipliers"] == list(range(1, 11))
-    assert release["format"] == "DeltaMod separate G3MTool patches"
+    assert release["format"] == (
+        "DeltaMod ZIP-only release with ignored G3MTool intermediates"
+    )
     assert release["minimum_g3mtool_version_for_multi_code_merge"] == "1.2.5"
     assert release["merge_support"] is True
     assert set(release["chapter_payloads"]) == {
@@ -65,6 +68,21 @@ def test_built_speed_release_records_match_every_archive():
                     hashlib.sha256(archive.read(payload_name)).hexdigest()
                     == expected["sha256"]
                 )
+
+
+def test_speed_deltamod_directory_contains_only_release_zips():
+    entries = sorted(SPEED_DIRECTORY.iterdir())
+    files = [entry for entry in entries if entry.is_file()]
+
+    assert len(files) == 6
+    assert all(entry.suffix.casefold() == ".zip" for entry in files)
+    assert not list(SPEED_DIRECTORY.glob("*.g3mpatch"))
+
+    ignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+    assert "mods/speed/.build/" in ignore
+    assert "mods/speed/deltamod/*.g3mpatch" in ignore
+    assert "*.g3mpatch binary" in attributes
 
 
 def test_telemetry_902_is_metadata_only_and_has_a_distinct_id():

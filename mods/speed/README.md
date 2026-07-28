@@ -23,20 +23,35 @@ originals remain untouched.
 Multi-code-patch merging requires G3MTool 1.2.5 or newer. DeltaMod 2.0.1
 originally bundled G3MTool 1.2.1, whose Undertale merge path can relink global
 variables incorrectly even when two mods edit different events. Run the
-backup-first `Update-DeltaMod-G3MTool.ps1` helper in `deltamod/` once if
+backup-first `Update-DeltaMod-G3MTool.ps1` helper in `tools/` once if
 DeltaMod still reports 1.2.1. No combined telemetry-and-speed package is used.
 Close DeltaMod first, then run:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\deltamod\Update-DeltaMod-G3MTool.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\Update-DeltaMod-G3MTool.ps1
 ```
 
 The helper verifies both official-release SHA-256 hashes before replacing the
 tool. To restore DeltaMod's original executable:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\deltamod\Update-DeltaMod-G3MTool.ps1 -Restore
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\Update-DeltaMod-G3MTool.ps1 -Restore
 ```
+
+## Reproducible ZIP-only releases
+
+`deltamod/` intentionally contains only the six installable ZIP archives.
+Loose `.g3mpatch` files are generated under the ignored `.build/payloads/`
+directory, packaged into the ZIPs, and never need to be committed:
+
+```powershell
+python .\tools\build_payloads.py
+python .\tools\build_packages.py
+```
+
+The text manifest `release_1.1.0.json` records the source, embedded payload,
+clean-game, and final ZIP hashes. Git treats ZIP and G3M patch formats as
+binary through the repository's `.gitattributes`.
 
 ## Manual UndertaleModTool installation
 

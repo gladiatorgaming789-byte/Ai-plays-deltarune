@@ -11,7 +11,7 @@ UPDATER = (
     Path(__file__).resolve().parents[1]
     / "mods"
     / "speed"
-    / "deltamod"
+    / "tools"
     / "Update-DeltaMod-G3MTool.ps1"
 )
 

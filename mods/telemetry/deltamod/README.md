@@ -12,12 +12,13 @@ This remains a separate telemetry mod. It can be enabled beside
 `mods/speed/deltamod/AI-Speed-All-Chapters-DeltaMod-v1.1.0.zip` after updating
 DeltaMod's merge tool to G3MTool 1.2.5 or newer. G3MTool 1.2.1 corrupts
 GameMaker variable references when it combines two code patches; use the
-backup-first updater supplied with the speed mod. There is no combined package.
+backup-first updater at
+`mods/speed/tools/Update-DeltaMod-G3MTool.ps1`. There is no combined package.
 
 ## Fixed in 9.0.2
 
 Version 9.0.2 is a metadata-only repair. It gives telemetry its own valid
-three-part package ID, points `neededFiles` at the installed Chapter 1–5
+three-part package ID, points `neededFiles` at the installed Chapters 1–5
 `data.win` files with their verified clean SHA-256 hashes, and explicitly
 enables merge support. The telemetry GML and the verified v9 VCDIFF payloads
 are unchanged from 9.0.1.

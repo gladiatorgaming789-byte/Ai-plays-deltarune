@@ -6,7 +6,8 @@ import zipfile
 
 import pytest
 
-from mods.speed.deltamod.build_payloads import (
+from mods.speed.tools.build_payloads import (
+    build_parser,
     _minimize_patch,
     _require_supported_g3mtool,
 )
@@ -123,7 +124,7 @@ def test_payload_builder_accepts_merge_safe_g3mtool(
         stderr = ""
 
     monkeypatch.setattr(
-        "mods.speed.deltamod.build_payloads.subprocess.run",
+        "mods.speed.tools.build_payloads.subprocess.run",
         lambda *args, **kwargs: Result(),
     )
 
@@ -139,9 +140,16 @@ def test_payload_builder_rejects_known_broken_g3mtool(
         stderr = ""
 
     monkeypatch.setattr(
-        "mods.speed.deltamod.build_payloads.subprocess.run",
+        "mods.speed.tools.build_payloads.subprocess.run",
         lambda *args, **kwargs: Result(),
     )
 
     with pytest.raises(RuntimeError, match="unsafe.*1.2.5"):
         _require_supported_g3mtool(Path("G3MTool-win32.exe"))
+
+
+def test_payload_builder_defaults_to_ignored_build_directory():
+    output = build_parser().parse_args([]).output_directory
+
+    assert output.parts[-3:] == ("speed", ".build", "payloads")
+    assert "deltamod" not in output.parts
