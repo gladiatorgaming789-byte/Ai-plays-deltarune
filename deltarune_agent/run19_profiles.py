@@ -192,8 +192,11 @@ class ProfileStore(BaseProfileStore):
                     pass
                 if os.path.lexists(link):
                     _remove_directory_link(link)
-                _create_directory_link(link, target)
+                # Include the name in rollback before creation. If link
+                # creation itself fails, the old link has already been
+                # removed and still needs to be restored.
                 changed.append(name)
+                _create_directory_link(link, target)
             return self.set_active(profile.id)
         except BaseException as operation_error:
             try:

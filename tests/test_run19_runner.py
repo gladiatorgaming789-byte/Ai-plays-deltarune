@@ -4,14 +4,18 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from PIL import Image
 
 from deltarune_agent import run19_runner
+from deltarune_agent.actions import Action
+from deltarune_agent.observer import Observation
 
 
 def _args(tmp_path: Path) -> Namespace:
     return Namespace(
         steps=1,
         interval=0.0,
+        speed="auto",
         countdown=0,
         region=(0, 0, 10, 10),
         visual_memory=tmp_path / "visual.json",
@@ -77,6 +81,120 @@ class _Tracker:
 
     def finish(self, *_args, **_kwargs):
         self.finished = True
+
+
+def test_manual_speed_scales_interval_and_is_recorded(tmp_path):
+    args = _args(tmp_path)
+    args.no_telemetry = True
+    args.speed = "10"
+    args.interval = 0.20
+    observation = Observation(
+        step=0,
+        frame=Image.new("RGB", (2, 2), "black"),
+    )
+    perception = SimpleNamespace(
+        state=SimpleNamespace(value="overworld"),
+        confidence=0.99,
+        source="test",
+        features=SimpleNamespace(as_dict=lambda: {}),
+    )
+
+    class Detector(_Detector):
+        def classify(self, _frame):
+            return perception
+
+        def learn_from_telemetry(self, *_args):
+            pass
+
+    class Cutscene:
+        def update(self, visual, *_args):
+            return visual
+
+        def note_action(self, *_args):
+            pass
+
+    class Policy(_Policy):
+        reason = "test decision"
+        last_visual_valid = True
+
+        def observe_room_trace(self, _trace):
+            pass
+
+        def validate_observation(self, value, _telemetry):
+            return value
+
+        def choose(self, *_args):
+            return Action("confirm", ("z",), duration=0.10, cooldown=0.20)
+
+        def drain_map_updates(self):
+            return []
+
+        def decision_context(self):
+            return {"kind": "test"}
+
+        def prediction_snapshot(self):
+            return {}
+
+    class Controller(_Controller):
+        def __init__(self):
+            super().__init__()
+            self.multipliers = []
+            self.actions = []
+
+        def set_speed_multiplier(self, multiplier):
+            self.multipliers.append(multiplier)
+
+        def execute(self, action):
+            self.actions.append(action.name)
+
+    class Tracker(_Tracker):
+        def __init__(self, directory):
+            super().__init__(directory)
+            self.records = []
+            self.finish_kwargs = {}
+
+        def record(self, *_args, **kwargs):
+            self.records.append(kwargs)
+
+        def finish(self, *_args, **kwargs):
+            self.finished = True
+            self.finish_kwargs = kwargs
+
+    detector = Detector()
+    policy = Policy()
+    controller = Controller()
+    tracker = Tracker(tmp_path / "run")
+    tracker.directory.mkdir()
+    sleeps = []
+
+    with patch.object(
+        run19_runner, "ScreenObserver", return_value=SimpleNamespace(observe=lambda _step: observation)
+    ), patch.object(
+        run19_runner, "VisualStateDetector", return_value=detector
+    ), patch.object(
+        run19_runner, "CutsceneTracker", return_value=Cutscene()
+    ), patch.object(
+        run19_runner, "HierarchicalPolicy", return_value=policy
+    ), patch.object(
+        run19_runner, "KeyboardController", return_value=controller
+    ), patch.object(
+        run19_runner, "EpisodeTracker", return_value=tracker
+    ), patch.object(
+        run19_runner, "fuse_perception", side_effect=lambda visual, _telemetry: visual
+    ), patch.object(
+        run19_runner.time, "sleep", side_effect=sleeps.append
+    ):
+        run19_runner.run(args)
+
+    assert controller.multipliers == [10.0]
+    assert controller.actions == ["confirm"]
+    assert sleeps == [0.02]
+    speed = tracker.records[0]["decision_context"]["speed"]
+    assert speed["requested"] == "10"
+    assert speed["effective_multiplier"] == 10.0
+    assert speed["effective_action_duration_seconds"] == 0.01
+    assert speed["effective_cooldown_seconds"] == 0.02
+    assert tracker.finish_kwargs["config"]["speed"] == "10"
 
 
 def test_constructor_failure_closes_resources_created_so_far(tmp_path):

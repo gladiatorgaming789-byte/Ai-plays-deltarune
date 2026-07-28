@@ -29,7 +29,9 @@ def validate_standard_layout(path: Path) -> int:
     position = len(VCDIFF_MAGIC)
     header_indicator = data[position]
     position += 1
+    secondary_compressor: int | None = None
     if header_indicator & 0x01:
+        secondary_compressor = data[position]
         position += 1
     if header_indicator & 0x02:
         length, position = _read_varint(data, position)
@@ -54,9 +56,14 @@ def validate_standard_layout(path: Path) -> int:
         _, position = _read_varint(data, position)  # target window length
         delta_indicator = data[position]
         position += 1
-        if delta_indicator != 0:
+        if delta_indicator & ~0x07:
             raise ValueError(
-                f"secondary-compressed VCDIFF sections are unsupported: {path}"
+                f"invalid VCDIFF delta indicator {delta_indicator:#x}: {path}"
+            )
+        if delta_indicator and secondary_compressor is None:
+            raise ValueError(
+                "VCDIFF window uses secondary compression without declaring "
+                f"a compressor: {path}"
             )
 
         data_length, position = _read_varint(data, position)

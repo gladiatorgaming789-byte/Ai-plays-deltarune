@@ -3,6 +3,7 @@ import time
 import pyautogui
 
 from .actions import Action
+from .speed import REGISTRATION_SAFE_FLOOR
 from .window import post_window_key
 
 
@@ -13,13 +14,34 @@ _PYAUTOGUI_FAILSAFE = pyautogui.FailSafeException
 
 
 class KeyboardController:
-    def __init__(self, live: bool = False, target_hwnd: int | None = None):
+    def __init__(
+        self,
+        live: bool = False,
+        target_hwnd: int | None = None,
+        *,
+        speed_multiplier: float = 1.0,
+        minimum_duration: float = REGISTRATION_SAFE_FLOOR,
+    ):
         self.live = live
         self.target_hwnd = target_hwnd
         self.background_input = False
         self.held_keys: tuple[str, ...] = ()
+        self.minimum_duration = max(0.0, float(minimum_duration))
+        self.set_speed_multiplier(speed_multiplier)
         pyautogui.FAILSAFE = True
         pyautogui.PAUSE = 0.005
+
+    def set_speed_multiplier(self, multiplier: float) -> None:
+        multiplier = float(multiplier)
+        if multiplier <= 0:
+            raise ValueError("speed multiplier must be positive")
+        self.speed_multiplier = multiplier
+
+    def scaled_duration(self, duration: float) -> float:
+        duration = max(0.0, float(duration))
+        if duration == 0:
+            return 0.0
+        return max(self.minimum_duration, duration / self.speed_multiplier)
 
     def set_target_window(self, hwnd: int | None) -> None:
         if hwnd == self.target_hwnd:
@@ -59,17 +81,18 @@ class KeyboardController:
             raise KeyboardInterrupt("mouse-corner emergency stop") from None
 
     def _execute(self, action: Action) -> None:
+        duration = self.scaled_duration(action.duration)
         if not self.live:
-            time.sleep(action.duration)
+            time.sleep(duration)
             return
         if action.continuous and action.keys:
             self._hold(action.keys)
-            time.sleep(action.duration)
+            time.sleep(duration)
             return
 
         self.release_all()
         if not action.keys:
-            time.sleep(action.duration)
+            time.sleep(duration)
             return
 
         pressed: list[str] = []
@@ -78,7 +101,7 @@ class KeyboardController:
             for key in action.keys:
                 self._key_down(key)
                 pressed.append(key)
-            time.sleep(action.duration)
+            time.sleep(duration)
         except BaseException as exc:
             action_error = exc
             raise

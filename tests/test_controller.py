@@ -158,3 +158,28 @@ def test_partial_button_press_releases_only_successful_keys():
         ("down", "x"),
         ("up", "z"),
     ]
+def test_action_duration_scales_with_game_speed(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(controller_module.time, "sleep", sleeps.append)
+    controller = controller_module.KeyboardController(
+        live=False,
+        speed_multiplier=2,
+    )
+
+    controller.execute(Action("confirm", ("z",), duration=0.10))
+
+    assert sleeps == [0.05]
+
+
+def test_scaled_action_duration_has_registration_floor(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(controller_module.time, "sleep", sleeps.append)
+    controller = controller_module.KeyboardController(
+        live=False,
+        speed_multiplier=4,
+        minimum_duration=0.008,
+    )
+
+    controller.execute(Action("short", ("z",), duration=0.01))
+
+    assert sleeps == [0.008]

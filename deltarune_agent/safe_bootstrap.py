@@ -177,6 +177,7 @@ def main() -> int:
     if not safe:
         _message("Deltarune Agent testing blocked", detail, error=True)
         return 1
+    previous_directory = Path.cwd()
     try:
         os.chdir(project_root)
         command = [sys.executable, "-m", "deltarune_agent", "gui"]
@@ -188,6 +189,13 @@ def main() -> int:
             error=True,
         )
         return 1
+    finally:
+        # Tests and callers may invoke main() in-process. Never leave their
+        # working directory inside a project that may immediately be removed.
+        try:
+            os.chdir(previous_directory)
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":

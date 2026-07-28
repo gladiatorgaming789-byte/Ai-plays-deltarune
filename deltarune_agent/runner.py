@@ -45,6 +45,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="override each action's tuned post-input delay",
     )
+    run.add_argument(
+        "--speed",
+        choices=("auto",) + tuple(str(value) for value in range(1, 11)),
+        default="auto",
+        help=(
+            "AI timing multiplier; auto follows DRSPEED telemetry and safely "
+            "falls back to 1x"
+        ),
+    )
     run.add_argument("--seed", type=int, default=0)
     run.add_argument(
         "--game-window",
@@ -125,12 +134,24 @@ def listen(args: argparse.Namespace) -> None:
     receiver = TelemetryReceiver(args.port)
     deadline = time.monotonic() + args.seconds
     previous = None
+    previous_speed = None
     print(
         f"Listening on 127.0.0.1:{args.port}; press Ctrl+C to stop."
     )
     try:
         while time.monotonic() < deadline:
             sample = receiver.poll()
+            speed = receiver.latest_speed
+            if speed is not None and (
+                previous_speed is None
+                or speed.multiplier != previous_speed.multiplier
+                or speed.target_fps != previous_speed.target_fps
+            ):
+                print(
+                    f"speed v{speed.version}: {speed.multiplier:g}x "
+                    f"({speed.base_fps:g} -> {speed.target_fps:g} FPS)"
+                )
+                previous_speed = speed
             if sample and sample != previous:
                 player_position = (
                     f" player=({sample.player_x:.1f},{sample.player_y:.1f})"

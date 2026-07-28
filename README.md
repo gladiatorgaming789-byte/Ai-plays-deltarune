@@ -2,7 +2,9 @@
 
 An external, safety-first controller for experimenting with an AI agent that can
 observe Deltarune, choose a small action, send keyboard input, and record its
-progress. It does **not** patch or modify the game.
+progress. The controller itself does **not** patch or modify the game. Optional
+telemetry and speed mods are separate, reversible packages that DeltaMod applies
+to protected copies.
 
 ## Current scope
 
@@ -166,6 +168,14 @@ quick collision recovery. Turns release the old direction immediately, while
 dialogue and menu buttons retain a longer debounce. Avoid passing `--interval`
 for normal play; that option exists only to override tuned delays while debugging.
 
+With the separate speed mod installed, `--speed auto` (the default) follows its
+localhost `DRSPEED` announcements. Action holds, cooldowns, waits, and an
+explicit `--interval` are divided by the detected 1x-10x multiplier, while very
+short taps retain a registration-safe floor. The startup countdown remains
+normal wall-clock time. If speed packets become stale, automatic mode warns
+once and safely returns the AI to 1x timing. Use `--speed 1` through
+`--speed 10` for a manual override, including when telemetry is disabled.
+
 Each run automatically reloads and updates `memory/navigation.json` and
 `memory/visual_states.json`. The visual model learns from states confirmed by
 telemetry, then remains usable if telemetry is temporarily unavailable. Delete
@@ -179,7 +189,9 @@ and ranked player-observed candidates, `navigation_updates.jsonl`, `run.json`,
 rendered room maps with exact guess boxes and learned portal-role badges. A
 `telemetry_diagnostics.json` file records packet counts, rejected/out-of-order
 parts, and the latest v9 sequence health. Logs stay open and flush in small batches rather than
-reopening a file on every step.
+reopening a file on every step. `speed_diagnostics.json` and each prediction
+record include the requested/detected multiplier, synchronization source,
+packet age, effective delays, and loop timing.
 
 `--live` is intentionally required every time. At startup, the controller looks
 for `deltarune` in both the executable name and the visible window title,
@@ -219,6 +231,9 @@ run. The GUI has separate plain-language AI decision and telemetry output panes
 and a live learned map. Repeated identical decisions are condensed so changes
 of goal, path checks, exit searches, interactions, and loop recovery stand out.
 Dark mode is enabled by default and can be toggled from the run controls.
+The speed selector defaults to **Auto**. A status line shows game speed, AI
+speed, and synchronization state; the F8, F9, and F10 buttons target only the
+Deltarune window and mirror the mod's 1x toggle/decrease/increase controls.
 The map loads persistent navigation and scene memory, follows the current room
 by default, and shows the actual camera pixels the AI has seen behind visited
 cells, observed paths, weighted blocked edges, unconfirmed visual guesses,
@@ -273,6 +288,14 @@ authoritative overworld/battle mode to
 `127.0.0.1:42069`. See its README for the backup-first installation procedure.
 It deliberately does not look up or transmit nearby interactable objects.
 The controller listens automatically; use `--no-telemetry` to run vision-only.
+
+The separate mod in `mods/speed/` starts at 2x, supports 1x through 10x, and
+controls the whole GameMaker simulation without changing audio pitch. Enable
+its Chapters 1-5 DeltaMod package beside the separate telemetry v9.0.2 package.
+Multi-code-patch merging requires G3MTool 1.2.5 or newer; the included
+backup-first updater replaces DeltaMod 2.0.1's affected 1.2.1 merge tool
+without modifying Deltarune. Optional per-chapter speed archives and a manual
+UndertaleModTool script are included. There is no combined package.
 
 After installing the patch on one chapter, test its output without controls:
 

@@ -30,6 +30,7 @@ from .window import (
     find_window,
     focus_window,
     is_window_foreground,
+    post_window_key,
     remember_window,
 )
 from .world_model import CELL_SIZE, EXPLORATION_REGION_CELLS
@@ -71,6 +72,32 @@ ACTION_LABELS = {
     "menu": "Open menu",
     "wait": "Wait",
 }
+
+
+def format_speed_status(speed: object) -> str:
+    if not isinstance(speed, dict):
+        return "Game: unknown | AI: 1x | waiting for speed telemetry"
+
+    game = speed.get("game_multiplier")
+    effective = speed.get("effective_multiplier", 1)
+
+    def multiplier_label(value: object) -> str:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return "unknown"
+        return f"{number:g}x"
+
+    if bool(speed.get("synchronized")):
+        state = "synchronized"
+    elif speed.get("source") == "manual":
+        state = "manual override"
+    else:
+        state = "safe 1x fallback"
+    return (
+        f"Game: {multiplier_label(game)} | "
+        f"AI: {multiplier_label(effective)} | {state}"
+    )
 
 
 def _decision_explanation(reason: str, state: str) -> tuple[str, str]:
@@ -1249,6 +1276,10 @@ class AgentGUI:
         self.live_var = tk.BooleanVar(value=False)
         self.steps_var = tk.StringVar(value="2000")
         self.window_var = tk.StringVar(value="deltarune")
+        self.speed_var = tk.StringVar(value="Auto")
+        self.speed_status_var = tk.StringVar(
+            value="Game: unknown | AI: 1x | waiting for speed telemetry"
+        )
         self.follow_room_var = tk.BooleanVar(value=True)
         self.show_room_view_var = tk.BooleanVar(value=True)
         self.show_navigation_var = tk.BooleanVar(value=True)
@@ -1341,12 +1372,69 @@ class AgentGUI:
         ttk.Button(controls, text="Clear output", command=self._clear_output).pack(
             side="left", padx=3
         )
+        ttk.Label(controls, text="AI speed:").pack(side="left", padx=(12, 0))
+        self.speed_box = ttk.Combobox(
+            controls,
+            textvariable=self.speed_var,
+            values=("Auto",) + tuple(f"{value}x" for value in range(1, 11)),
+            state="readonly",
+            width=6,
+        )
+        self.speed_box.pack(side="left", padx=(3, 6))
+        for key, label in (
+            ("f8", "F8 toggle"),
+            ("f9", "F9 −"),
+            ("f10", "F10 +"),
+        ):
+            ttk.Button(
+                controls,
+                text=label,
+                command=lambda key=key: self._send_speed_key(key),
+                width=9,
+            ).pack(side="left", padx=2)
         ttk.Checkbutton(
             controls,
             text="Dark mode",
             variable=self.dark_mode_var,
             command=self._apply_theme,
         ).pack(side="right", padx=(8, 2))
+        ttk.Label(
+            controls,
+            textvariable=self.speed_status_var,
+            style="Subtitle.TLabel",
+        ).pack(side="right", padx=(8, 4))
+
+    def _send_speed_key(self, key: str) -> None:
+        try:
+            game_window = self.window_var.get().strip() or "deltarune"
+            window = find_window(game_window, self.window_memory)
+            if window is None:
+                raise RuntimeError(
+                    "No Deltarune window is running. Launch a chapter first."
+                )
+            remember_window(self.window_memory, window)
+            post_window_key(window.hwnd, key, True)
+            self.root.after(
+                80,
+                lambda hwnd=window.hwnd, key=key: self._release_speed_key(
+                    hwnd, key
+                ),
+            )
+            self._append(
+                self.ai_output,
+                f"Sent {key.upper()} to Deltarune; waiting for speed telemetry.\n",
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            messagebox.showerror("Could not change game speed", str(exc))
+
+    def _release_speed_key(self, hwnd: int, key: str) -> None:
+        try:
+            post_window_key(hwnd, key, False)
+        except (OSError, ValueError) as exc:
+            self._append(
+                self.ai_output,
+                f"Speed-control key release warning: {exc}\n",
+            )
 
     def _build_main_area(self) -> None:
         panes = ttk.Panedwindow(self.root, orient="horizontal")
@@ -1953,6 +2041,8 @@ class AgentGUI:
             str(self.stop_file),
             "--window-memory",
             str(self.window_memory),
+            "--speed",
+            self.speed_var.get().casefold().removesuffix("x"),
         ]
         if self.live_var.get():
             command.append("--live")
@@ -2047,6 +2137,7 @@ class AgentGUI:
             if message:
                 self._append(self.ai_output, f"--- {message} ---\n")
             return False
+        self.speed_status_var.set(format_speed_status(payload.get("speed")))
         self.map_model.update(payload)
         self._display_ai_decision(payload)
         telemetry = payload.get("telemetry")
@@ -2129,6 +2220,7 @@ class AgentGUI:
         self.start_button.configure(state="normal")
         self.stop_button.configure(state="disabled")
         self.process = None
+        self.speed_status_var.set("Game: unknown | AI: stopped")
         if self.stop_file is not None:
             self.stop_file.unlink(missing_ok=True)
             self.stop_file = None
