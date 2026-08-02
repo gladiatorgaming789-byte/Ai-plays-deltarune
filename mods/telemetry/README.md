@@ -1,5 +1,18 @@
 # Deltarune telemetry mod
 
+## Current game update
+
+The recommended DeltaMod release is
+`deltamod/Telemetry-All-Chapters-DeltaMod-v9.1.0.zip`. It was rebuilt against
+Deltarune Steam build 24484059 (Chapter 5 v0.0.253) after the Chapter 2-5
+`data.win` files changed. Telemetry protocol v9 is unchanged, so the Python
+receiver remains compatible.
+
+Telemetry and speed are still separate packages. Their current semantic
+G3MTool payloads modify disjoint events and require G3MTool 1.2.5 or newer for
+safe multi-code-patch merging. Do not install the retired v9.0.1/v9.0.2 ZIPs on
+the updated game.
+
 This optional UndertaleModTool script adds small GML telemetry hooks:
 
 - `obj_mainchara` sends `overworld`, room ID/name, and position.

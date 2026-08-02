@@ -7,7 +7,10 @@ EnsureDataLoaded();
 const string marker = "AI_SPEED_MOD|1|";
 if (Data.Strings.Any(item => item.Content.Contains(marker)))
 {
-    ScriptMessage("AI speed mod v1 is already present in this data.win. No changes were made.");
+    ScriptMessage(
+        "AI speed mod is already present in this data.win. " +
+        "No changes were made."
+    );
     return;
 }
 
@@ -128,7 +131,8 @@ imports.QueueAppend(beginStep, speedHook);
 imports.Import();
 
 ScriptMessage(
-    "AI speed mod v1 was installed at 2x. F8 toggles 1x/previous, " +
+    "AI speed mod v1.2.0 was installed at 2x. " +
+    "F8 toggles 1x/previous, " +
     "F9 decreases, and F10 increases up to 10x. Use Save As only after " +
     "preserving the original data.win."
 );

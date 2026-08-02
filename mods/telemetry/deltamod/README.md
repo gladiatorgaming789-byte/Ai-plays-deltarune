@@ -1,59 +1,62 @@
 # DeltaMod telemetry package
 
-The current user-facing release artifact is:
+The current user-facing release is:
 
 ```text
-Telemetry-DeltaMod-v9.0.2.zip
+Telemetry-All-Chapters-DeltaMod-v9.1.0.zip
 ```
 
-Import that ZIP directly into DeltaMod, then enable or disable the mod there. **Do not extract it, do not run UndertaleModTool, and do not manually patch any `data.win` file.**
+Import that ZIP directly into DeltaMod and enable it. Do not extract the ZIP,
+run a loose `.g3mpatch`, or overwrite an installed `data.win` by hand.
 
-This remains a separate telemetry mod. It can be enabled beside
-`mods/speed/deltamod/AI-Speed-All-Chapters-DeltaMod-v1.1.0.zip` after updating
-DeltaMod's merge tool to G3MTool 1.2.5 or newer. G3MTool 1.2.1 corrupts
-GameMaker variable references when it combines two code patches; use the
-backup-first updater at
-`mods/speed/tools/Update-DeltaMod-G3MTool.ps1`. There is no combined package.
+Version 9.1.0 preserves telemetry protocol v9 and targets Deltarune Steam build
+24484059 (Chapter 5 v0.0.253). Chapter 1 is unchanged from the prior release;
+the clean Chapter 2-5 files and their checksums changed in the game update.
+The old v9.0.1/v9.0.2 packages therefore cannot be applied to the current
+files and have been retired from this directory.
 
-## Fixed in 9.0.2
+## Separate speed-mod compatibility
 
-Version 9.0.2 is a metadata-only repair. It gives telemetry its own valid
-three-part package ID, points `neededFiles` at the installed Chapters 1–5
-`data.win` files with their verified clean SHA-256 hashes, and explicitly
-enables merge support. The telemetry GML and the verified v9 VCDIFF payloads
-are unchanged from 9.0.1.
+Telemetry and speed remain two independently enabled mods. This telemetry
+release contains seven semantic `CodeEntries` changes and no sound, texture,
+room, or other asset changes. The speed release changes only `obj_time` Begin
+Step, so the packages do not replace the same event.
 
-## VCDIFF repair retained from 9.0.1
+Combining code patches requires G3MTool 1.2.5 or newer. Older G3MTool releases
+could corrupt GameMaker variable references while relinking two patches; that
+was the source of the earlier `obj_time`/`bbox_top` crash. The current package
+builder refuses payloads made by an older tool, and its manifest declares
+`mergeSupport: true`.
 
-The original generated payloads used valid VCDIFF data but placed each optional Adler-32 checksum at the end of its window. Standard xdelta3/DeltaMod expects the four checksum bytes immediately after the VCDIFF window-length fields and before the data, instruction, and address sections. DeltaMod therefore misread the old payload and reported that the xdelta was being applied to the wrong source file.
+## What is validated
 
-Version 9.0.1 moves every checksum into the standard position without changing the reconstructed telemetry targets.
+The release builder:
 
-Validation performed for all five chapters:
+- reads clean `chapterN_windows/data.win` files from the supplied
+  `Deltarune.zip` without modifying the installed game;
+- verifies the current SHA-256 and MD5 for every chapter;
+- compiles `AiTelemetry.csx` separately against all five files;
+- rejects changes outside the seven expected telemetry code events;
+- applies each minimized payload back to its exact clean source;
+- checks the protocol and autosave markers in every reconstructed file;
+- records source, payload, and reconstructed-file hashes;
+- rejects stale payloads if the source script, game build, hashes, or G3MTool
+  version changed before packaging; and
+- validates the finished root-only DeltaMod ZIP and its per-chapter targets.
 
-- The supplied clean `data.win` hashes match the expected source hashes.
-- Every corrected payload passes strict standard VCDIFF window-layout parsing.
-- Every corrected payload decodes against its matching clean chapter file.
-- Each decoded result matches the previously verified UndertaleModTool telemetry target SHA-256.
-- The decoder was cross-checked by successfully decoding the known-working Telegraphed Mew-Mew Bombs DeltaMod payload.
-- ZIP entries, metadata checksums, `meta.json`, and `modding.xml` were validated.
+Loose `.g3mpatch` files are reproducible build intermediates under the ignored
+`mods/telemetry/.build` directory. Only the finished ZIP is kept in this
+release directory, so GitHub never needs to handle loose patch files.
 
-The ZIP contains these files directly at its archive root:
+## Maintainer rebuild
 
-```text
-Chapter1DataPatch.xdelta
-Chapter2DataPatch.xdelta
-Chapter3DataPatch.xdelta
-Chapter4DataPatch.xdelta
-Chapter5DataPatch.xdelta
-meta.json
-modding.xml
+With the clean `Deltarune.zip` in the game directory and DeltaMod's G3MTool
+1.2.5+ installed:
+
+```powershell
+.\.venv\Scripts\python.exe .\mods\telemetry\tools\build_payloads.py
+.\.venv\Scripts\python.exe .\mods\telemetry\tools\build_packages.py
 ```
 
-## DeltaMod behavior
-
-DeltaMod handles the game-file operation automatically. End users only import and toggle the mod. The `.xdelta` files are internal package payloads used by DeltaMod; users do not run a patcher themselves.
-
-The telemetry GML remains version 9 and was not changed for this package repair.
-
-Use `validate_vcdiff_layout.py` before packaging any future payloads so non-standard checksum placement is rejected before release.
+The manual UndertaleModTool-compatible source remains at
+`mods/telemetry/AiTelemetry.csx`.

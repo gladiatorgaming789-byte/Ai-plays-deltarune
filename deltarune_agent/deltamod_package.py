@@ -23,26 +23,36 @@ PATCH_LINE_PATTERN = re.compile(
     r'to="\./chapter([1-5])_windows/data\.win"/>$'
 )
 
-# Verified clean Steam Deltarune 1.05 data.win hashes. These identify the
-# installed input files DeltaMod is allowed to patch; they are deliberately
-# independent from the package payload hashes.
-DELTARUNE_105_HASHES = {
+DELTARUNE_STEAM_BUILD_ID = "24484059"
+DELTARUNE_PATCH_LABEL = "Chapter 5 v0.0.253"
+
+# Verified clean Steam data.win hashes for the current supported build. These
+# identify the installed input files DeltaMod is allowed to patch; they are
+# deliberately independent from both package payload hashes and the stale
+# data.win.hash sidecars shipped for Chapters 2-5 in this build.
+DELTARUNE_CURRENT_HASHES = {
     1: "82c2bb61b8d78cd287120f6301588fecba34ec5a890bac711b7a8774c760ec70",
-    2: "116dcb1dda3517634571417fbe1db862d6381008526a4bf8ebde8ca88b7dc5f1",
-    3: "f24458adcd1faf8d8ba432addea03fc265adf831e7fd92c130d92a87bb858dc5",
-    4: "8d2396a6a18cfb6c75fa6a1f59ed539ae0d528294d936d025b9231197cb8d798",
-    5: "7e3e9c4a0ef84f0129b6a1c9e9f81091e83abbafbf66eb09893c2082cf5618de",
+    2: "047c5ab003e3e017a709c02757e119c81e0327760169512110fd276b19241e68",
+    3: "c1a0925343694ec9b9adcbf2f916a720b02fd1b999286cfe8fe6a52f3320f714",
+    4: "ed64789586238b52375e994e1c1cf13694dd2d0dab57d13e639b9c892e37d8f2",
+    5: "370dfd141d2955d5a1960122919b16e4092b52ffbb85fda541bc4680c6b3b85c",
 }
-DELTARUNE_105_MD5 = {
+DELTARUNE_CURRENT_MD5 = {
     1: "0ccbfd7c4f9fb1b86de1e2aaec0bacc9",
-    2: "9c28c97a88aa59103fe26aae6a289138",
-    3: "2907d8acac4d7893d045760e6b08c1ec",
-    4: "12b1db58e1a5e55eda910e9e2e7f6ae8",
-    5: "ad76409db119eb742b0831d77442b9a0",
+    2: "1592c9bffa2d9e53ddeedc0c4f9a07d6",
+    3: "b43158db2e958e767ebb1aae72fb05a1",
+    4: "27e36f883f4ade21707dc8261072d416",
+    5: "9c80e6300e0548d933cc006f3c22760d",
 }
 
+# Compatibility aliases for older build scripts. The public game version is
+# still reported to DeltaMod as 1.05, but these values now identify Steam build
+# 24484059 rather than the older files originally associated with these names.
+DELTARUNE_105_HASHES = DELTARUNE_CURRENT_HASHES
+DELTARUNE_105_MD5 = DELTARUNE_CURRENT_MD5
+
 DEFAULT_NAME = "AI Plays Deltarune Telemetry"
-DEFAULT_VERSION = "9.0.2"
+DEFAULT_VERSION = "9.1.0"
 DEFAULT_DESCRIPTION = (
     "Localhost-only runtime telemetry for the external AI Plays Deltarune "
     "controller."

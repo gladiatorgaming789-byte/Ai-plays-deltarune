@@ -109,7 +109,12 @@ def test_dialogue_event_maps_player_position_not_writer_position():
 
 
 def test_gui_is_available_as_a_controller_command():
-    assert build_parser().parse_args(["gui"]).command == "gui"
+    default = build_parser().parse_args(["gui"])
+    legacy = build_parser().parse_args(["gui", "--legacy"])
+
+    assert default.command == "gui"
+    assert default.legacy is False
+    assert legacy.legacy is True
 
 
 def test_run_speed_defaults_to_auto_and_accepts_manual_override():

@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -16,13 +17,19 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from deltarune_agent.deltamod_package import DELTARUNE_105_HASHES
+from deltarune_agent.deltamod_package import DELTARUNE_CURRENT_HASHES
+from mods.speed.tools.release_config import (
+    BUILD_INFO_FILENAME,
+    MINIMUM_G3MTOOL_VERSION,
+    SUPPORTED_GAME_BUILD,
+    TARGET_VERSION,
+    VERSION,
+)
 
 
 TARGET_CODE = "gml_Object_obj_time_Step_1"
 SPEED_MARKERS = (b"AI_SPEED_MOD|1|", b"DRSPEED|1|multiplier=")
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
-MINIMUM_G3MTOOL_VERSION = (1, 2, 5)
 
 
 def _sha256(path: Path) -> str:
@@ -92,7 +99,7 @@ def _find_clean_source(game_directory: Path, chapter: int) -> Path:
         chapter_directory / "data.original.win",
         chapter_directory / "data.unmodded.win",
     )
-    expected = DELTARUNE_105_HASHES[chapter]
+    expected = DELTARUNE_CURRENT_HASHES[chapter]
     observed: list[str] = []
     for candidate in candidates:
         if not candidate.is_file():
@@ -103,9 +110,43 @@ def _find_clean_source(game_directory: Path, chapter: int) -> Path:
         observed.append(f"{candidate.name}={checksum}")
     details = ", ".join(observed) if observed else "no candidate files found"
     raise RuntimeError(
-        f"Chapter {chapter} has no verified clean Deltarune 1.05 source "
+        f"Chapter {chapter} has no verified clean {SUPPORTED_GAME_BUILD} "
+        "source. Checksums are calculated from the actual data.win bytes; "
+        "data.win.hash sidecars are intentionally ignored because the "
+        "current Steam release ships stale sidecars for Chapters 2-5 "
         f"({details})"
     )
+
+
+def _extract_archive_sources(
+    archive_path: Path,
+    chapters: list[int],
+    destination: Path,
+) -> tuple[dict[int, Path], str]:
+    """Extract only verified chapter data files from a supplied game ZIP."""
+    archive_hash = _sha256(archive_path)
+    sources: dict[int, Path] = {}
+    with zipfile.ZipFile(archive_path) as archive:
+        names = archive.namelist()
+        for chapter in chapters:
+            member = f"chapter{chapter}_windows/data.win"
+            if names.count(member) != 1:
+                raise RuntimeError(
+                    f"Game archive must contain exactly one {member}"
+                )
+            output = destination / f"chapter{chapter}_data.win"
+            with archive.open(member) as source, output.open("wb") as target:
+                shutil.copyfileobj(source, target, length=1024 * 1024)
+            checksum = _sha256(output)
+            expected = DELTARUNE_CURRENT_HASHES[chapter]
+            if checksum != expected:
+                raise RuntimeError(
+                    f"Game archive chapter {chapter} does not match "
+                    f"{SUPPORTED_GAME_BUILD}: expected {expected}, got "
+                    f"{checksum}"
+                )
+            sources[chapter] = output
+    return sources, archive_hash
 
 
 def _write_zip_entry(
@@ -218,7 +259,7 @@ def _build_chapter(
     temporary_root: Path,
 ) -> None:
     original_hash = _sha256(clean_source)
-    if original_hash != DELTARUNE_105_HASHES[chapter]:
+    if original_hash != DELTARUNE_CURRENT_HASHES[chapter]:
         raise RuntimeError(f"Chapter {chapter} clean source hash changed")
 
     chapter_root = temporary_root / f"chapter{chapter}"
@@ -312,6 +353,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=default_g3mtool,
     )
     parser.add_argument(
+        "--game-archive",
+        type=Path,
+        help=(
+            "optional clean Deltarune ZIP; verified chapter data.win bytes "
+            "are extracted to a temporary build directory and stale "
+            "data.win.hash sidecars are ignored"
+        ),
+    )
+    parser.add_argument(
         "--output-directory",
         type=Path,
         default=speed_root / ".build" / "payloads",
@@ -345,15 +395,36 @@ def main() -> int:
         raise FileNotFoundError(f"Speed source was not found: {script}")
     output_directory.mkdir(parents=True, exist_ok=True)
 
-    sources = {
-        chapter: _find_clean_source(game_directory, chapter)
-        for chapter in chapters
-    }
     with tempfile.TemporaryDirectory(
         prefix=".speed-payload-build-",
         dir=output_directory.parent,
     ) as temporary:
         temporary_root = Path(temporary)
+        if args.game_archive is not None:
+            archive_path = args.game_archive.expanduser().resolve()
+            if not archive_path.is_file():
+                raise FileNotFoundError(
+                    f"Deltarune game archive was not found: {archive_path}"
+                )
+            sources, archive_hash = _extract_archive_sources(
+                archive_path,
+                chapters,
+                temporary_root,
+            )
+            source_details: dict[str, object] = {
+                "mode": "archive",
+                "archive_name": archive_path.name,
+                "archive_sha256": archive_hash,
+            }
+            print(
+                f"Using verified {archive_path.name} ({archive_hash})"
+            )
+        else:
+            sources = {
+                chapter: _find_clean_source(game_directory, chapter)
+                for chapter in chapters
+            }
+            source_details = {"mode": "installed-files"}
         for chapter in chapters:
             _build_chapter(
                 chapter=chapter,
@@ -366,10 +437,30 @@ def main() -> int:
                 ),
                 temporary_root=temporary_root,
             )
+    build_info = {
+        "format": "AI speed payload build provenance v1",
+        "speed_mod_version": VERSION,
+        "deltarune_target_version": TARGET_VERSION,
+        "supported_game_build": SUPPORTED_GAME_BUILD,
+        "g3mtool_version": ".".join(str(part) for part in version),
+        "script_sha256": _sha256(script),
+        "chapters": chapters,
+        "clean_chapter_sha256": {
+            str(chapter): DELTARUNE_CURRENT_HASHES[chapter]
+            for chapter in chapters
+        },
+        "source": source_details,
+    }
+    (output_directory / BUILD_INFO_FILENAME).write_text(
+        json.dumps(build_info, indent=2) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
     print(
         "Payloads are build intermediates under "
         f"{output_directory}; Git ignores this directory."
     )
+    print(f"Build provenance: {output_directory / BUILD_INFO_FILENAME}")
     return 0
 
 

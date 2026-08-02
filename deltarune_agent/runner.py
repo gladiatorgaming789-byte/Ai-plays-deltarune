@@ -126,7 +126,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="do not write metrics.json and replay.json",
     )
-    sub.add_parser("gui", help="open the desktop controller and wall-map viewer")
+    gui = sub.add_parser(
+        "gui",
+        help="open the desktop controller and remembered-map operator console",
+    )
+    gui.add_argument(
+        "--legacy",
+        action="store_true",
+        help="launch the transitional Tk interface instead of the Qt console",
+    )
     return parser
 
 
@@ -479,6 +487,11 @@ def main() -> None:
             )
         )
     elif args.command == "gui":
-        from .gui import launch_gui
+        if args.legacy:
+            from .integrated_gui import launch_integrated_gui
 
-        launch_gui()
+            launch_integrated_gui()
+        else:
+            from .qt_ui import launch_qt_gui
+
+            launch_qt_gui()

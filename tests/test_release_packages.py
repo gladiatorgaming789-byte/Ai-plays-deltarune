@@ -6,7 +6,7 @@ from pathlib import Path
 import zipfile
 
 from deltarune_agent.deltamod_package import (
-    DELTARUNE_105_HASHES,
+    DELTARUNE_CURRENT_HASHES,
     validate_package,
 )
 
@@ -14,7 +14,8 @@ from deltarune_agent.deltamod_package import (
 ROOT = Path(__file__).resolve().parents[1]
 SPEED_ROOT = ROOT / "mods" / "speed"
 SPEED_DIRECTORY = SPEED_ROOT / "deltamod"
-TELEMETRY_DIRECTORY = ROOT / "mods" / "telemetry" / "deltamod"
+TELEMETRY_ROOT = ROOT / "mods" / "telemetry"
+TELEMETRY_DIRECTORY = TELEMETRY_ROOT / "deltamod"
 
 
 def _sha256(path: Path) -> str:
@@ -23,11 +24,11 @@ def _sha256(path: Path) -> str:
 
 def test_built_speed_release_records_match_every_archive():
     release = json.loads(
-        (SPEED_ROOT / "release_1.1.0.json").read_text(encoding="utf-8")
+        (SPEED_ROOT / "release_1.2.0.json").read_text(encoding="utf-8")
     )
     assert release["clean_chapter_sha256"] == {
         str(chapter): checksum
-        for chapter, checksum in DELTARUNE_105_HASHES.items()
+        for chapter, checksum in DELTARUNE_CURRENT_HASHES.items()
     }
     assert release["default_multiplier"] == 2
     assert release["supported_multipliers"] == list(range(1, 11))
@@ -85,33 +86,58 @@ def test_speed_deltamod_directory_contains_only_release_zips():
     assert "*.g3mpatch binary" in attributes
 
 
-def test_telemetry_902_is_metadata_only_and_has_a_distinct_id():
+def test_current_telemetry_release_is_rebuilt_and_has_a_distinct_id():
     release = json.loads(
-        (TELEMETRY_DIRECTORY / "release_9.0.2.json").read_text(
-            encoding="utf-8"
-        )
+        (TELEMETRY_ROOT / "release_9.1.0.json").read_text(encoding="utf-8")
     )
-    current = TELEMETRY_DIRECTORY / release["file"]
-    previous = TELEMETRY_DIRECTORY / release["payload_source"]
-    assert current.is_file() and previous.is_file()
-    assert _sha256(current) == release["sha256"]
-    assert release["payloads_unchanged"] is True
-    assert release["package_id"] == "github.ai-telemetry.gladiatorgaming789-byte"
-    assert release["package_id"] != "github.ai-speed.gladiatorgaming789-byte"
-    validate_package(current)
+    record = release["package"]
+    package = TELEMETRY_DIRECTORY / record["file"]
+    assert package.is_file()
+    assert package.stat().st_size == record["size"]
+    assert _sha256(package) == record["sha256"]
+    assert release["telemetry_mod_version"] == "9.1.0"
+    assert release["telemetry_protocol"] == 9
+    assert release["steam_build_id"] == "24484059"
+    assert release["clean_chapter_sha256"] == {
+        str(chapter): checksum
+        for chapter, checksum in DELTARUNE_CURRENT_HASHES.items()
+    }
+    assert record["package_id"] == "github.ai-telemetry.gladiatorgaming789-byte"
+    assert record["package_id"] != "github.ai-speed.gladiatorgaming789-byte"
+    validate_package(package)
 
-    with zipfile.ZipFile(current) as current_zip, zipfile.ZipFile(
-        previous
-    ) as previous_zip:
-        metadata = json.loads(current_zip.read("meta.json"))
+    with zipfile.ZipFile(package) as archive:
+        assert archive.namelist() == record["root_entries"]
+        metadata = json.loads(archive.read("meta.json"))
         assert metadata["metadata"]["mergeSupport"] is True
         assert {
             item["file"]: item["checksum"]
             for item in metadata["neededFiles"]
         } == {
             f"./chapter{chapter}_windows/data.win": checksum
-            for chapter, checksum in DELTARUNE_105_HASHES.items()
+            for chapter, checksum in DELTARUNE_CURRENT_HASHES.items()
         }
+        payloads = [
+            name for name in archive.namelist() if name.endswith(".g3mpatch")
+        ]
+        assert len(payloads) == 5
+        assert not any(
+            name.endswith((".csx", ".xdelta", ".vcdiff"))
+            for name in archive.namelist()
+        )
         for chapter in range(1, 6):
-            name = f"Chapter{chapter}DataPatch.xdelta"
-            assert current_zip.read(name) == previous_zip.read(name)
+            name = f"Chapter{chapter}Telemetry.g3mpatch"
+            expected = release["chapter_payloads"][str(chapter)]
+            assert name in payloads
+            assert len(archive.read(name)) == expected["size"]
+            assert hashlib.sha256(archive.read(name)).hexdigest() == expected["sha256"]
+
+
+def test_telemetry_deltamod_directory_contains_only_current_release_files():
+    files = sorted(path for path in TELEMETRY_DIRECTORY.iterdir() if path.is_file())
+    archives = [path for path in files if path.suffix.casefold() == ".zip"]
+
+    assert [path.name for path in archives] == [
+        "Telemetry-All-Chapters-DeltaMod-v9.1.0.zip"
+    ]
+    assert not list(TELEMETRY_DIRECTORY.glob("*.g3mpatch"))
