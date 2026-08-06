@@ -1,73 +1,11 @@
 {
-  "format": "DeltaMod ZIP-only release with ignored G3MTool intermediates",
-  "steam_build_id": "24484059",
-  "deltarune_target_version": "1.05",
   "telemetry_mod_version": "9.1.0",
   "telemetry_protocol": 9,
-  "minimum_g3mtool_version_for_speed_merge": "1.2.5",
-  "merge_support": true,
-  "manual_source": "AiTelemetry.csx",
-  "manual_source_sha256": "c3239c679fdbab5a700930628a5ea19a6a7046a3620fb4656fd1a84a73848977",
-  "clean_chapter_sha256": {
-    "1": "82c2bb61b8d78cd287120f6301588fecba34ec5a890bac711b7a8774c760ec70",
-    "2": "047c5ab003e3e017a709c02757e119c81e0327760169512110fd276b19241e68",
-    "3": "c1a0925343694ec9b9adcbf2f916a720b02fd1b999286cfe8fe6a52f3320f714",
-    "4": "ed64789586238b52375e994e1c1cf13694dd2d0dab57d13e639b9c892e37d8f2",
-    "5": "370dfd141d2955d5a1960122919b16e4092b52ffbb85fda541bc4680c6b3b85c"
-  },
-  "chapter_payloads": {
-    "1": {
-      "archive_name": "Chapter1Telemetry.g3mpatch",
-      "size": 100830,
-      "sha256": "cfe687a3a3a8f0bb25ece87ea4dbafacd196042fdbe0a60a81f422b5dcc0740b"
-    },
-    "2": {
-      "archive_name": "Chapter2Telemetry.g3mpatch",
-      "size": 259856,
-      "sha256": "e33735cab1d110f22574818d0dd01f07461bfdfc8cec259a7f7e46cc130f7a5e"
-    },
-    "3": {
-      "archive_name": "Chapter3Telemetry.g3mpatch",
-      "size": 388414,
-      "sha256": "2d0d1ce216b17ce1097792688def7abf7ff7756e754d26be5486ffa4f4e282a2"
-    },
-    "4": {
-      "archive_name": "Chapter4Telemetry.g3mpatch",
-      "size": 416852,
-      "sha256": "98003fe3c0eb96992466fd5c57f6214ae18e87a19e4bf9b124a9ff65fb076d16"
-    },
-    "5": {
-      "archive_name": "Chapter5Telemetry.g3mpatch",
-      "size": 625541,
-      "sha256": "4a393ecd3b2c4d3c9e2785d83f9293e1a00c4e6c59624d4e59a855545410efa0"
-    }
-  },
-  "package": {
-    "file": "Telemetry-All-Chapters-DeltaMod-v9.1.0.zip",
-    "size": 1756681,
-    "sha256": "3d87e38c694050898d3930336b7ec18b78d920b03a245122c89a42c4820e547d",
-    "root_entries": [
-      "Chapter1Telemetry.g3mpatch",
-      "Chapter2Telemetry.g3mpatch",
-      "Chapter3Telemetry.g3mpatch",
-      "Chapter4Telemetry.g3mpatch",
-      "Chapter5Telemetry.g3mpatch",
-      "meta.json",
-      "modding.xml"
-    ],
-    "package_id": "github.ai-telemetry.gladiatorgaming789-byte",
-    "target_version": "1.05",
-    "chapters": [
-      1,
-      2,
-      3,
-      4,
-      5
-    ],
-    "merge_support": true
-  },
-  "payload_provenance": {
-    "record_version": 1,
-    "g3mtool_version": "1.2.5"
-  }
+  "status": "withdrawn",
+  "withdrawn_on": "2026-08-06",
+  "reason": "When enabled beside speed v1.2.0, independently compiled GameMaker patches can corrupt shared variable-table indexes. The observed runtime failure incorrectly relocated bbox_top into gml_Object_obj_time_Step_1.",
+  "affected_packages": "Telemetry-All-Chapters-DeltaMod-v9.1.0.zip",
+  "replacement": "Direct-CSX package builder introduced for telemetry package v9.2.0; wire protocol remains v9",
+  "replacement_verification": "Pending runtime validation against refreshed clean Deltarune chapter files",
+  "recovery": "Disable both old packages and rebuild DeltaMod protected copies from clean originals before testing a replacement."
 }
