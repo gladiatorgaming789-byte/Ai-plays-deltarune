@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
-import re
 import sys
 import zipfile
 
@@ -13,141 +11,83 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from deltarune_agent.deltamod_package import (
-    DELTARUNE_CURRENT_HASHES,
-    DELTARUNE_CURRENT_MD5,
-    DELTARUNE_PATCH_LABEL,
-    DELTARUNE_STEAM_BUILD_ID,
-    PatchSpec,
-    build_package,
-    validate_package,
+from deltarune_agent.deltamod_csx_package import (
+    SUPPORTED_CHAPTERS,
+    build_csx_package,
+    sha256_file,
+    validate_csx_package,
 )
 
 
-VERSION = "9.1.0"
-TARGET_VERSION = "1.05"
+VERSION = "9.2.0"
+TELEMETRY_PROTOCOL = 9
 NAME = "AI Plays Deltarune Telemetry"
 DESCRIPTION = (
-    "Localhost-only telemetry protocol v9 for the external AI Plays "
-    f"Deltarune controller, rebuilt for {DELTARUNE_PATCH_LABEL} (Steam build "
-    f"{DELTARUNE_STEAM_BUILD_ID}). Separate speed and telemetry merging "
-    "requires G3MTool 1.2.5 or newer."
+    "Direct-CSX localhost-only telemetry protocol v9 for the external AI "
+    "controller. DeltaMod executes the source installer separately for each "
+    "chapter, avoiding compiled GameMaker variable-table merges."
 )
 AUTHOR = "gladiatorgaming789-byte"
 URL = "https://github.com/gladiatorgaming789-byte/Ai-plays-deltarune"
 PACKAGE_ID = "github.ai-telemetry.gladiatorgaming789-byte"
-MINIMUM_G3MTOOL_VERSION = (1, 2, 5)
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def _payloads(directory: Path) -> dict[int, Path]:
-    payloads = {
-        chapter: directory / f"Chapter{chapter}Telemetry.g3mpatch"
-        for chapter in range(1, 6)
-    }
-    missing = [str(path) for path in payloads.values() if not path.is_file()]
-    if missing:
-        raise FileNotFoundError(
-            "Missing temporary telemetry payloads. Run build_payloads.py first:\n"
-            + "\n".join(missing)
-        )
-    return payloads
-
-
-def _validated_provenance(
-    telemetry_root: Path,
-    payload_directory: Path,
-    payloads: dict[int, Path],
-) -> dict[str, object]:
-    record_path = payload_directory.parent / "payloads.json"
-    if not record_path.is_file():
-        raise FileNotFoundError(
-            "Missing payload provenance. Re-run build_payloads.py before "
-            "packaging."
-        )
+def _clean_hashes(path: Path | None, chapters: tuple[int, ...]) -> dict[int, str] | None:
+    if path is None:
+        return None
     try:
-        record = json.loads(record_path.read_text(encoding="utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise RuntimeError("Telemetry payload provenance is invalid") from exc
-    if not isinstance(record, dict) or record.get("record_version") != 1:
-        raise RuntimeError("Unsupported telemetry payload provenance version")
-    if record.get("steam_build_id") != DELTARUNE_STEAM_BUILD_ID:
+        payload = json.loads(path.expanduser().read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Could not read clean hash map: {path}") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("Clean hash map must be a JSON object")
+    try:
+        hashes = {int(chapter): str(checksum) for chapter, checksum in payload.items()}
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("Clean hash map keys must be chapter numbers") from exc
+    if set(hashes) != set(chapters):
         raise RuntimeError(
-            "Telemetry payloads target a stale Steam build; rebuild them"
+            "Clean hash map must contain exactly the chapters being packaged"
         )
-    if record.get("telemetry_protocol") != 9:
-        raise RuntimeError("Telemetry payload protocol does not match v9")
-    script = telemetry_root / "AiTelemetry.csx"
-    if (
-        record.get("manual_source") != script.name
-        or record.get("manual_source_sha256") != _sha256(script)
-    ):
-        raise RuntimeError(
-            "AiTelemetry.csx changed after payload generation; rebuild payloads"
-        )
-    version_match = re.fullmatch(
-        r"(\d+)\.(\d+)\.(\d+)",
-        str(record.get("g3mtool_version", "")),
-    )
-    if version_match is None or tuple(
-        int(part) for part in version_match.groups()
-    ) < MINIMUM_G3MTOOL_VERSION:
-        raise RuntimeError(
-            "Telemetry payloads were not built with merge-safe G3MTool 1.2.5+"
-        )
-
-    chapter_records = record.get("chapters")
-    if not isinstance(chapter_records, list):
-        raise RuntimeError("Telemetry provenance has no chapter records")
-    by_chapter = {
-        item.get("chapter"): item
-        for item in chapter_records
-        if isinstance(item, dict)
-    }
-    if (
-        len(chapter_records) != 5
-        or len(by_chapter) != 5
-        or set(by_chapter) != set(range(1, 6))
-    ):
-        raise RuntimeError("Telemetry provenance must cover Chapters 1-5")
-    for chapter, payload in payloads.items():
-        item = by_chapter[chapter]
-        if (
-            item.get("clean_sha256") != DELTARUNE_CURRENT_HASHES[chapter]
-            or item.get("clean_md5") != DELTARUNE_CURRENT_MD5[chapter]
-            or item.get("payload_size") != payload.stat().st_size
-            or item.get("payload_sha256") != _sha256(payload)
-        ):
-            raise RuntimeError(
-                f"Chapter {chapter} payload does not match current provenance"
-            )
-    return record
+    return hashes
 
 
 def build_parser() -> argparse.ArgumentParser:
     telemetry_root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(
         description=(
-            "Package ignored telemetry G3MTool intermediates into one "
-            "ZIP-only Chapters 1-5 DeltaMod release."
+            "Build a DeltaMod direct-CSX telemetry package. The target version "
+            "is required so an outdated game version is never guessed."
         )
     )
     parser.add_argument(
-        "--payload-directory",
-        type=Path,
-        default=telemetry_root / ".build" / "payloads",
+        "--target-version",
+        required=True,
+        help="exact Deltarune version expected by the installed DeltaMod build",
     )
     parser.add_argument(
-        "--output-directory",
+        "--chapter",
+        type=int,
+        action="append",
+        choices=SUPPORTED_CHAPTERS,
+        help="chapter to include; repeat as needed (default: Chapters 1-5)",
+    )
+    parser.add_argument(
+        "--clean-hashes",
         type=Path,
-        default=telemetry_root / "deltamod",
+        help=(
+            "optional JSON object mapping included chapter numbers to freshly "
+            "measured clean data.win SHA-256 values"
+        ),
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=(
+            telemetry_root
+            / "deltamod"
+            / f"Telemetry-All-Chapters-DeltaMod-CSX-v{VERSION}.zip"
+        ),
     )
     parser.add_argument(
         "--manifest",
@@ -160,90 +100,67 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     telemetry_root = Path(__file__).resolve().parents[1]
-    payload_directory = args.payload_directory.expanduser().resolve()
-    output_directory = args.output_directory.expanduser().resolve()
-    manifest_path = args.manifest.expanduser().resolve()
-    payloads = _payloads(payload_directory)
-    provenance = _validated_provenance(
-        telemetry_root,
-        payload_directory,
-        payloads,
-    )
-    output_directory.mkdir(parents=True, exist_ok=True)
-    output = (
-        output_directory / f"Telemetry-All-Chapters-DeltaMod-v{VERSION}.zip"
-    )
-    package = build_package(
-        patches=[
-            PatchSpec(
-                chapter,
-                payloads[chapter],
-                DELTARUNE_CURRENT_HASHES[chapter],
-                f"Chapter{chapter}Telemetry.g3mpatch",
-            )
-            for chapter in range(1, 6)
-        ],
-        output=output,
-        target_version=TARGET_VERSION,
+    chapters = tuple(sorted(args.chapter or SUPPORTED_CHAPTERS))
+    if len(chapters) != len(set(chapters)):
+        raise RuntimeError("A chapter was selected more than once")
+    source = telemetry_root / "AiTelemetry.csx"
+    hashes = _clean_hashes(args.clean_hashes, chapters)
+    package = build_csx_package(
+        script=source,
+        chapters=chapters,
+        output=args.output,
+        target_version=args.target_version,
+        payload_label="Telemetry",
         name=NAME,
         version=VERSION,
         description=DESCRIPTION,
         authors=[AUTHOR],
         url=URL,
         package_id=PACKAGE_ID,
+        clean_hashes=hashes,
         merge_support=True,
     )
-    validate_package(package)
+    validation = validate_csx_package(package, expected_chapters=chapters)
     with zipfile.ZipFile(package) as archive:
-        metadata = json.loads(archive.read("meta.json"))
         root_entries = archive.namelist()
 
-    source = telemetry_root / "AiTelemetry.csx"
     release = {
-        "format": "DeltaMod ZIP-only release with ignored G3MTool intermediates",
-        "steam_build_id": DELTARUNE_STEAM_BUILD_ID,
-        "deltarune_target_version": TARGET_VERSION,
+        "format": "DeltaMod direct-CSX source package",
+        "status": "source-level migration; runtime verification pending",
+        "reason": (
+            "Compiled speed and telemetry packages could corrupt shared "
+            "GameMaker variable indexes when enabled together."
+        ),
         "telemetry_mod_version": VERSION,
-        "telemetry_protocol": 9,
-        "minimum_g3mtool_version_for_speed_merge": "1.2.5",
+        "telemetry_protocol": TELEMETRY_PROTOCOL,
+        "target_version": args.target_version,
+        "chapters": list(chapters),
         "merge_support": True,
-        "manual_source": source.name,
-        "manual_source_sha256": _sha256(source),
-        "clean_chapter_sha256": {
-            str(chapter): checksum
-            for chapter, checksum in DELTARUNE_CURRENT_HASHES.items()
-        },
-        "chapter_payloads": {
-            str(chapter): {
-                "archive_name": payloads[chapter].name,
-                "size": payloads[chapter].stat().st_size,
-                "sha256": _sha256(payloads[chapter]),
-            }
-            for chapter in range(1, 6)
-        },
+        "source": source.name,
+        "source_sha256": sha256_file(source),
+        "clean_hashes_included": hashes is not None,
         "package": {
             "file": package.name,
             "size": package.stat().st_size,
-            "sha256": _sha256(package),
+            "sha256": sha256_file(package),
             "root_entries": root_entries,
-            "package_id": metadata["metadata"]["packageID"],
-            "target_version": metadata["deltaruneTargetVersion"],
-            "chapters": list(range(1, 6)),
-            "merge_support": metadata["metadata"]["mergeSupport"],
-        },
-        "payload_provenance": {
-            "record_version": provenance["record_version"],
-            "g3mtool_version": provenance["g3mtool_version"],
+            **validation,
         },
     }
-    manifest_path.write_text(
+    manifest = args.manifest.expanduser().resolve()
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(
         json.dumps(release, indent=2) + "\n",
         encoding="utf-8",
         newline="\n",
     )
     print(package)
-    print(f"Release manifest: {manifest_path}")
-    print("Loose .g3mpatch files remain only in the ignored .build directory.")
+    print(f"Release manifest: {manifest}")
+    if hashes is None:
+        print(
+            "Compatibility hashes were intentionally omitted. Verify the CSX "
+            "package against refreshed clean chapter files before release."
+        )
     return 0
 
 
