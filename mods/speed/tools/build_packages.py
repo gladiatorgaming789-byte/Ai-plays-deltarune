@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import sys
@@ -12,171 +11,82 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from deltarune_agent.deltamod_package import (
-    DELTARUNE_CURRENT_HASHES,
-    PatchSpec,
-    build_package,
-    validate_package,
-)
-from mods.speed.tools.release_config import (
-    BUILD_INFO_FILENAME,
-    MINIMUM_G3MTOOL_VERSION,
+from deltarune_agent.deltamod_csx_package import (
     SUPPORTED_CHAPTERS,
-    SUPPORTED_GAME_BUILD,
-    TARGET_VERSION,
-    VERSION,
+    build_csx_package,
+    sha256_file,
+    validate_csx_package,
 )
 
 
+VERSION = "1.3.0"
 NAME = "AI Deltarune Run Speed"
 DESCRIPTION = (
-    "Reversible 1x-10x simulation speed controls with localhost "
-    "synchronization for standalone play or telemetry-synchronized AI runs. "
-    f"Targets {SUPPORTED_GAME_BUILD}. Multi-code-patch merging requires "
-    "G3MTool 1.2.5 or newer."
+    "Direct-CSX 1x-10x simulation speed controls with localhost "
+    "synchronization. DeltaMod executes the source installer separately for "
+    "each selected chapter, avoiding compiled GameMaker variable-table merges."
 )
 AUTHOR = "gladiatorgaming789-byte"
 URL = "https://github.com/gladiatorgaming789-byte/Ai-plays-deltarune"
-ALL_PACKAGE_ID = "github.ai-speed.gladiatorgaming789-byte"
+PACKAGE_ID = "github.ai-speed.gladiatorgaming789-byte"
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def _payloads(directory: Path) -> dict[int, Path]:
-    payloads = {
-        chapter: directory / f"Chapter{chapter}Speed.g3mpatch"
-        for chapter in SUPPORTED_CHAPTERS
-    }
-    missing = [str(path) for path in payloads.values() if not path.is_file()]
-    if missing:
-        raise FileNotFoundError(
-            "Missing temporary speed payloads. Run build_payloads.py first:\n"
-            + "\n".join(missing)
-        )
-    return payloads
-
-
-def _build_provenance(directory: Path, source: Path) -> dict[str, object]:
-    path = directory / BUILD_INFO_FILENAME
-    if not path.is_file():
-        raise FileNotFoundError(
-            f"Missing {BUILD_INFO_FILENAME}. Run build_payloads.py before "
-            "packaging so source provenance can be verified."
-        )
+def _clean_hashes(path: Path | None, chapters: tuple[int, ...]) -> dict[int, str] | None:
+    if path is None:
+        return None
     try:
-        info = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid payload provenance: {path}") from exc
-    expected = {
-        "speed_mod_version": VERSION,
-        "deltarune_target_version": TARGET_VERSION,
-        "supported_game_build": SUPPORTED_GAME_BUILD,
-        "script_sha256": _sha256(source),
-        "chapters": list(SUPPORTED_CHAPTERS),
-        "clean_chapter_sha256": {
-            str(chapter): checksum
-            for chapter, checksum in DELTARUNE_CURRENT_HASHES.items()
-        },
-    }
-    mismatches = [
-        key for key, value in expected.items() if info.get(key) != value
-    ]
-    if mismatches:
-        raise ValueError(
-            "Payload provenance does not match this release source: "
-            + ", ".join(mismatches)
-            + ". Rebuild all payloads before packaging."
-        )
-    version_text = str(info.get("g3mtool_version", ""))
+        payload = json.loads(path.expanduser().read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Could not read clean hash map: {path}") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("Clean hash map must be a JSON object")
     try:
-        tool_version = tuple(int(part) for part in version_text.split("."))
-    except ValueError as exc:
-        raise ValueError(
-            "Payload provenance has an invalid G3MTool version"
-        ) from exc
-    if len(tool_version) != 3 or tool_version < MINIMUM_G3MTOOL_VERSION:
-        required = ".".join(
-            str(part) for part in MINIMUM_G3MTOOL_VERSION
+        hashes = {int(chapter): str(checksum) for chapter, checksum in payload.items()}
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("Clean hash map keys must be chapter numbers") from exc
+    if set(hashes) != set(chapters):
+        raise RuntimeError(
+            "Clean hash map must contain exactly the chapters being packaged"
         )
-        raise ValueError(f"Payloads require G3MTool {required} or newer")
-    source_details = info.get("source")
-    if not isinstance(source_details, dict) or source_details.get("mode") not in {
-        "archive",
-        "installed-files",
-    }:
-        raise ValueError("Payload provenance has invalid source details")
-    return info
-
-
-def _spec(chapter: int, payload: Path) -> PatchSpec:
-    return PatchSpec(
-        chapter,
-        payload,
-        archive_name_override=f"Chapter{chapter}Speed.g3mpatch",
-    )
-
-
-def _archive_record(path: Path, chapters: list[int]) -> dict[str, object]:
-    validate_package(path)
-    with zipfile.ZipFile(path) as archive:
-        metadata = json.loads(archive.read("meta.json"))
-        root_entries = archive.namelist()
-    return {
-        "file": path.name,
-        "size": path.stat().st_size,
-        "sha256": _sha256(path),
-        "root_entries": root_entries,
-        "package_id": metadata["metadata"]["packageID"],
-        "target_version": metadata["deltaruneTargetVersion"],
-        "chapters": chapters,
-        "merge_support": metadata["metadata"]["mergeSupport"],
-    }
-
-
-def _build_one(
-    *,
-    chapters: list[int],
-    payloads: dict[int, Path],
-    output: Path,
-    package_id: str,
-) -> Path:
-    return build_package(
-        patches=[_spec(chapter, payloads[chapter]) for chapter in chapters],
-        output=output,
-        target_version=TARGET_VERSION,
-        name=NAME,
-        version=VERSION,
-        description=DESCRIPTION,
-        authors=[AUTHOR],
-        url=URL,
-        package_id=package_id,
-        merge_support=True,
-    )
+    return hashes
 
 
 def build_parser() -> argparse.ArgumentParser:
     speed_root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(
         description=(
-            "Package ignored G3MTool intermediates into ZIP-only DeltaMod "
-            "releases and write a text manifest beside the speed source."
+            "Build a DeltaMod direct-CSX speed package. The target version is "
+            "required so an outdated game version is never guessed."
         )
     )
     parser.add_argument(
-        "--payload-directory",
-        type=Path,
-        default=speed_root / ".build" / "payloads",
+        "--target-version",
+        required=True,
+        help="exact Deltarune version expected by the installed DeltaMod build",
     )
     parser.add_argument(
-        "--output-directory",
+        "--chapter",
+        type=int,
+        action="append",
+        choices=SUPPORTED_CHAPTERS,
+        help="chapter to include; repeat as needed (default: Chapters 1-5)",
+    )
+    parser.add_argument(
+        "--clean-hashes",
         type=Path,
-        default=speed_root / "deltamod",
+        help=(
+            "optional JSON object mapping included chapter numbers to freshly "
+            "measured clean data.win SHA-256 values"
+        ),
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=(
+            speed_root
+            / "deltamod"
+            / f"AI-Speed-All-Chapters-DeltaMod-CSX-v{VERSION}.zip"
+        ),
     )
     parser.add_argument(
         "--manifest",
@@ -189,91 +99,66 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     speed_root = Path(__file__).resolve().parents[1]
-    payload_directory = args.payload_directory.expanduser().resolve()
-    output_directory = args.output_directory.expanduser().resolve()
-    manifest_path = args.manifest.expanduser().resolve()
+    chapters = tuple(sorted(args.chapter or SUPPORTED_CHAPTERS))
+    if len(chapters) != len(set(chapters)):
+        raise RuntimeError("A chapter was selected more than once")
     source = speed_root / "AiSpeed.csx"
-    provenance = _build_provenance(payload_directory, source)
-    payloads = _payloads(payload_directory)
-    output_directory.mkdir(parents=True, exist_ok=True)
-
-    packages: list[tuple[Path, list[int]]] = []
-    all_chapters = list(SUPPORTED_CHAPTERS)
-    packages.append(
-        (
-            _build_one(
-                chapters=all_chapters,
-                payloads=payloads,
-                output=(
-                    output_directory
-                    / f"AI-Speed-All-Chapters-DeltaMod-v{VERSION}.zip"
-                ),
-                package_id=ALL_PACKAGE_ID,
-            ),
-            all_chapters,
-        )
+    hashes = _clean_hashes(args.clean_hashes, chapters)
+    package = build_csx_package(
+        script=source,
+        chapters=chapters,
+        output=args.output,
+        target_version=args.target_version,
+        payload_label="Speed",
+        name=NAME,
+        version=VERSION,
+        description=DESCRIPTION,
+        authors=[AUTHOR],
+        url=URL,
+        package_id=PACKAGE_ID,
+        clean_hashes=hashes,
+        merge_support=True,
     )
-    for chapter in all_chapters:
-        packages.append(
-            (
-                _build_one(
-                    chapters=[chapter],
-                    payloads=payloads,
-                    output=(
-                        output_directory
-                        / f"AI-Speed-Chapter-{chapter}-DeltaMod-v{VERSION}.zip"
-                    ),
-                    package_id=(
-                        f"github.ai-speed-chapter{chapter}."
-                        "gladiatorgaming789-byte"
-                    ),
-                ),
-                [chapter],
-            )
-        )
+    validation = validate_csx_package(package, expected_chapters=chapters)
+    with zipfile.ZipFile(package) as archive:
+        root_entries = archive.namelist()
 
     release = {
-        "format": "DeltaMod ZIP-only release with ignored G3MTool intermediates",
-        "minimum_g3mtool_version_for_multi_code_merge": "1.2.5",
-        "deltarune_target_version": TARGET_VERSION,
-        "supported_game_build": SUPPORTED_GAME_BUILD,
+        "format": "DeltaMod direct-CSX source package",
+        "status": "source-level migration; runtime verification pending",
+        "reason": (
+            "Compiled speed and telemetry packages could corrupt shared "
+            "GameMaker variable indexes when enabled together."
+        ),
         "speed_mod_version": VERSION,
-        "default_multiplier": 2,
-        "supported_multipliers": list(range(1, 11)),
+        "target_version": args.target_version,
+        "chapters": list(chapters),
         "merge_support": True,
-        "manual_source": source.name,
-        "manual_source_sha256": _sha256(source),
-        "intermediate_directory": ".build/payloads",
-        "build_provenance": provenance,
-        "chapter_payloads": {
-            str(chapter): {
-                "archive_name": payloads[chapter].name,
-                "size": payloads[chapter].stat().st_size,
-                "sha256": _sha256(payloads[chapter]),
-            }
-            for chapter in all_chapters
+        "source": source.name,
+        "source_sha256": sha256_file(source),
+        "clean_hashes_included": hashes is not None,
+        "package": {
+            "file": package.name,
+            "size": package.stat().st_size,
+            "sha256": sha256_file(package),
+            "root_entries": root_entries,
+            **validation,
         },
-        "clean_chapter_sha256": {
-            str(chapter): checksum
-            for chapter, checksum in DELTARUNE_CURRENT_HASHES.items()
-        },
-        "packages": [
-            _archive_record(package, chapters)
-            for package, chapters in packages
-        ],
     }
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.write_text(
+    manifest = args.manifest.expanduser().resolve()
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(
         json.dumps(release, indent=2) + "\n",
         encoding="utf-8",
         newline="\n",
     )
-    for package, _ in packages:
-        print(package)
-    print(f"Release manifest: {manifest_path}")
-    print(
-        "Loose .g3mpatch files remain only in the ignored .build directory."
-    )
+    print(package)
+    print(f"Release manifest: {manifest}")
+    if hashes is None:
+        print(
+            "Compatibility hashes were intentionally omitted. Verify the CSX "
+            "package against refreshed clean chapter files before release."
+        )
     return 0
 
 
