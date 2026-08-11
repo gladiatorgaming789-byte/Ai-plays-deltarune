@@ -131,7 +131,7 @@ imports.QueueAppend(beginStep, speedHook);
 imports.Import();
 
 ScriptMessage(
-    "AI speed mod v1.2.0 was installed at 2x. " +
+    "AI speed mod v1.3.0 was installed at 2x. " +
     "F8 toggles 1x/previous, " +
     "F9 decreases, and F10 increases up to 10x. Use Save As only after " +
     "preserving the original data.win."
