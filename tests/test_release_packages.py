@@ -63,12 +63,15 @@ def test_speed_release_manifest_records_direct_csx_candidate():
     assert release["clean_chapter_sha256"] == _expected_hashes()
     assert release["source"] == "AiSpeed.csx"
     assert release["source_sha256"] == sha256_csx_file(SPEED_ROOT / "AiSpeed.csx")
+    assert release["reproducibility"]["canonical_text"] == (
+        "UTF-8 without BOM, LF line endings"
+    )
 
     package = release["package"]
     assert package["file"] == "AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.0.zip"
     assert package["size"] == 7894
     assert package["sha256"] == (
-        "d9c9a3fca7ff3a610f4b4de1578a75f5b233ffaa86c281e71cd1032f2d622ced"
+        "ae2ad5ae5a3c30cf9c7e48d51b052cd10febb419514672760840ed7f99fb5283"
     )
     assert package["root_entries"] == [
         "meta.json",
@@ -103,12 +106,15 @@ def test_telemetry_release_manifest_records_direct_csx_candidate():
     assert release["source_sha256"] == sha256_csx_file(
         TELEMETRY_ROOT / "AiTelemetry.csx"
     )
+    assert release["reproducibility"]["canonical_text"] == (
+        "UTF-8 without BOM, LF line endings"
+    )
 
     package = release["package"]
     assert package["file"] == "Telemetry-All-Chapters-DeltaMod-CSX-v9.2.0.zip"
     assert package["size"] == 15293
     assert package["sha256"] == (
-        "01adbcfbbcf05e19453ff698575d5336bcd5ac1afb081d822cd39caa8469e442"
+        "8464461d0e291f6a67b827be2cb4f06f2218a1ef8976ada9905b58c8b3e46255"
     )
     assert package["root_entries"] == [
         "meta.json",
