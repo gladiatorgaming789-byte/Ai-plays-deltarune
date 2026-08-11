@@ -48,6 +48,22 @@ def _build(
     )
 
 
+def _build_from_source(source: Path, output: Path) -> Path:
+    return build_csx_package(
+        script=source,
+        chapters=[1, 2],
+        output=output,
+        target_version="1.05",
+        payload_label="Example",
+        name="Example CSX",
+        version="1.0.0",
+        description="Test source patch",
+        authors=["tester"],
+        url="https://example.invalid",
+        package_id="example.csx.tests",
+    )
+
+
 def test_builder_writes_one_source_payload_per_chapter(tmp_path: Path) -> None:
     output = _build(tmp_path)
     result = validate_csx_package(output, expected_chapters=(1, 2))
@@ -92,6 +108,35 @@ def test_builder_can_pin_fresh_clean_data_hashes(tmp_path: Path) -> None:
             "checksum": hashes[2],
         },
     ]
+
+
+def test_builder_is_identical_for_lf_and_crlf_checkouts(tmp_path: Path) -> None:
+    lf_source = tmp_path / "lf" / "AiExample.csx"
+    crlf_source = tmp_path / "crlf" / "AiExample.csx"
+    lf_source.parent.mkdir()
+    crlf_source.parent.mkdir()
+    lf_source.write_bytes(VALID_CSX.encode("utf-8"))
+    crlf_source.write_bytes(VALID_CSX.replace("\n", "\r\n").encode("utf-8"))
+
+    lf_package = _build_from_source(lf_source, tmp_path / "lf.zip")
+    crlf_package = _build_from_source(crlf_source, tmp_path / "crlf.zip")
+
+    assert lf_package.read_bytes() == crlf_package.read_bytes()
+    with zipfile.ZipFile(lf_package) as archive:
+        assert {item.date_time for item in archive.infolist()} == {
+            (1980, 1, 1, 0, 0, 0)
+        }
+        for name in archive.namelist():
+            if name.endswith(".csx"):
+                assert b"\r\n" not in archive.read(name)
+
+
+def test_builder_repeated_runs_are_byte_identical(tmp_path: Path) -> None:
+    source = _script(tmp_path / "AiExample.csx")
+    first = _build_from_source(source, tmp_path / "first.zip")
+    first_bytes = first.read_bytes()
+    second = _build_from_source(source, tmp_path / "second.zip")
+    assert second.read_bytes() == first_bytes
 
 
 def test_builder_rejects_duplicate_chapters(tmp_path: Path) -> None:
