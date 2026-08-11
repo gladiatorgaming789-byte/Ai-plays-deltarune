@@ -21,9 +21,13 @@ Source-level validation with UndertaleModTool CLI 0.9.1.2 passed on Chapters
 result, `obj_time` contains the speed hook and no telemetry marker, `bbox_top`,
 or other `bbox_*` reference.
 
+The package builder canonicalizes CSX to UTF-8/LF and fixes ZIP metadata, so the
+same sources produce the same candidate bytes on Windows and non-Windows
+checkouts.
+
 Candidate SHA-256:
 
-`d9c9a3fca7ff3a610f4b4de1578a75f5b233ffaa86c281e71cd1032f2d622ced`
+`ae2ad5ae5a3c30cf9c7e48d51b052cd10febb419514672760840ed7f99fb5283`
 
 This is still a **runtime-test candidate** until it has been imported into the
 current DeltaMod and launched in the real game alongside telemetry v9.2.0.
