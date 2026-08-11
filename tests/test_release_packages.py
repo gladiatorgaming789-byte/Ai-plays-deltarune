@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 
+from deltarune_agent.deltamod_csx_package import sha256_csx_file
 from deltarune_agent.deltamod_package import DELTARUNE_CURRENT_HASHES
 from mods.speed.tools import build_packages as speed_packages
 from mods.telemetry.tools import build_packages as telemetry_packages
@@ -15,10 +15,6 @@ SPEED_ROOT = MODS_ROOT / "speed"
 SPEED_DIRECTORY = SPEED_ROOT / "deltamod"
 TELEMETRY_ROOT = MODS_ROOT / "telemetry"
 TELEMETRY_DIRECTORY = TELEMETRY_ROOT / "deltamod"
-
-
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _expected_hashes() -> dict[str, str]:
@@ -66,7 +62,7 @@ def test_speed_release_manifest_records_direct_csx_candidate():
     assert release["chapter5_version_marker"] == "v0.0.253"
     assert release["clean_chapter_sha256"] == _expected_hashes()
     assert release["source"] == "AiSpeed.csx"
-    assert release["source_sha256"] == _sha256(SPEED_ROOT / "AiSpeed.csx")
+    assert release["source_sha256"] == sha256_csx_file(SPEED_ROOT / "AiSpeed.csx")
 
     package = release["package"]
     assert package["file"] == "AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.0.zip"
@@ -104,7 +100,9 @@ def test_telemetry_release_manifest_records_direct_csx_candidate():
     assert release["chapter5_version_marker"] == "v0.0.253"
     assert release["clean_chapter_sha256"] == _expected_hashes()
     assert release["source"] == "AiTelemetry.csx"
-    assert release["source_sha256"] == _sha256(TELEMETRY_ROOT / "AiTelemetry.csx")
+    assert release["source_sha256"] == sha256_csx_file(
+        TELEMETRY_ROOT / "AiTelemetry.csx"
+    )
 
     package = release["package"]
     assert package["file"] == "Telemetry-All-Chapters-DeltaMod-CSX-v9.2.0.zip"
