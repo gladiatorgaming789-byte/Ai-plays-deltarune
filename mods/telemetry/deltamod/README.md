@@ -25,9 +25,13 @@ Source-level validation with UndertaleModTool CLI 0.9.1.2 passed on Chapters
 telemetry remains in its intended events while `obj_time` contains no telemetry
 marker, `bbox_top`, or other `bbox_*` reference.
 
+The package builder canonicalizes CSX to UTF-8/LF and fixes ZIP metadata, so the
+same sources produce the same candidate bytes on Windows and non-Windows
+checkouts.
+
 Candidate SHA-256:
 
-`01adbcfbbcf05e19453ff698575d5336bcd5ac1afb081d822cd39caa8469e442`
+`8464461d0e291f6a67b827be2cb4f06f2218a1ef8976ada9905b58c8b3e46255`
 
 This is still a **runtime-test candidate** until it has been imported into the
 current DeltaMod and launched in the real game alongside speed v1.3.0.
