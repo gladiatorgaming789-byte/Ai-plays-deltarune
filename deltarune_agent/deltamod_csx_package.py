@@ -4,7 +4,6 @@ import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import re
-import tempfile
 import zipfile
 
 
@@ -23,6 +22,7 @@ REQUIRED_CSX_MARKERS = (
     "CodeImportGroup",
     ".Import();",
 )
+DETERMINISTIC_ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 
 
 def sha256_bytes(payload: bytes) -> str:
@@ -66,6 +66,33 @@ def validate_csx_file(path: Path) -> str:
     if not path.is_file():
         raise FileNotFoundError(f"CSX patch does not exist: {path}")
     return validate_csx_bytes(path.read_bytes(), label=str(path))
+
+
+def canonical_csx_bytes(payload: bytes, *, label: str) -> bytes:
+    """Return validated UTF-8 CSX with platform-independent LF newlines.
+
+    Git may materialize text files as CRLF on Windows. DeltaMod packages must be
+    reproducible regardless of the checkout platform, so source payloads are
+    normalized before hashing and archiving. UTF-8 BOMs are also removed by the
+    utf-8-sig decoder used during validation.
+    """
+
+    text = validate_csx_bytes(payload, label=label)
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    return normalized.encode("utf-8")
+
+
+def canonical_csx_file_bytes(path: Path) -> bytes:
+    path = path.expanduser().resolve()
+    if path.suffix.casefold() != ".csx":
+        raise ValueError(f"direct DeltaMod source patches must use .csx: {path}")
+    if not path.is_file():
+        raise FileNotFoundError(f"CSX patch does not exist: {path}")
+    return canonical_csx_bytes(path.read_bytes(), label=str(path))
+
+
+def sha256_csx_file(path: Path) -> str:
+    return sha256_bytes(canonical_csx_file_bytes(path))
 
 
 def _validate_package_id(package_id: str) -> str:
@@ -167,6 +194,23 @@ def _modding_xml(chapters: tuple[int, ...], payload_label: str) -> str:
     )
 
 
+def _zip_info(name: str) -> zipfile.ZipInfo:
+    info = zipfile.ZipInfo(name, date_time=DETERMINISTIC_ZIP_TIMESTAMP)
+    info.compress_type = zipfile.ZIP_DEFLATED
+    info.create_system = 3
+    info.external_attr = 0o100644 << 16
+    return info
+
+
+def _write_zip_entry(archive: zipfile.ZipFile, name: str, payload: bytes) -> None:
+    archive.writestr(
+        _zip_info(name),
+        payload,
+        compress_type=zipfile.ZIP_DEFLATED,
+        compresslevel=9,
+    )
+
+
 def build_csx_package(
     *,
     script: Path,
@@ -183,16 +227,16 @@ def build_csx_package(
     clean_hashes: dict[int, str] | None = None,
     merge_support: bool = True,
 ) -> Path:
-    """Build a root-only DeltaMod package that applies source CSX per chapter.
+    """Build a deterministic root-only DeltaMod source-CSX package.
 
     DeltaMod declares CSX through the standard ``xdelta`` patch type. Each
-    chapter receives a separate archive member with identical source bytes so
-    package validation and application order remain unambiguous.
+    chapter receives a separate archive member with identical canonical source
+    bytes. ZIP metadata and text line endings are fixed so the same inputs
+    produce the same package hash on Windows, Linux, and macOS.
     """
 
     script = script.expanduser().resolve()
-    validate_csx_file(script)
-    script_bytes = script.read_bytes()
+    script_bytes = canonical_csx_file_bytes(script)
     normalized_chapters = _normalize_chapters(chapters)
     normalized_hashes = _normalize_hashes(normalized_chapters, clean_hashes)
     target_version = target_version.strip()
@@ -207,52 +251,42 @@ def build_csx_package(
     if not cleaned_authors:
         raise ValueError("at least one author is required")
 
+    metadata_bytes = (
+        json.dumps(
+            _metadata(
+                chapters=normalized_chapters,
+                clean_hashes=normalized_hashes,
+                target_version=target_version,
+                name=name,
+                version=version,
+                description=description,
+                authors=cleaned_authors,
+                url=url,
+                package_id=package_id,
+                merge_support=merge_support,
+            ),
+            indent=4,
+            ensure_ascii=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+    modding_bytes = _modding_xml(normalized_chapters, payload_label).encode("utf-8")
+
     output = output.expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary_output = output.with_name(f".{output.name}.tmp")
     temporary_output.unlink(missing_ok=True)
+
     try:
-        with tempfile.TemporaryDirectory(prefix="deltamod-csx-") as temporary:
-            root = Path(temporary)
+        with zipfile.ZipFile(temporary_output, "w") as archive:
+            _write_zip_entry(archive, "meta.json", metadata_bytes)
+            _write_zip_entry(archive, "modding.xml", modding_bytes)
             for chapter in normalized_chapters:
-                (root / _payload_name(chapter, payload_label)).write_bytes(
-                    script_bytes
+                _write_zip_entry(
+                    archive,
+                    _payload_name(chapter, payload_label),
+                    script_bytes,
                 )
-            (root / "meta.json").write_text(
-                json.dumps(
-                    _metadata(
-                        chapters=normalized_chapters,
-                        clean_hashes=normalized_hashes,
-                        target_version=target_version,
-                        name=name,
-                        version=version,
-                        description=description,
-                        authors=cleaned_authors,
-                        url=url,
-                        package_id=package_id,
-                        merge_support=merge_support,
-                    ),
-                    indent=4,
-                    ensure_ascii=False,
-                )
-                + "\n",
-                encoding="utf-8",
-                newline="\n",
-            )
-            (root / "modding.xml").write_text(
-                _modding_xml(normalized_chapters, payload_label),
-                encoding="utf-8",
-                newline="\n",
-            )
-            with zipfile.ZipFile(
-                temporary_output,
-                "w",
-                compression=zipfile.ZIP_DEFLATED,
-            ) as archive:
-                for path in sorted(
-                    root.iterdir(), key=lambda item: item.name.casefold()
-                ):
-                    archive.write(path, arcname=path.name)
         validate_csx_package(
             temporary_output,
             expected_chapters=normalized_chapters,
@@ -323,7 +357,11 @@ def validate_csx_package(
                     f"modding.xml references a missing patch: {payload_name}"
                 )
             payload = archive.read(payload_name)
-            validate_csx_bytes(payload, label=payload_name)
+            canonical_payload = canonical_csx_bytes(payload, label=payload_name)
+            if payload != canonical_payload:
+                raise ValueError(
+                    f"CSX payload must use canonical UTF-8/LF text: {payload_name}"
+                )
             payload_hashes.add(sha256_bytes(payload))
             declared_chapters.add(chapter)
             declared_payloads.add(payload_name)
