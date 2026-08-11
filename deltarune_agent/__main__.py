@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import sys
 
 
@@ -26,6 +27,15 @@ def _parse_gui_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _auto_update_gui(relaunch_args: list[str]) -> None:
+    """Update a clean Git checkout before importing either GUI toolkit."""
+
+    from .auto_update import maybe_auto_update
+
+    project_root = Path(__file__).resolve().parents[1]
+    maybe_auto_update(project_root, relaunch_args)
+
+
 def _launch_gui(argv: list[str]) -> None:
     args = _parse_gui_args(argv)
     if args.legacy:
@@ -41,6 +51,7 @@ def _launch_gui(argv: list[str]) -> None:
 def main() -> None:
     argv = sys.argv[1:]
     if argv and argv[0] == "gui":
+        _auto_update_gui(argv)
         _launch_gui(argv[1:])
         return
 
