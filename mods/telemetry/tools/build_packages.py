@@ -14,6 +14,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
 from deltarune_agent.deltamod_csx_package import (
     SUPPORTED_CHAPTERS,
     build_csx_package,
+    sha256_csx_file,
     sha256_file,
     validate_csx_package,
 )
@@ -137,7 +138,7 @@ def main() -> int:
         "chapters": list(chapters),
         "merge_support": True,
         "source": source.name,
-        "source_sha256": sha256_file(source),
+        "source_sha256": sha256_csx_file(source),
         "clean_hashes_included": hashes is not None,
         "package": {
             "file": package.name,
