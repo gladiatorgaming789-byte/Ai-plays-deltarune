@@ -34,6 +34,6 @@ def test_target_version_is_required() -> None:
     assert parser.parse_args(["--target-version", "1.05"]).target_version == "1.05"
 
 
-def test_speed_release_uses_new_direct_csx_version() -> None:
-    assert build_packages.VERSION == "1.3.0"
+def test_speed_release_uses_corrected_direct_csx_version() -> None:
+    assert build_packages.VERSION == "1.3.1"
     assert "Direct-CSX" in build_packages.DESCRIPTION
