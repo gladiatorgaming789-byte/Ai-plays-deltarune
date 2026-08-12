@@ -19,6 +19,7 @@ def test_auto_speed_uses_fresh_packet_and_scales_delays():
 
     assert speed.effective_multiplier(now=10.2) == 2.0
     assert speed.source(now=10.2) == "telemetry"
+    assert speed.verification_state(now=10.2) == "matched"
     assert speed.synchronized(now=10.2) is True
     assert speed.scale_delay(0.10, now=10.2) == 0.05
 
@@ -29,18 +30,44 @@ def test_auto_speed_falls_back_to_one_when_packet_is_stale():
 
     assert speed.effective_multiplier(now=12.1) == 1.0
     assert speed.source(now=12.1) == "safe_fallback"
+    assert speed.verification_state(now=12.1) == "missing_or_stale"
     assert speed.stale_warning(now=12.1) is not None
     speed.update(_sample(10.0))
     assert speed.stale_warning(now=12.2) is None
 
 
-def test_manual_speed_works_without_telemetry():
+def test_manual_speed_works_without_telemetry_but_reports_unverified_state():
     speed = SpeedSynchronizer("3")
 
     assert speed.effective_multiplier(now=100.0) == 3.0
     assert speed.source(now=100.0) == "manual"
+    assert speed.verification_state(now=100.0) == "unverified"
     assert speed.scale_delay(0.18, now=100.0) == 0.06
     assert speed.stale_warning(now=100.0) is None
+    warning = speed.runtime_warning(now=100.0)
+    assert warning is not None
+    assert "not confirmed" in warning
+    assert speed.runtime_warning(now=100.1) is None
+
+
+def test_manual_speed_warns_when_fresh_telemetry_disagrees():
+    speed = SpeedSynchronizer("10")
+    speed.update(_sample(2.0))
+
+    assert speed.verification_state(now=10.2) == "mismatch"
+    warning = speed.runtime_warning(now=10.2)
+    assert warning is not None
+    assert "disagrees" in warning
+    assert "2x" in warning
+
+
+def test_manual_speed_is_verified_when_packet_matches():
+    speed = SpeedSynchronizer("10")
+    speed.update(_sample(10.0))
+
+    assert speed.verification_state(now=10.2) == "matched"
+    assert speed.synchronized(now=10.2)
+    assert speed.runtime_warning(now=10.2) is None
 
 
 def test_registration_floor_keeps_short_inputs_detectable():
