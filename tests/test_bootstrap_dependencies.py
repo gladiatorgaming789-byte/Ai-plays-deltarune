@@ -146,3 +146,4 @@ def test_windows_launcher_bootstraps_before_gui() -> None:
     assert launcher.index("bootstrap_dependencies") < launcher.index(
         "-m deltarune_agent gui"
     )
+    assert "if %errorlevel% equ" not in launcher.casefold()
