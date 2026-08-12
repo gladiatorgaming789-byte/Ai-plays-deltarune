@@ -161,6 +161,7 @@ def test_builder_repeated_runs_are_byte_identical(tmp_path: Path) -> None:
     [
         "mods/speed/tools/build_packages.py",
         "mods/telemetry/tools/build_packages.py",
+        "mods/support/tools/build_packages.py",
     ],
 )
 def test_mod_builders_run_without_site_packages(
