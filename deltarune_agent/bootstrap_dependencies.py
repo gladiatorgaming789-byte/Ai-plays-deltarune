@@ -2,16 +2,23 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.metadata
 import importlib.util
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 
 
 MIN_PYTHON = (3, 11)
 MARKER_NAME = ".deltarune-ai-dependencies.json"
-REQUIRED_IMPORTS = ("PIL", "pyautogui", "PySide6")
+REQUIREMENT_NAME_PATTERN = re.compile(r"^([A-Za-z0-9_.-]+)")
+IMPORT_BY_DISTRIBUTION = {
+    "pillow": "PIL",
+    "pyautogui": "pyautogui",
+    "pyside6": "PySide6",
+}
 
 
 def requirements_fingerprint(path: Path) -> str:
@@ -22,9 +29,32 @@ def marker_path(project_root: Path) -> Path:
     return project_root / ".venv" / MARKER_NAME
 
 
-def missing_required_modules() -> list[str]:
+def declared_distributions(requirements: Path) -> tuple[str, ...]:
+    result: list[str] = []
+    for raw_line in requirements.read_text(encoding="utf-8").splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if not line or line.startswith(("-", "http:", "https:", "git+")):
+            continue
+        match = REQUIREMENT_NAME_PATTERN.match(line)
+        if match is not None:
+            result.append(match.group(1))
+    return tuple(result)
+
+
+def missing_required_packages(requirements: Path) -> list[str]:
+    missing: list[str] = []
     importlib.invalidate_caches()
-    return [name for name in REQUIRED_IMPORTS if importlib.util.find_spec(name) is None]
+    for distribution in declared_distributions(requirements):
+        try:
+            importlib.metadata.distribution(distribution)
+        except importlib.metadata.PackageNotFoundError:
+            missing.append(distribution)
+            continue
+        normalized = distribution.casefold().replace("_", "-").replace(".", "-")
+        import_name = IMPORT_BY_DISTRIBUTION.get(normalized)
+        if import_name and importlib.util.find_spec(import_name) is None:
+            missing.append(distribution)
+    return missing
 
 
 def _read_marker(path: Path) -> dict[str, object] | None:
@@ -64,9 +94,9 @@ def dependencies_current(project_root: Path) -> tuple[bool, str]:
     current_python = f"{sys.version_info.major}.{sys.version_info.minor}"
     if marker.get("python_major_minor") != current_python:
         return False, "Python version changed"
-    missing = missing_required_modules()
+    missing = missing_required_packages(requirements)
     if missing:
-        return False, "missing package imports: " + ", ".join(missing)
+        return False, "missing project packages: " + ", ".join(missing)
     return True, "dependencies are current"
 
 
@@ -135,10 +165,10 @@ def ensure_dependencies(
     )
     _run([sys.executable, "-m", "pip", "check"], cwd=project_root)
 
-    missing = missing_required_modules()
+    missing = missing_required_packages(requirements)
     if missing:
         raise RuntimeError(
-            "Dependency installation completed but required modules are still "
+            "Dependency installation completed but required packages are still "
             "unavailable: " + ", ".join(missing)
         )
 
