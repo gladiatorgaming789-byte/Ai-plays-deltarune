@@ -16,6 +16,7 @@ on:
       - "mods/telemetry/AiTelemetry.csx"
       - "mods/telemetry/tools/**"
       - "mods/telemetry/release_9.2.1.json"
+      - "mods/support/**"
 
 permissions:
   contents: write
@@ -43,7 +44,8 @@ jobs:
             mods/speed/deltamod/AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.0.zip \
             mods/speed/deltamod/AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.1.zip \
             mods/telemetry/deltamod/Telemetry-All-Chapters-DeltaMod-CSX-v9.2.0.zip \
-            mods/telemetry/deltamod/Telemetry-All-Chapters-DeltaMod-CSX-v9.2.1.zip
+            mods/telemetry/deltamod/Telemetry-All-Chapters-DeltaMod-CSX-v9.2.1.zip \
+            mods/support/deltamod/AI-Support-All-Chapters-DeltaMod-CSX-v1.0.0.zip
           python -S mods/build_validated_packages.py
 
       - name: Commit exact validated ZIPs
@@ -54,13 +56,15 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A \
             mods/speed/deltamod \
-            mods/telemetry/deltamod
+            mods/telemetry/deltamod \
+            mods/support/deltamod
           git add -f \
             mods/speed/deltamod/AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.1.zip \
-            mods/telemetry/deltamod/Telemetry-All-Chapters-DeltaMod-CSX-v9.2.1.zip
+            mods/telemetry/deltamod/Telemetry-All-Chapters-DeltaMod-CSX-v9.2.1.zip \
+            mods/support/deltamod/AI-Support-All-Chapters-DeltaMod-CSX-v1.0.0.zip
           if git diff --cached --quiet; then
             echo "Validated package ZIPs are already committed."
             exit 0
           fi
-          git commit -m "Include corrected DeltaMod CSX package ZIPs"
+          git commit -m "Include atomic AI Support DeltaMod ZIP"
           git push origin HEAD:development
