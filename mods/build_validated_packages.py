@@ -75,13 +75,7 @@ def package_is_valid(path: Path, expected_size: int, expected_sha256: str) -> bo
 
 
 def _canonical_zip_bytes(entries: list[tuple[str, bytes]]) -> bytes:
-    """Return a minimal, byte-stable ZIP_STORED archive.
-
-    Python's zipfile writer and zlib can change output details across Python/zlib
-    patch versions. For final release bytes we therefore write the small subset
-    of the ZIP format we need directly: stored entries, fixed DOS timestamp,
-    fixed Unix mode, no extras/comments, and a deterministic central directory.
-    """
+    """Return a minimal, byte-stable ZIP_STORED archive."""
 
     output = bytearray()
     central: list[tuple[bytes, int, int, int]] = []
@@ -155,6 +149,20 @@ def canonicalize_zip_storage(path: Path) -> None:
     path.write_bytes(_canonical_zip_bytes(entries))
 
 
+def _member_summary(path: Path) -> str:
+    if not path.is_file():
+        return "package missing"
+    try:
+        with zipfile.ZipFile(path, "r") as archive:
+            return "; ".join(
+                f"{info.filename}={len(payload)}:{hashlib.sha256(payload).hexdigest()}"
+                for info in archive.infolist()
+                for payload in (archive.read(info.filename),)
+            )
+    except zipfile.BadZipFile:
+        return "package is not a readable ZIP"
+
+
 def build_package(
     label: str,
     builder: Path,
@@ -215,11 +223,12 @@ def build_package(
     actual_size = output.stat().st_size
     actual_sha256 = sha256_file(output)
     if actual_size != expected_size or actual_sha256 != expected_sha256:
+        members = _member_summary(output)
         output.unlink(missing_ok=True)
         raise RuntimeError(
             f"{label} package did not reproduce the validated release bytes. "
             f"Expected {expected_size} bytes / {expected_sha256}, got "
-            f"{actual_size} bytes / {actual_sha256}."
+            f"{actual_size} bytes / {actual_sha256}. Members: {members}"
         )
     print(
         f"[Mods] {label} package built and verified: {output.name} "
