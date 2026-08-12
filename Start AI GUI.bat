@@ -1,26 +1,60 @@
 @echo off
+setlocal
 cd /d "%~dp0"
 
-if exist ".venv\Scripts\python.exe" (
-    ".venv\Scripts\python.exe" -m deltarune_agent gui
-    goto finished
+set "VENV_PY=.venv\Scripts\python.exe"
+
+if not exist "%VENV_PY%" (
+    echo [Setup] No project environment found. Creating .venv...
+    call :create_environment
+    if errorlevel 1 goto setup_failed
 )
 
+"%VENV_PY%" -m deltarune_agent.bootstrap_dependencies
+if errorlevel 1 goto setup_failed
+
+"%VENV_PY%" -m deltarune_agent gui
+set "EXIT_CODE=%errorlevel%"
+if not "%EXIT_CODE%"=="0" pause
+exit /b %EXIT_CODE%
+
+:create_environment
 where py >nul 2>nul
 if %errorlevel% equ 0 (
-    py -m deltarune_agent gui
-    goto finished
+    py -3.13 -c "import sys" >nul 2>nul
+    if %errorlevel% equ 0 (
+        py -3.13 -m venv .venv
+        exit /b %errorlevel%
+    )
+    py -3.12 -c "import sys" >nul 2>nul
+    if %errorlevel% equ 0 (
+        py -3.12 -m venv .venv
+        exit /b %errorlevel%
+    )
+    py -3.11 -c "import sys" >nul 2>nul
+    if %errorlevel% equ 0 (
+        py -3.11 -m venv .venv
+        exit /b %errorlevel%
+    )
 )
 
 where python >nul 2>nul
 if %errorlevel% equ 0 (
-    python -m deltarune_agent gui
-    goto finished
+    python -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>nul
+    if %errorlevel% equ 0 (
+        python -m venv .venv
+        exit /b %errorlevel%
+    )
 )
 
-echo Python was not found. Complete the README setup first.
-pause
+echo.
+echo [Setup] Python 3.11 or newer was not found.
+echo Install Python once, then double-click this launcher again.
 exit /b 1
 
-:finished
-if %errorlevel% neq 0 pause
+:setup_failed
+echo.
+echo [Setup] The project environment could not be prepared.
+echo Nothing was installed globally. Review the error above and try again.
+pause
+exit /b 1
