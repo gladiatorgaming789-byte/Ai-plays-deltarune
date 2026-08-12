@@ -16,6 +16,18 @@ rem deltarune_agent\__init__.py before Pillow/PySide6 are installed.
 "%VENV_PY%" "deltarune_agent\bootstrap_dependencies.py"
 if errorlevel 1 goto setup_failed
 
+rem Update the checkout before validating generated mod packages. Otherwise an
+rem older checkout can reject current package bytes using stale release metadata
+rem and fail before the GUI's normal startup updater ever gets a chance to run.
+"%VENV_PY%" -m deltarune_agent.auto_update --apply
+if errorlevel 1 goto setup_failed
+
+rem The update may have changed requirements.txt or the bootstrap itself. Run
+rem the bootstrap again from the updated checkout so the environment marker and
+rem required packages match the code that is about to launch.
+"%VENV_PY%" "deltarune_agent\bootstrap_dependencies.py"
+if errorlevel 1 goto setup_failed
+
 rem Materialize the validated DeltaMod candidates from committed CSX sources.
 rem Existing packages are accepted only when their size and SHA-256 match the
 rem checked-in release records; missing or invalid packages are rebuilt.
@@ -67,7 +79,7 @@ exit /b 1
 
 :setup_failed
 echo.
-echo [Setup] The project environment or validated mod packages could not be prepared.
+echo [Setup] The project environment, update, or validated mod packages could not be prepared.
 echo Nothing was installed globally. Review the error above and try again.
 pause
 exit /b 1
