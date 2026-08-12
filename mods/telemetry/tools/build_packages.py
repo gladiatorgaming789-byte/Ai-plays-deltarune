@@ -20,7 +20,7 @@ from mods.tools.deltamod_csx_loader import (
 )
 
 
-VERSION = "9.2.0"
+VERSION = "9.2.1"
 TELEMETRY_PROTOCOL = 9
 NAME = "AI Plays Deltarune Telemetry"
 DESCRIPTION = (
