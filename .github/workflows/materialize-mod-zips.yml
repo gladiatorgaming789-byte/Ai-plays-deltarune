@@ -7,6 +7,7 @@ on:
       - development
     paths:
       - ".github/workflows/materialize-mod-zips.yml"
+      - "requirements.txt"
       - "mods/build_validated_packages.py"
       - "mods/validated_deltarune_build.json"
       - "mods/speed/AiSpeed.csx"
@@ -33,6 +34,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+          cache: "pip"
+
+      - name: Install project dependencies
+        run: python -m pip install -r requirements.txt
 
       - name: Build and verify validated packages
         run: python mods/build_validated_packages.py
