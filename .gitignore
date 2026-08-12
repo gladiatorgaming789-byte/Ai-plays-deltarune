@@ -6,8 +6,13 @@ runs/
 memory/
 
 # Speed-mod builds are reproducible intermediates. Only the finished DeltaMod
-# ZIP releases belong in mods/speed/deltamod.
+# ZIP release belongs in mods/speed/deltamod.
 mods/speed/.build/
 mods/speed/deltamod/*.g3mpatch
 mods/speed/deltamod/*.json
 mods/speed/deltamod/*.xml
+
+# Telemetry's deterministic runtime-test ZIP is materialized locally from the
+# committed CSX source and validated release metadata. Keep the generated copy
+# out of Git status while still verifying its exact SHA-256 before use.
+mods/telemetry/deltamod/Telemetry-All-Chapters-DeltaMod-CSX-v9.2.0.zip
