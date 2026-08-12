@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MODS_ROOT = ROOT / "mods"
 VALIDATED_BUILD = MODS_ROOT / "validated_deltarune_build.json"
 DOS_TIME = 0
-DOS_DATE = 33  # 1980-01-01
+DOS_DATE = 33
 VERSION_NEEDED = 20
 VERSION_MADE_BY_UNIX = (3 << 8) | 20
 EXTERNAL_ATTR = 0o100644 << 16
@@ -25,14 +25,14 @@ PACKAGE_SPECS = (
     (
         "Speed",
         MODS_ROOT / "speed" / "tools" / "build_packages.py",
-        MODS_ROOT / "speed" / "deltamod" / "AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.0.zip",
-        MODS_ROOT / "speed" / "release_1.3.0.json",
+        MODS_ROOT / "speed" / "deltamod" / "AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.1.zip",
+        MODS_ROOT / "speed" / "release_1.3.1.json",
     ),
     (
         "Telemetry",
         MODS_ROOT / "telemetry" / "tools" / "build_packages.py",
-        MODS_ROOT / "telemetry" / "deltamod" / "Telemetry-All-Chapters-DeltaMod-CSX-v9.2.0.zip",
-        MODS_ROOT / "telemetry" / "release_9.2.0.json",
+        MODS_ROOT / "telemetry" / "deltamod" / "Telemetry-All-Chapters-DeltaMod-CSX-v9.2.1.zip",
+        MODS_ROOT / "telemetry" / "release_9.2.1.json",
     ),
 )
 
@@ -57,13 +57,12 @@ def expected_package(release_path: Path) -> tuple[int, str]:
     package = release.get("package")
     if not isinstance(package, dict):
         raise RuntimeError(f"Missing package record in {release_path}")
-    try:
-        size = int(package["size"])
-        checksum = str(package["sha256"]).lower()
-    except (KeyError, TypeError, ValueError) as exc:
-        raise RuntimeError(f"Invalid package record in {release_path}") from exc
+    size = int(package["size"])
+    checksum = str(package["sha256"]).lower()
     if len(checksum) != 64:
         raise RuntimeError(f"Invalid package SHA-256 in {release_path}")
+    if package.get("patch_type") != "csx":
+        raise RuntimeError(f"Release is not pinned to DeltaMod csx patch type: {release_path}")
     return size, checksum
 
 
@@ -89,11 +88,8 @@ def _canonical_meta_bytes(payload: bytes) -> bytes:
 
 
 def _canonical_zip_bytes(entries: list[tuple[str, bytes]]) -> bytes:
-    """Return a minimal, byte-stable ZIP_STORED archive."""
-
     output = bytearray()
     central: list[tuple[bytes, int, int, int]] = []
-
     for name, payload in entries:
         name_bytes = name.encode("utf-8")
         crc32 = binascii.crc32(payload) & 0xFFFFFFFF
@@ -140,7 +136,6 @@ def _canonical_zip_bytes(entries: list[tuple[str, bytes]]) -> bytes:
             offset,
         )
         output += name_bytes
-
     central_size = len(output) - central_start
     count = len(central)
     output += struct.pack(
@@ -168,18 +163,21 @@ def canonicalize_zip_storage(path: Path) -> None:
     path.write_bytes(_canonical_zip_bytes(entries))
 
 
-def _member_summary(path: Path) -> str:
-    if not path.is_file():
-        return "package missing"
-    try:
-        with zipfile.ZipFile(path, "r") as archive:
-            return "; ".join(
-                f"{info.filename}={len(payload)}:{hashlib.sha256(payload).hexdigest()}"
-                for info in archive.infolist()
-                for payload in (archive.read(info.filename),)
+def _verify_csx_declarations(path: Path) -> None:
+    with zipfile.ZipFile(path, "r") as archive:
+        lines = archive.read("modding.xml").decode("utf-8").splitlines()
+    if len(lines) != 5:
+        raise RuntimeError(f"Expected five CSX patch declarations in {path.name}")
+    for line in lines:
+        stripped = line.strip()
+        if 'type="csx"' not in stripped or not stripped.endswith("data.win\"/>"):
+            raise RuntimeError(
+                f"Invalid DeltaMod CSX declaration in {path.name}: {stripped}"
             )
-    except zipfile.BadZipFile:
-        return "package is not a readable ZIP"
+        if 'type="xdelta"' in stripped:
+            raise RuntimeError(
+                f"Raw CSX must never be routed through xdelta/G3MTool: {path.name}"
+            )
 
 
 def build_package(
@@ -193,15 +191,11 @@ def build_package(
 ) -> None:
     expected_size, expected_sha256 = expected_package(release_path)
     if package_is_valid(output, expected_size, expected_sha256):
+        _verify_csx_declarations(output)
         print(f"[Mods] {label} package ready: {output.name}")
         return
 
-    if output.exists():
-        print(f"[Mods] Replacing invalid {label.lower()} package: {output.name}")
-        output.unlink()
-    else:
-        print(f"[Mods] Building missing {label.lower()} package: {output.name}")
-
+    output.unlink(missing_ok=True)
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="deltarune-ai-mod-build-") as temp_dir:
         temp = Path(temp_dir)
@@ -234,20 +228,16 @@ def build_package(
                 f"{label} package builder failed with exit code {result.returncode}"
             )
 
-    if not output.is_file():
-        raise RuntimeError(f"{label} package builder did not create {output}")
-
     canonicalize_zip_storage(output)
-
+    _verify_csx_declarations(output)
     actual_size = output.stat().st_size
     actual_sha256 = sha256_file(output)
     if actual_size != expected_size or actual_sha256 != expected_sha256:
-        members = _member_summary(output)
         output.unlink(missing_ok=True)
         raise RuntimeError(
             f"{label} package did not reproduce the validated release bytes. "
             f"Expected {expected_size} bytes / {expected_sha256}, got "
-            f"{actual_size} bytes / {actual_sha256}. Members: {members}"
+            f"{actual_size} bytes / {actual_sha256}."
         )
     print(
         f"[Mods] {label} package built and verified: {output.name} "
@@ -265,7 +255,6 @@ def main() -> int:
         hash_map = {str(key): str(value) for key, value in raw_hashes.items()}
         if set(hash_map) != {"1", "2", "3", "4", "5"}:
             raise RuntimeError("validated chapter hashes must contain Chapters 1-5")
-
         for label, builder, output, release_path in PACKAGE_SPECS:
             build_package(
                 label,
