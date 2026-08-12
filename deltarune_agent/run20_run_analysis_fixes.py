@@ -30,6 +30,7 @@ class Run20RunAnalysisExplorer(Run18ReinforcementExplorer):
     def __init__(self, seed: int = 0, memory_path: Path | None = None):
         super().__init__(seed, memory_path)
         self._pending_entry_escape: tuple[str, str, tuple[int, int], str] | None = None
+        self._single_side_suppressed_keys: set[tuple[str, int, int]] = set()
         self.post_entry_escape_plans = 0
         self.frontier_first_steps = 0
         self.unreachable_doorways_retired = 0
@@ -196,6 +197,43 @@ class Run20RunAnalysisExplorer(Run18ReinforcementExplorer):
                     "long room: exhaust reachable learned frontier before visual speculation",
                 )
 
+        # The latest live run reached a story-stalled room where the only
+        # remaining untested entity evidence was a one-sided
+        # possible_interactable. The Run 20 scenery filter correctly kept that
+        # weak evidence out of ordinary exploration, but story-pressure mode in
+        # the parent policy asked only for possible_character records. That
+        # combination could make a real stationary entity unreachable forever.
+        # During explicit story search, test both observed entity classes before
+        # falling back to exits and blind probes. This remains room/NPC agnostic.
+        if self._progress_pressure(room, cell):
+            retry_route = self._route_to_retryable_story_interaction(room, cell)
+            if retry_route is not None:
+                direction, target = retry_route
+                return (
+                    direction,
+                    1,
+                    "story search: retry another response at learned interaction "
+                    f"({target[1]},{target[2]}) via {direction}",
+                )
+            story_plan = self._direction_to_visual_hypothesis(
+                room,
+                cell,
+                story_focus=True,
+                allowed_hypotheses={
+                    "possible_character",
+                    "possible_interactable",
+                },
+            )
+            if story_plan is not None:
+                direction, hypothesis, target_region = story_plan
+                return (
+                    direction,
+                    1,
+                    "story search: approach remembered "
+                    f"{hypothesis.replace('_', ' ')} via {direction} "
+                    f"near region {target_region}",
+                )
+
         return super()._plan_exploration(room, cell)
 
     def _direction_to_visual_hypothesis(
@@ -219,12 +257,19 @@ class Run20RunAnalysisExplorer(Run18ReinforcementExplorer):
                 continue
             if int(record.get("entity_approach_directions", 0) or 0) >= MIN_ACTIONABLE_INTERACTABLE_SIDES:
                 continue
+            # One-sided evidence remains too weak for ordinary wandering, but
+            # once the policy has explicit progress pressure it is better to
+            # test the observed entity than to probe every room edge forever.
+            if story_focus:
+                continue
             suppressed.append((record, record.get("hypothesis")))
             record["hypothesis"] = None
             if self.visual_goal == key:
                 self.visual_goal = None
                 self.decision_visual_goal = None
-            self.single_side_interactable_routes_suppressed += 1
+            if key not in self._single_side_suppressed_keys:
+                self._single_side_suppressed_keys.add(key)
+                self.single_side_interactable_routes_suppressed += 1
         try:
             return super()._direction_to_visual_hypothesis(
                 room,
