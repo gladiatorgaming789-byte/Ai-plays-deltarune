@@ -12,10 +12,10 @@ on:
       - "mods/tools/**"
       - "mods/speed/AiSpeed.csx"
       - "mods/speed/tools/**"
-      - "mods/speed/release_1.3.0.json"
+      - "mods/speed/release_1.3.1.json"
       - "mods/telemetry/AiTelemetry.csx"
       - "mods/telemetry/tools/**"
-      - "mods/telemetry/release_9.2.0.json"
+      - "mods/telemetry/release_9.2.1.json"
 
 permissions:
   contents: write
@@ -41,8 +41,10 @@ jobs:
           set -euo pipefail
           rm -f \
             mods/speed/deltamod/AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.0.zip \
-            mods/telemetry/deltamod/Telemetry-All-Chapters-DeltaMod-CSX-v9.2.0.zip
-          python mods/build_validated_packages.py
+            mods/speed/deltamod/AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.1.zip \
+            mods/telemetry/deltamod/Telemetry-All-Chapters-DeltaMod-CSX-v9.2.0.zip \
+            mods/telemetry/deltamod/Telemetry-All-Chapters-DeltaMod-CSX-v9.2.1.zip
+          python -S mods/build_validated_packages.py
 
       - name: Commit exact validated ZIPs
         shell: bash
@@ -50,12 +52,15 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A \
+            mods/speed/deltamod \
+            mods/telemetry/deltamod
           git add -f \
-            mods/speed/deltamod/AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.0.zip \
-            mods/telemetry/deltamod/Telemetry-All-Chapters-DeltaMod-CSX-v9.2.0.zip
+            mods/speed/deltamod/AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.1.zip \
+            mods/telemetry/deltamod/Telemetry-All-Chapters-DeltaMod-CSX-v9.2.1.zip
           if git diff --cached --quiet; then
             echo "Validated package ZIPs are already committed."
             exit 0
           fi
-          git commit -m "Include validated DeltaMod package ZIPs"
+          git commit -m "Include corrected DeltaMod CSX package ZIPs"
           git push origin HEAD:development
