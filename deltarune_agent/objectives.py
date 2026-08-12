@@ -37,6 +37,7 @@ class Objective:
 class ObjectiveManager:
     current: Objective | None = None
     history: list[Objective] = field(default_factory=list)
+    change_count: int = 0
 
     def choose(self, candidates: Iterable[Objective]) -> Objective:
         options = list(candidates)
@@ -60,6 +61,7 @@ class ObjectiveManager:
         )
         self.current = selected
         if changed:
+            self.change_count += 1
             self.history.append(selected)
             if len(self.history) > 100:
                 self.history = self.history[-100:]
