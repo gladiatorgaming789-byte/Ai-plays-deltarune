@@ -14,13 +14,15 @@ On first launch the script:
 
 1. looks for Python 3.13, 3.12, or 3.11;
 2. creates the project-local `.venv` when it does not exist;
-3. runs `deltarune_agent.bootstrap_dependencies` inside that environment;
+3. runs the stdlib-only `deltarune_agent/bootstrap_dependencies.py` file directly inside that environment, before importing the `deltarune_agent` package;
 4. installs the current branch's `requirements.txt` with pip;
 5. runs `pip check`;
 6. verifies that the declared project packages are present; and
 7. launches the GUI only after setup succeeds.
 
 Nothing is installed into the global Python environment.
+
+The bootstrap is intentionally executed by file path rather than with `python -m deltarune_agent.bootstrap_dependencies`. Module execution imports `deltarune_agent/__init__.py` first, which can require Pillow, PySide6, and other project dependencies before the bootstrap has had a chance to install them.
 
 ## Later launches
 
@@ -41,13 +43,13 @@ If Python is missing, the launcher stops without changing the system and tells y
 From an existing project environment:
 
 ```powershell
-.\.venv\Scripts\python.exe -m deltarune_agent.bootstrap_dependencies --check
+.\.venv\Scripts\python.exe .\deltarune_agent\bootstrap_dependencies.py --check
 ```
 
 To repair/reinstall when needed:
 
 ```powershell
-.\.venv\Scripts\python.exe -m deltarune_agent.bootstrap_dependencies
+.\.venv\Scripts\python.exe .\deltarune_agent\bootstrap_dependencies.py
 ```
 
 The normal launcher already performs these checks automatically, so these commands are only for troubleshooting.

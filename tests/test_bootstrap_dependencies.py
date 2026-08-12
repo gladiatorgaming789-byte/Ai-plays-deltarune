@@ -137,13 +137,14 @@ def test_failed_install_never_marks_environment_current(
     assert not bootstrap.marker_path(tmp_path).exists()
 
 
-def test_windows_launcher_bootstraps_before_gui() -> None:
+def test_windows_launcher_bootstraps_before_gui_without_importing_package() -> None:
     launcher = (
         Path(__file__).resolve().parents[1] / "Start AI GUI.bat"
     ).read_text(encoding="utf-8")
     assert "-m venv .venv" in launcher
-    assert "-m deltarune_agent.bootstrap_dependencies" in launcher
-    assert launcher.index("bootstrap_dependencies") < launcher.index(
+    assert '"deltarune_agent\\bootstrap_dependencies.py"' in launcher
+    assert "-m deltarune_agent.bootstrap_dependencies" not in launcher
+    assert launcher.index("bootstrap_dependencies.py") < launcher.index(
         "-m deltarune_agent gui"
     )
     assert "if %errorlevel% equ" not in launcher.casefold()

@@ -11,7 +11,9 @@ call :create_environment
 if errorlevel 1 goto setup_failed
 
 :dependencies
-"%VENV_PY%" -m deltarune_agent.bootstrap_dependencies
+rem Run the stdlib-only bootstrap by file path. Using -m here would import
+rem deltarune_agent\__init__.py before Pillow/PySide6 are installed.
+"%VENV_PY%" "deltarune_agent\bootstrap_dependencies.py"
 if errorlevel 1 goto setup_failed
 
 "%VENV_PY%" -m deltarune_agent gui
