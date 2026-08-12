@@ -6,11 +6,13 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
 MODS_ROOT = ROOT / "mods"
 VALIDATED_BUILD = MODS_ROOT / "validated_deltarune_build.json"
+ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 
 PACKAGE_SPECS = (
     (
@@ -66,6 +68,31 @@ def package_is_valid(path: Path, expected_size: int, expected_sha256: str) -> bo
     )
 
 
+def canonicalize_zip_storage(path: Path) -> None:
+    """Rewrite a package with platform-independent uncompressed ZIP entries.
+
+    DEFLATE output can vary between zlib versions even with identical inputs and
+    compression settings. The packages are tiny, so the canonical release form
+    uses ZIP_STORED plus fixed metadata. This preserves every archive member byte
+    while making the final package hash independent of the host zlib build.
+    """
+
+    temporary = path.with_name(f".{path.name}.stored.tmp")
+    temporary.unlink(missing_ok=True)
+    try:
+        with zipfile.ZipFile(path, "r") as source, zipfile.ZipFile(temporary, "w") as target:
+            for source_info in source.infolist():
+                payload = source.read(source_info.filename)
+                info = zipfile.ZipInfo(source_info.filename, date_time=ZIP_TIMESTAMP)
+                info.compress_type = zipfile.ZIP_STORED
+                info.create_system = 3
+                info.external_attr = 0o100644 << 16
+                target.writestr(info, payload, compress_type=zipfile.ZIP_STORED)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def build_package(
     label: str,
     builder: Path,
@@ -118,8 +145,13 @@ def build_package(
                 f"{label} package builder failed with exit code {result.returncode}"
             )
 
-    actual_size = output.stat().st_size if output.is_file() else -1
-    actual_sha256 = sha256_file(output) if output.is_file() else "missing"
+    if not output.is_file():
+        raise RuntimeError(f"{label} package builder did not create {output}")
+
+    canonicalize_zip_storage(output)
+
+    actual_size = output.stat().st_size
+    actual_sha256 = sha256_file(output)
     if actual_size != expected_size or actual_sha256 != expected_sha256:
         output.unlink(missing_ok=True)
         raise RuntimeError(
@@ -153,7 +185,7 @@ def main() -> int:
                 target_version=target_version,
                 hash_map=hash_map,
             )
-    except (OSError, KeyError, ValueError, json.JSONDecodeError, RuntimeError) as exc:
+    except (OSError, KeyError, ValueError, json.JSONDecodeError, RuntimeError, zipfile.BadZipFile) as exc:
         print(f"[Mods] ERROR: {exc}", file=sys.stderr)
         return 1
     return 0
