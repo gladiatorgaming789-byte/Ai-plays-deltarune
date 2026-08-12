@@ -2,9 +2,15 @@
 
 ## Current state
 
-The current runtime-test candidates are **Speed 1.3.1** and **Telemetry 9.2.1**.
-Both package raw UndertaleModTool source scripts and declare those scripts with
-DeltaMod's dedicated `type="csx"` patch type.
+The normal combined AI runtime-test candidate is **AI Support 1.0.0**. It
+atomically composes Speed 1.3.1 and Telemetry 9.2.1 into one UndertaleModTool
+CSX installer per chapter.
+
+Speed 1.3.1 and Telemetry 9.2.1 remain available as **standalone diagnostic
+packages only**. Do not enable both standalone packages together. Current
+DeltaMod applies each separate `type="csx"` patch from the same `data.win.bak`,
+so a later CSX patch can replace the result of an earlier CSX patch instead of
+accumulating both changes.
 
 Four older package generations are withdrawn:
 
@@ -29,20 +35,48 @@ The validated project baseline is DeltaMod target `1.05`, Steam build
 Corrected source archive SHA-256:
 `a182babb54ed918700561d5ab60503dd272847a88c07027f09311b5101e0a7bc`
 
+## Why AI Support is atomic
+
+Current DeltaMod has three relevant patching stages:
+
+1. override/copy patches;
+2. `xdelta` and `g3mpatch` patches merged by G3MTool; and
+3. `csx` patches executed by UndertaleModCli.
+
+For a CSX target, DeltaMod creates `data.win.bak` once and then invokes UTMT as
+`load <backup> --output <target> --scripts <patch>` for each CSX patch. Because
+each separate CSX invocation starts from the same backup, two independent CSX
+mods targeting the same `data.win` are not a reliable composition mechanism.
+
+AI Support solves this without duplicating component logic. Its builder reads
+the exact committed Speed and Telemetry CSX sources, canonicalizes them,
+component-scopes their installer bodies, and generates one combined source that
+runs Speed and Telemetry in a single UTMT invocation. Telemetry remains protocol
+v9.
+
 ## Source-level validation
 
-UndertaleModTool CLI 0.9.1.2 previously passed all 20 semantic cases:
-telemetry only, speed only, telemetry then speed, and speed then telemetry for
-Chapters 1-5. Combined results kept the speed hook in
-`gml_Object_obj_time_Step_1`, telemetry in its intended events, and no telemetry
-`bbox_*` reference in `obj_time`.
+UndertaleModTool CLI 0.9.1.2 previously passed all 20 semantic cases using the
+underlying Speed and Telemetry sources: telemetry only, speed only, telemetry
+then speed, and speed then telemetry for Chapters 1-5. Combined results kept
+the speed hook in `gml_Object_obj_time_Step_1`, telemetry in its intended
+events, and no telemetry `bbox_*` reference in `obj_time`.
 
-The 1.3.1 / 9.2.1 packaging correction does not alter those functional CSX
-sources or telemetry protocol. It changes DeltaMod dispatch metadata so the raw
-scripts are executed by the CSX/UTMT path instead of being handed to G3MTool's
-ZIP patch merger.
+The current packaging fixes do not alter those functional component sources.
+They correct DeltaMod dispatch and composition behavior.
 
 ## Deterministic runtime-test candidates
+
+### Normal combined package
+
+- `AI-Support-All-Chapters-DeltaMod-CSX-v1.0.0.zip`
+  - size: 81,579 bytes
+  - SHA-256: `b017fe942d67c713b3c0ee7fe003787a024f600eed2ebb9314b33d67221ea5b5`
+  - generated combined CSX SHA-256: `14d82f34ef5e2c61e4abb486bdc6a22efc9056d10a23a8378e80134b64a9595e`
+  - Speed component: 1.3.1
+  - Telemetry component: 9.2.1 / protocol 9
+
+### Standalone diagnostics
 
 - `AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.1.zip`
   - size: 23,689 bytes
@@ -51,27 +85,28 @@ ZIP patch merger.
   - size: 53,389 bytes
   - SHA-256: `609afc19c41e2e65001bb7d3eb8a3f18918fb6dd214a3e9ed91c04202cb88ef1`
 
-The release materializer canonicalizes CSX source to UTF-8/LF and writes a
-byte-stable STORED ZIP with fixed timestamps, permissions, metadata ordering,
-and entry ordering. Tests also execute the builders with Python `-S` so package
-creation cannot silently depend on gameplay/UI site-packages.
+The release materializer canonicalizes CSX source to UTF-8/LF and writes
+byte-stable STORED ZIPs with fixed timestamps, permissions, metadata ordering,
+and entry ordering. Tests execute all three builders with Python `-S` so
+package creation cannot silently depend on gameplay/UI site-packages.
 
-Each package contains root-level `meta.json`, `modding.xml`, and five
-chapter-specific CSX source entries. `neededFiles` pins the clean chapter hashes
-above. Every `modding.xml` entry must use `type="csx"`; validation explicitly
-rejects `type="xdelta"` for these raw scripts.
+Every `modding.xml` entry uses `type="csx"`; validation explicitly rejects
+`type="xdelta"` for these raw scripts.
 
 ## Remaining runtime release gate
 
-1. Remove the withdrawn 1.3.0 / 9.2.0 imports from DeltaMod.
+1. Remove the withdrawn Speed 1.3.0 and Telemetry 9.2.0 imports from DeltaMod.
 2. Let DeltaMod restore/reconstruct from its clean protected copies.
-3. Import Speed 1.3.1 and Telemetry 9.2.1.
-4. Test telemetry by itself across Chapters 1-5.
-5. Test speed by itself across Chapters 1-5, including F8/F9/F10.
-6. Enable both and launch Chapters 1-5.
-7. Confirm telemetry reaches localhost UDP 42069 and speed synchronization works.
-8. Disable and re-enable once and confirm clean protected-copy restoration.
-9. Require the current Recovery CI matrix to pass.
+3. Optional standalone diagnostic: import Speed 1.3.1 alone, test Chapters 1-5
+   and F8/F9/F10, then remove/disable it and restore clean.
+4. Optional standalone diagnostic: import Telemetry 9.2.1 alone, test Chapters
+   1-5 and protocol v9, then remove/disable it and restore clean.
+5. For normal combined use, disable/remove both standalone packages and import
+   **AI Support 1.0.0 only**.
+6. Launch Chapters 1-5 and confirm both telemetry v9 and speed controls work.
+7. Disable and re-enable AI Support once and confirm clean protected-copy
+   restoration/repatching.
+8. Require the current Recovery CI matrix to pass.
 
-Until the live DeltaMod checks pass, 1.3.1 and 9.2.1 remain runtime-test
-candidates rather than final runtime-verified releases.
+Until the live DeltaMod checks pass, AI Support 1.0.0 remains a runtime-test
+candidate rather than a final runtime-verified release.
