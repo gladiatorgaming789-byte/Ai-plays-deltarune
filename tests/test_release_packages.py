@@ -66,12 +66,15 @@ def test_speed_release_manifest_records_direct_csx_candidate():
     assert release["reproducibility"]["canonical_text"] == (
         "UTF-8 without BOM, LF line endings"
     )
+    assert release["reproducibility"]["compression"] == (
+        "STORED (no compression; zlib-independent)"
+    )
 
     package = release["package"]
     assert package["file"] == "AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.0.zip"
-    assert package["size"] == 7894
+    assert package["size"] == 23704
     assert package["sha256"] == (
-        "ae2ad5ae5a3c30cf9c7e48d51b052cd10febb419514672760840ed7f99fb5283"
+        "08ee5fcb0278c97cd2197b97df23c2be852eefd630be1d1f146bbaab1300c842"
     )
     assert package["root_entries"] == [
         "meta.json",
@@ -109,12 +112,15 @@ def test_telemetry_release_manifest_records_direct_csx_candidate():
     assert release["reproducibility"]["canonical_text"] == (
         "UTF-8 without BOM, LF line endings"
     )
+    assert release["reproducibility"]["compression"] == (
+        "STORED (no compression; zlib-independent)"
+    )
 
     package = release["package"]
     assert package["file"] == "Telemetry-All-Chapters-DeltaMod-CSX-v9.2.0.zip"
-    assert package["size"] == 15293
+    assert package["size"] == 53404
     assert package["sha256"] == (
-        "8464461d0e291f6a67b827be2cb4f06f2218a1ef8976ada9905b58c8b3e46255"
+        "c66e2f679ce8892c6aaefc6dddb47efef571e60b239714528fde962c99f9a710"
     )
     assert package["root_entries"] == [
         "meta.json",
@@ -128,16 +134,20 @@ def test_telemetry_release_manifest_records_direct_csx_candidate():
     _assert_semantic_matrix(release["semantic_validation"])
 
 
-def test_withdrawn_binary_packages_are_not_committed():
+def test_only_current_validated_binary_packages_are_committed():
     speed_files = sorted(path.name for path in SPEED_DIRECTORY.iterdir() if path.is_file())
     telemetry_files = sorted(
         path.name for path in TELEMETRY_DIRECTORY.iterdir() if path.is_file()
     )
 
-    assert speed_files == ["README.md"]
-    assert telemetry_files == ["README.md"]
-    assert not list(SPEED_DIRECTORY.glob("*.zip"))
-    assert not list(TELEMETRY_DIRECTORY.glob("*.zip"))
+    assert speed_files == [
+        "AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.0.zip",
+        "README.md",
+    ]
+    assert telemetry_files == [
+        "README.md",
+        "Telemetry-All-Chapters-DeltaMod-CSX-v9.2.0.zip",
+    ]
     assert not list(SPEED_DIRECTORY.glob("*.g3mpatch"))
     assert not list(TELEMETRY_DIRECTORY.glob("*.g3mpatch"))
 
