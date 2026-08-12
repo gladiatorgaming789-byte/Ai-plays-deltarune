@@ -16,6 +16,12 @@ rem deltarune_agent\__init__.py before Pillow/PySide6 are installed.
 "%VENV_PY%" "deltarune_agent\bootstrap_dependencies.py"
 if errorlevel 1 goto setup_failed
 
+rem Materialize the validated DeltaMod candidates from committed CSX sources.
+rem Existing packages are accepted only when their size and SHA-256 match the
+rem checked-in release records; missing or invalid packages are rebuilt.
+"%VENV_PY%" "mods\build_validated_packages.py"
+if errorlevel 1 goto setup_failed
+
 "%VENV_PY%" -m deltarune_agent gui
 set "EXIT_CODE=%errorlevel%"
 if not "%EXIT_CODE%"=="0" pause
@@ -61,7 +67,7 @@ exit /b 1
 
 :setup_failed
 echo.
-echo [Setup] The project environment could not be prepared.
+echo [Setup] The project environment or validated mod packages could not be prepared.
 echo Nothing was installed globally. Review the error above and try again.
 pause
 exit /b 1
