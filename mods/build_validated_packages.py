@@ -19,6 +19,7 @@ DOS_DATE = 33  # 1980-01-01
 VERSION_NEEDED = 20
 VERSION_MADE_BY_UNIX = (3 << 8) | 20
 EXTERNAL_ATTR = 0o100644 << 16
+META_KEY_ORDER = ("metadata", "deltaruneTargetVersion", "neededFiles", "exporter")
 
 PACKAGE_SPECS = (
     (
@@ -72,6 +73,19 @@ def package_is_valid(path: Path, expected_size: int, expected_sha256: str) -> bo
         and path.stat().st_size == expected_size
         and sha256_file(path) == expected_sha256
     )
+
+
+def _canonical_meta_bytes(payload: bytes) -> bytes:
+    value = json.loads(payload.decode("utf-8"))
+    if not isinstance(value, dict):
+        raise RuntimeError("meta.json must be a JSON object")
+    ordered: dict[str, object] = {}
+    for key in META_KEY_ORDER:
+        if key in value:
+            ordered[key] = value[key]
+    for key in sorted(set(value).difference(ordered)):
+        ordered[key] = value[key]
+    return (json.dumps(ordered, indent=4, ensure_ascii=False) + "\n").encode("utf-8")
 
 
 def _canonical_zip_bytes(entries: list[tuple[str, bytes]]) -> bytes:
@@ -145,7 +159,12 @@ def _canonical_zip_bytes(entries: list[tuple[str, bytes]]) -> bytes:
 
 def canonicalize_zip_storage(path: Path) -> None:
     with zipfile.ZipFile(path, "r") as source:
-        entries = [(info.filename, source.read(info.filename)) for info in source.infolist()]
+        entries: list[tuple[str, bytes]] = []
+        for info in source.infolist():
+            payload = source.read(info.filename)
+            if info.filename == "meta.json":
+                payload = _canonical_meta_bytes(payload)
+            entries.append((info.filename, payload))
     path.write_bytes(_canonical_zip_bytes(entries))
 
 
