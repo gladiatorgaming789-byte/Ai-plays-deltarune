@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
+import sys
 import zipfile
 
 import pytest
@@ -137,6 +139,53 @@ def test_builder_repeated_runs_are_byte_identical(tmp_path: Path) -> None:
     first_bytes = first.read_bytes()
     second = _build_from_source(source, tmp_path / "second.zip")
     assert second.read_bytes() == first_bytes
+
+
+@pytest.mark.parametrize(
+    "builder_relative",
+    [
+        "mods/speed/tools/build_packages.py",
+        "mods/telemetry/tools/build_packages.py",
+    ],
+)
+def test_mod_builders_run_without_site_packages(
+    tmp_path: Path,
+    builder_relative: str,
+) -> None:
+    """Package materialization must not depend on Pillow, Qt, or other runtime deps."""
+
+    repository_root = Path(__file__).resolve().parents[1]
+    clean_hashes = tmp_path / "clean_hashes.json"
+    clean_hashes.write_text(
+        json.dumps({"1": "00" * 32}),
+        encoding="utf-8",
+    )
+    output = tmp_path / f"{Path(builder_relative).parents[1].name}.zip"
+    manifest = tmp_path / f"{Path(builder_relative).parents[1].name}.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-S",
+            str(repository_root / builder_relative),
+            "--target-version",
+            "1.05",
+            "--chapter",
+            "1",
+            "--clean-hashes",
+            str(clean_hashes),
+            "--output",
+            str(output),
+            "--manifest",
+            str(manifest),
+        ],
+        cwd=repository_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert output.is_file()
+    assert manifest.is_file()
 
 
 def test_builder_rejects_duplicate_chapters(tmp_path: Path) -> None:
