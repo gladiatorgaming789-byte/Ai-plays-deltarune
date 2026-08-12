@@ -17,8 +17,8 @@
   },
   "package": {
     "file": "Telemetry-All-Chapters-DeltaMod-CSX-v9.2.0.zip",
-    "size": 15293,
-    "sha256": "8464461d0e291f6a67b827be2cb4f06f2218a1ef8976ada9905b58c8b3e46255",
+    "size": 53404,
+    "sha256": "c66e2f679ce8892c6aaefc6dddb47efef571e60b239714528fde962c99f9a710",
     "root_entries": [
       "meta.json",
       "modding.xml",
@@ -33,7 +33,7 @@
     "canonical_text": "UTF-8 without BOM, LF line endings",
     "zip_timestamp": "1980-01-01T00:00:00",
     "zip_mode": "100644",
-    "compression": "DEFLATE level 9"
+    "compression": "STORED (no compression; zlib-independent)"
   },
   "semantic_validation": {
     "utmt_cli_version": "0.9.1.2",
