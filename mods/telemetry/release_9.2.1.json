@@ -1,0 +1,48 @@
+{
+  "format": "DeltaMod direct-CSX source package",
+  "status": "source-level validation passed; DeltaMod runtime verification pending",
+  "version": "9.2.1",
+  "telemetry_protocol": 9,
+  "target_version": "1.05",
+  "steam_build_id": "24484059",
+  "chapter5_version_marker": "v0.0.253",
+  "source": "AiTelemetry.csx",
+  "source_sha256": "c3239c679fdbab5a700930628a5ea19a6a7046a3620fb4656fd1a84a73848977",
+  "clean_chapter_sha256": {
+    "1": "82c2bb61b8d78cd287120f6301588fecba34ec5a890bac711b7a8774c760ec70",
+    "2": "047c5ab003e3e01757e119c81e0327760169512110fd276b19241e68",
+    "3": "c1a0925343694ec9b9adcbf2f916a720b02fd1b999286cfe8fe6a52f3320f714",
+    "4": "ed64789586238b52375e994e1c1cf13694dd2d0dab57d13e639b9c892e37d8f2",
+    "5": "370dfd141d2955d5a1960122919b16e4092b52ffbb85fda541bc4680c6b3b85c"
+  },
+  "package": {
+    "file": "Telemetry-All-Chapters-DeltaMod-CSX-v9.2.1.zip",
+    "size": 53389,
+    "sha256": "609afc19c41e2e65001bb7d3eb8a3f18918fb6dd214a3e9ed91c04202cb88ef1",
+    "patch_type": "csx",
+    "root_entries": [
+      "meta.json",
+      "modding.xml",
+      "Chapter1Telemetry.csx",
+      "Chapter2Telemetry.csx",
+      "Chapter3Telemetry.csx",
+      "Chapter4Telemetry.csx",
+      "Chapter5Telemetry.csx"
+    ]
+  },
+  "reproducibility": {
+    "canonical_text": "UTF-8 without BOM, LF line endings",
+    "zip_timestamp": "1980-01-01T00:00:00",
+    "zip_mode": "100644",
+    "compression": "STORED (no compression; zlib-independent)"
+  },
+  "semantic_validation": {
+    "utmt_cli_version": "0.9.1.2",
+    "telemetry_only": "pass Chapters 1-5",
+    "speed_only": "pass Chapters 1-5",
+    "telemetry_then_speed": "pass Chapters 1-5",
+    "speed_then_telemetry": "pass Chapters 1-5",
+    "obj_time_bbox_leak": false
+  },
+  "packaging_fix": "Raw UndertaleModTool CSX is declared with DeltaMod patch type csx. Version 9.2.0 incorrectly declared raw CSX as xdelta, which routed it through G3MTool's ZIP-backed merge path."
+}
