@@ -140,7 +140,11 @@ class HierarchicalPolicy:
             if self.objectives.current
             else None
         )
-        summary["objective_changes"] = len(self.objectives.history)
+        # History intentionally keeps only the newest 100 entries for compact
+        # diagnostics. Report the independent counter so long runs do not look
+        # artificially capped at exactly 100 objective changes.
+        summary["objective_changes"] = self.objectives.change_count
+        summary["objective_history_retained"] = len(self.objectives.history)
         summary["last_dialogue_signature"] = self.last_dialogue_signature
         summary["last_dialogue_text"] = self.last_dialogue_text
         summary["frozen_visual_frames"] = self.visual_freshness.frozen_frames
