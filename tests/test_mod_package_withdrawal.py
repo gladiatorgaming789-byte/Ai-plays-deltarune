@@ -13,16 +13,16 @@ CURRENT_PACKAGES = (
         / "mods"
         / "speed"
         / "deltamod"
-        / "AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.0.zip",
-        REPOSITORY_ROOT / "mods" / "speed" / "release_1.3.0.json",
+        / "AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.1.zip",
+        REPOSITORY_ROOT / "mods" / "speed" / "release_1.3.1.json",
     ),
     (
         REPOSITORY_ROOT
         / "mods"
         / "telemetry"
         / "deltamod"
-        / "Telemetry-All-Chapters-DeltaMod-CSX-v9.2.0.zip",
-        REPOSITORY_ROOT / "mods" / "telemetry" / "release_9.2.0.json",
+        / "Telemetry-All-Chapters-DeltaMod-CSX-v9.2.1.zip",
+        REPOSITORY_ROOT / "mods" / "telemetry" / "release_9.2.1.json",
     ),
 )
 
@@ -54,9 +54,10 @@ def test_only_current_validated_mod_packages_are_committed() -> None:
         assert package.name == expected["file"]
         assert package.stat().st_size == expected["size"]
         assert _sha256(package) == expected["sha256"]
+        assert expected["patch_type"] == "csx"
 
 
-def test_old_release_records_are_explicitly_withdrawn() -> None:
+def test_compiled_release_records_remain_withdrawn() -> None:
     records = (
         REPOSITORY_ROOT / "mods" / "speed" / "release_1.2.0.json",
         REPOSITORY_ROOT / "mods" / "telemetry" / "release_9.1.0.json",
@@ -65,4 +66,16 @@ def test_old_release_records_are_explicitly_withdrawn() -> None:
         payload = json.loads(path.read_text(encoding="utf-8"))
         assert payload["status"] == "withdrawn"
         assert "bbox_top" in payload["reason"]
-        assert "Direct-CSX" in payload["replacement"]
+
+
+def test_xdelta_routed_csx_release_records_are_withdrawn() -> None:
+    records = (
+        REPOSITORY_ROOT / "mods" / "speed" / "release_1.3.0.json",
+        REPOSITORY_ROOT / "mods" / "telemetry" / "release_9.2.0.json",
+    )
+    for path in records:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        assert payload["status"] == "withdrawn"
+        assert "type=xdelta" in payload["reason"]
+        assert "End of Central Directory" in payload["reason"]
+        assert "type=csx" in payload["replacement"]
