@@ -10,6 +10,7 @@ from PIL import Image
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
 PW_CLIENTONLY = 0x00000001
+SRCCOPY = 0x00CC0020
 DIB_RGB_COLORS = 0
 BI_RGB = 0
 
@@ -65,6 +66,18 @@ gdi32.DeleteObject.argtypes = (wintypes.HGDIOBJ,)
 gdi32.DeleteObject.restype = wintypes.BOOL
 gdi32.DeleteDC.argtypes = (wintypes.HDC,)
 gdi32.DeleteDC.restype = wintypes.BOOL
+gdi32.BitBlt.argtypes = (
+    wintypes.HDC,
+    ctypes.c_int,
+    ctypes.c_int,
+    ctypes.c_int,
+    ctypes.c_int,
+    wintypes.HDC,
+    ctypes.c_int,
+    ctypes.c_int,
+    wintypes.DWORD,
+)
+gdi32.BitBlt.restype = wintypes.BOOL
 gdi32.GetDIBits.argtypes = (
     wintypes.HDC,
     wintypes.HBITMAP,
@@ -77,8 +90,7 @@ gdi32.GetDIBits.argtypes = (
 gdi32.GetDIBits.restype = ctypes.c_int
 
 
-def capture_window_client(hwnd: int) -> Image.Image:
-    """Capture a client area even when another window is in front of it."""
+def _capture_window_client(hwnd: int, *, bitblt: bool) -> Image.Image:
     rect = wintypes.RECT()
     if not user32.GetClientRect(hwnd, ctypes.byref(rect)):
         raise ctypes.WinError(ctypes.get_last_error())
@@ -100,7 +112,25 @@ def capture_window_client(hwnd: int) -> Image.Image:
         raise ctypes.WinError(ctypes.get_last_error())
     previous = gdi32.SelectObject(memory_dc, bitmap)
     try:
-        if not user32.PrintWindow(hwnd, memory_dc, PW_CLIENTONLY):
+        if bitblt:
+            # GetDC(hwnd) is the client-area DC. BitBlt gives us a second
+            # Windows capture route when a GameMaker/DirectX window declines
+            # PrintWindow while unfocused. It is deliberately attempted only
+            # after PrintWindow fails and only for a background game window.
+            drawn = gdi32.BitBlt(
+                memory_dc,
+                0,
+                0,
+                width,
+                height,
+                window_dc,
+                0,
+                0,
+                SRCCOPY,
+            )
+        else:
+            drawn = user32.PrintWindow(hwnd, memory_dc, PW_CLIENTONLY)
+        if not drawn:
             raise ctypes.WinError(ctypes.get_last_error())
         info = BitmapInfo(
             BitmapInfoHeader(
@@ -138,6 +168,16 @@ def capture_window_client(hwnd: int) -> Image.Image:
         user32.ReleaseDC(hwnd, window_dc)
 
 
+def capture_window_client(hwnd: int) -> Image.Image:
+    """Capture a client area through PrintWindow."""
+    return _capture_window_client(hwnd, bitblt=False)
+
+
+def capture_window_client_bitblt(hwnd: int) -> Image.Image:
+    """Capture the client DC with BitBlt as a background fallback."""
+    return _capture_window_client(hwnd, bitblt=True)
+
+
 @dataclass(frozen=True)
 class Observation:
     frame: Image.Image
@@ -150,27 +190,72 @@ class ScreenObserver:
         self.region = region
         self.window_hwnd: int | None = None
         self._last_window_frame: Image.Image | None = None
+        self._capture_counts = {
+            "print_window_successes": 0,
+            "print_window_errors": 0,
+            "print_window_unusable": 0,
+            "bitblt_successes": 0,
+            "bitblt_errors": 0,
+            "bitblt_unusable": 0,
+            "desktop_successes": 0,
+            "desktop_unusable": 0,
+            "stale_frame_reuses": 0,
+            "blank_fallbacks": 0,
+            "valid_frames": 0,
+            "invalid_frames": 0,
+        }
+
+    def _accept(self, frame: Image.Image, step: int, method: str) -> Observation | None:
+        if frame_is_usable(frame):
+            self._capture_counts[f"{method}_successes"] += 1
+            self._capture_counts["valid_frames"] += 1
+            self._last_window_frame = frame
+            return Observation(frame=frame, step=step)
+        self._capture_counts[f"{method}_unusable"] += 1
+        return None
 
     def observe(self, step: int) -> Observation:
         if self.window_hwnd is not None:
+            frame: Image.Image | None = None
             try:
                 frame = capture_window_client(self.window_hwnd)
-                if frame_is_usable(frame):
-                    self._last_window_frame = frame
-                    return Observation(frame=frame, step=step)
             except OSError:
-                frame = None
-            if user32.GetForegroundWindow() == self.window_hwnd:
+                self._capture_counts["print_window_errors"] += 1
+            else:
+                accepted = self._accept(frame, step, "print_window")
+                if accepted is not None:
+                    return accepted
+
+            foreground = user32.GetForegroundWindow() == self.window_hwnd
+            if foreground:
                 desktop = pyautogui.screenshot(region=self.region)
-                if frame_is_usable(desktop):
-                    self._last_window_frame = desktop
-                    return Observation(frame=desktop, step=step)
+                accepted = self._accept(desktop, step, "desktop")
+                if accepted is not None:
+                    return accepted
+            else:
+                # PrintWindow failed for long stretches in the 2026-08-12 live
+                # run while telemetry proved that Kris kept moving. Try the
+                # client DC before giving up and reusing a stale screenshot.
+                try:
+                    background = capture_window_client_bitblt(self.window_hwnd)
+                except OSError:
+                    self._capture_counts["bitblt_errors"] += 1
+                else:
+                    accepted = self._accept(background, step, "bitblt")
+                    if accepted is not None:
+                        return accepted
+                    if frame is None:
+                        frame = background
+
+            self._capture_counts["invalid_frames"] += 1
             if self._last_window_frame is not None:
+                self._capture_counts["stale_frame_reuses"] += 1
                 return Observation(
                     frame=self._last_window_frame.copy(),
                     step=step,
                     visual_valid=False,
                 )
+            self._capture_counts["blank_fallbacks"] += 1
             size = frame.size if frame is not None else (
                 (self.region[2], self.region[3]) if self.region else (320, 240)
             )
@@ -180,6 +265,20 @@ class ScreenObserver:
                 visual_valid=False,
             )
         return Observation(frame=pyautogui.screenshot(region=self.region), step=step)
+
+    def diagnostics(self) -> dict[str, object]:
+        counts = dict(self._capture_counts)
+        total = int(counts["valid_frames"]) + int(counts["invalid_frames"])
+        counts.update(
+            {
+                "window_capture_configured": self.window_hwnd is not None,
+                "observed_window_frames": total,
+                "visual_valid_ratio": (
+                    float(counts["valid_frames"]) / total if total else None
+                ),
+            }
+        )
+        return counts
 
     def set_region(self, region: tuple[int, int, int, int]) -> None:
         self.region = region
