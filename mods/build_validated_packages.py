@@ -34,6 +34,12 @@ PACKAGE_SPECS = (
         MODS_ROOT / "telemetry" / "deltamod" / "Telemetry-All-Chapters-DeltaMod-CSX-v9.2.1.zip",
         MODS_ROOT / "telemetry" / "release_9.2.1.json",
     ),
+    (
+        "Support",
+        MODS_ROOT / "support" / "tools" / "build_packages.py",
+        MODS_ROOT / "support" / "deltamod" / "AI-Support-All-Chapters-DeltaMod-CSX-v1.0.0.zip",
+        MODS_ROOT / "support" / "release_1.0.0.json",
+    ),
 )
 
 
