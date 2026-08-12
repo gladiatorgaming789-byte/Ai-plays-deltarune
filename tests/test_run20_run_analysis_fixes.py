@@ -60,10 +60,8 @@ def test_repeatedly_unreachable_doorway_is_retired(tmp_path: Path) -> None:
     assert policy.unreachable_doorways_retired == 1
 
 
-def test_one_sided_interactable_is_not_routed(tmp_path: Path) -> None:
-    policy = explorer(tmp_path)
-    key = ("room", 2, 2)
-    policy.screen_regions[key] = {
+def _one_sided_interactable_record() -> dict[str, object]:
+    return {
         "hypothesis": "possible_interactable",
         "guess_state": "proposed",
         "guess_confidence": 0.8,
@@ -76,13 +74,45 @@ def test_one_sided_interactable_is_not_routed(tmp_path: Path) -> None:
         "failed_approaches": 0,
         "interest": 0.5,
     }
+
+
+def test_one_sided_interactable_is_not_routed_during_normal_exploration(
+    tmp_path: Path,
+) -> None:
+    policy = explorer(tmp_path)
+    key = ("room", 2, 2)
+    policy.screen_regions[key] = _one_sided_interactable_record()
     policy.seen_cells.add(("room", 0, 0))
 
-    result = policy._direction_to_visual_hypothesis("room", (0, 0))
+    first = policy._direction_to_visual_hypothesis("room", (0, 0))
+    second = policy._direction_to_visual_hypothesis("room", (0, 0))
 
-    assert result is None
+    assert first is None
+    assert second is None
     assert policy.screen_regions[key]["hypothesis"] == "possible_interactable"
+    # The diagnostic counts unique suppressed leads, not every planning call.
     assert policy.single_side_interactable_routes_suppressed == 1
+
+
+def test_story_focus_can_route_to_one_sided_interactable(tmp_path: Path) -> None:
+    policy = explorer(tmp_path)
+    key = ("room", 2, 2)
+    policy.screen_regions[key] = _one_sided_interactable_record()
+    policy.seen_cells.add(("room", 0, 0))
+
+    result = policy._direction_to_visual_hypothesis(
+        "room",
+        (0, 0),
+        story_focus=True,
+        allowed_hypotheses={"possible_interactable"},
+    )
+
+    assert result is not None
+    direction, hypothesis, target_region = result
+    assert direction in {"down", "right"}
+    assert hypothesis == "possible_interactable"
+    assert target_region == (2, 2)
+    assert policy.single_side_interactable_routes_suppressed == 0
 
 
 def test_automatic_progress_does_not_reward_stale_actions(tmp_path: Path) -> None:
