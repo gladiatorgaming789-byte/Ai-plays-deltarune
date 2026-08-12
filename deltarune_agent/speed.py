@@ -104,29 +104,7 @@ class SpeedSynchronizer:
             return "matched"
         return "mismatch"
 
-    def stale_warning(self, now: float | None = None) -> str | None:
-        if not self.automatic or self.detected_multiplier(now) is not None:
-            self.warned_stale = False
-            return None
-        if self.warned_stale:
-            return None
-        self.warned_stale = True
-        return (
-            "Speed telemetry is unavailable or stale; the AI is using safe 1x "
-            "timing until a fresh DRSPEED packet arrives."
-        )
-
-    def runtime_warning(self, now: float | None = None) -> str | None:
-        """Return one actionable warning for an unverified timing request.
-
-        Manual mode intentionally remains usable without telemetry. The latest
-        live run requested 10x while receiving zero DRSPEED packets, however, so
-        silently labeling that state simply as ``manual`` hid a potentially
-        severe game/AI timing mismatch. Report it without changing the user's
-        explicitly selected timing behavior.
-        """
-        if self.automatic:
-            return self.stale_warning(now)
+    def _manual_warning(self, now: float | None = None) -> str | None:
         requested = float(self.requested)
         if requested == 1.0:
             self.warned_manual_mismatch = False
@@ -149,6 +127,30 @@ class SpeedSynchronizer:
             f"({detected:g}x). The AI will keep the explicitly selected manual "
             "timing, but inputs may be mistimed."
         )
+
+    def stale_warning(self, now: float | None = None) -> str | None:
+        """Compatibility warning hook used by the current runner.
+
+        Historically this only warned in automatic mode. Manual high-speed runs
+        could therefore receive zero DRSPEED packets while silently timing input
+        as if the game were accelerated. Keep manual mode semantics intact, but
+        surface that unverified state through the same one-shot warning hook.
+        """
+        if not self.automatic:
+            return self._manual_warning(now)
+        if self.detected_multiplier(now) is not None:
+            self.warned_stale = False
+            return None
+        if self.warned_stale:
+            return None
+        self.warned_stale = True
+        return (
+            "Speed telemetry is unavailable or stale; the AI is using safe 1x "
+            "timing until a fresh DRSPEED packet arrives."
+        )
+
+    def runtime_warning(self, now: float | None = None) -> str | None:
+        return self.stale_warning(now)
 
     def scale_delay(self, seconds: float, now: float | None = None) -> float:
         seconds = max(0.0, float(seconds))
