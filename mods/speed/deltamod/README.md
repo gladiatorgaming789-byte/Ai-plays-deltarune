@@ -1,38 +1,46 @@
 # DeltaMod speed package
 
-The compiled v1.2.0 ZIPs were withdrawn on August 6, 2026.
-
-Do not restore or install them beside telemetry v9.1.0. Their independently compiled GameMaker payloads can corrupt shared variable indexes and cause `gml_Object_obj_time_Step_1` to read an unrelated `bbox_top` global.
-
 ## Current candidate
 
-The replacement is the direct-CSX speed v1.3.0 package:
+Use:
 
-`AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.0.zip`
+`AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.1.zip`
 
-A fresh `development` clone includes this ZIP. `Start AI GUI.bat` also runs `mods/build_validated_packages.py` before the GUI starts. The package is accepted only when its exact size and SHA-256 match `release_1.3.0.json`; a missing or damaged copy is rebuilt from `AiSpeed.csx` and must reproduce the expected bytes.
+Speed 1.3.1 is a packaging-route correction for the existing direct-CSX speed
+source. Its `modding.xml` declares every raw UndertaleModTool script with
+DeltaMod `type="csx"`.
 
-It targets DeltaMod game version `1.05` and the validated Steam build 24484059 baseline whose Chapter 5 data contains `v0.0.253`. All five clean `data.win` SHA-256 values are pinned in `neededFiles`.
+Speed 1.3.0 is withdrawn. It incorrectly declared raw `.csx` scripts as
+`type="xdelta"`, which caused DeltaMod to pass them to G3MTool's ZIP-backed
+merge engine. G3MTool then failed with `End of Central Directory record could
+not be found` because the inputs were source text, not G3MPatch ZIP archives.
+The older compiled Speed 1.2.0 package also remains withdrawn because of the
+separate shared-variable-index merge-corruption issue.
 
-Source-level validation with UndertaleModTool CLI 0.9.1.2 passed on Chapters 1-5 both alone and with telemetry applied in either order. In every combined result, `obj_time` contains the speed hook and no telemetry marker, `bbox_top`, or other `bbox_*` reference.
+A fresh `development` clone includes the 1.3.1 ZIP. `Start AI GUI.bat` runs the
+validated package materializer before GUI startup and accepts the package only
+when it reproduces the release record exactly.
 
-The canonical package uses UTF-8/LF CSX and uncompressed `STORED` ZIP entries with fixed headers, timestamps, permissions, and metadata ordering. This avoids cross-platform zlib/Python ZIP-byte differences while preserving the validated DeltaMod member contents.
+Validated candidate:
 
-Candidate SHA-256:
+- size: `23689` bytes
+- SHA-256: `bab2cd4ce2340ed4b15c83037b9dea8500e267e640972834b9a22fd41dfd0d3d`
+- DeltaMod target: `1.05`
+- Steam baseline: `24484059`
+- patch type: `csx`
 
-`08ee5fcb0278c97cd2197b97df23c2be852eefd630be1d1f146bbaab1300c842`
-
-Expected size: `23704` bytes.
-
-This is still a **runtime-test candidate** until it has been imported into the current DeltaMod and launched in the real game alongside telemetry v9.2.0.
+The five clean chapter hashes are pinned through `neededFiles`. The package is
+canonical UTF-8/LF and byte-stable across supported Python platforms.
 
 ## Before testing
 
-1. Disable and remove the withdrawn speed/telemetry packages.
-2. Make DeltaMod rebuild its protected chapter copies from clean originals.
-3. Pull the latest `development` branch so the current validated ZIP is present.
-4. Import the v1.3.0 direct-CSX candidate.
-5. Test speed alone before enabling telemetry.
-6. Then enable both candidates and launch every chapter.
+1. Remove Speed 1.3.0 and Telemetry 9.2.0 from DeltaMod.
+2. Let DeltaMod restore/reconstruct clean protected chapter copies.
+3. Pull the latest `development` branch.
+4. Import Speed 1.3.1.
+5. Test Speed alone across Chapters 1-5, including F8/F9/F10.
+6. Then import/enable Telemetry 9.2.1 and test both together.
 
-The source installer is `../AiSpeed.csx`; the reproducible package builder is `../tools/build_packages.py`.
+This remains a **runtime-test candidate** until those live DeltaMod/game checks
+pass. The source installer is `../AiSpeed.csx`; the reproducible builder is
+`../tools/build_packages.py`.
