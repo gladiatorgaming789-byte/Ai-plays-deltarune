@@ -44,6 +44,7 @@ class SpeedSynchronizer:
             raise ValueError("minimum_delay cannot be negative")
         self.sample: SpeedSample | None = None
         self.warned_stale = False
+        self.warned_manual_mismatch = False
 
     @property
     def automatic(self) -> bool:
@@ -55,6 +56,7 @@ class SpeedSynchronizer:
         ):
             self.sample = sample
             self.warned_stale = False
+            self.warned_manual_mismatch = False
 
     def packet_age(self, now: float | None = None) -> float | None:
         if self.sample is None:
@@ -91,6 +93,17 @@ class SpeedSynchronizer:
             and abs(detected - self.effective_multiplier(now)) < 0.001
         )
 
+    def verification_state(self, now: float | None = None) -> str:
+        detected = self.detected_multiplier(now)
+        if self.automatic:
+            return "matched" if detected is not None else "missing_or_stale"
+        requested = float(self.requested)
+        if detected is None:
+            return "not_required" if requested == 1.0 else "unverified"
+        if abs(detected - requested) < 0.001:
+            return "matched"
+        return "mismatch"
+
     def stale_warning(self, now: float | None = None) -> str | None:
         if not self.automatic or self.detected_multiplier(now) is not None:
             self.warned_stale = False
@@ -101,6 +114,40 @@ class SpeedSynchronizer:
         return (
             "Speed telemetry is unavailable or stale; the AI is using safe 1x "
             "timing until a fresh DRSPEED packet arrives."
+        )
+
+    def runtime_warning(self, now: float | None = None) -> str | None:
+        """Return one actionable warning for an unverified timing request.
+
+        Manual mode intentionally remains usable without telemetry. The latest
+        live run requested 10x while receiving zero DRSPEED packets, however, so
+        silently labeling that state simply as ``manual`` hid a potentially
+        severe game/AI timing mismatch. Report it without changing the user's
+        explicitly selected timing behavior.
+        """
+        if self.automatic:
+            return self.stale_warning(now)
+        requested = float(self.requested)
+        if requested == 1.0:
+            self.warned_manual_mismatch = False
+            return None
+        detected = self.detected_multiplier(now)
+        if detected is not None and abs(detected - requested) < 0.001:
+            self.warned_manual_mismatch = False
+            return None
+        if self.warned_manual_mismatch:
+            return None
+        self.warned_manual_mismatch = True
+        if detected is None:
+            return (
+                f"Manual {requested:g}x AI timing is not confirmed by DRSPEED "
+                "telemetry. The game may be running at a different speed; use "
+                "Auto or verify the Speed/AI Support mod is enabled."
+            )
+        return (
+            f"Manual {requested:g}x AI timing disagrees with DRSPEED telemetry "
+            f"({detected:g}x). The AI will keep the explicitly selected manual "
+            "timing, but inputs may be mistimed."
         )
 
     def scale_delay(self, seconds: float, now: float | None = None) -> float:
@@ -125,6 +172,7 @@ class SpeedSynchronizer:
             "detected_multiplier": detected,
             "effective_multiplier": effective,
             "source": self.source(now),
+            "verification_state": self.verification_state(now),
             "packet_age_seconds": self.packet_age(now),
             "stale_after_seconds": self.stale_after,
             "synchronized": self.synchronized(now),
