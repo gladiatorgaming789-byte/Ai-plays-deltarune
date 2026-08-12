@@ -24,6 +24,14 @@ CURRENT_PACKAGES = (
         / "Telemetry-All-Chapters-DeltaMod-CSX-v9.2.1.zip",
         REPOSITORY_ROOT / "mods" / "telemetry" / "release_9.2.1.json",
     ),
+    (
+        REPOSITORY_ROOT
+        / "mods"
+        / "support"
+        / "deltamod"
+        / "AI-Support-All-Chapters-DeltaMod-CSX-v1.0.0.zip",
+        REPOSITORY_ROOT / "mods" / "support" / "release_1.0.0.json",
+    ),
 )
 
 
@@ -40,6 +48,7 @@ def test_only_current_validated_mod_packages_are_committed() -> None:
     package_roots = (
         REPOSITORY_ROOT / "mods" / "speed" / "deltamod",
         REPOSITORY_ROOT / "mods" / "telemetry" / "deltamod",
+        REPOSITORY_ROOT / "mods" / "support" / "deltamod",
     )
     committed_archives = {
         path
@@ -79,3 +88,18 @@ def test_xdelta_routed_csx_release_records_are_withdrawn() -> None:
         assert "type=xdelta" in payload["reason"]
         assert "End of Central Directory" in payload["reason"]
         assert "type=csx" in payload["replacement"]
+
+
+def test_atomic_support_release_explains_shared_backup_requirement() -> None:
+    payload = json.loads(
+        (REPOSITORY_ROOT / "mods" / "support" / "release_1.0.0.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert payload["status"] == (
+        "source-composition validation passed; DeltaMod runtime verification pending"
+    )
+    assert "same .bak" in payload["reason"]
+    assert payload["speed_component_version"] == "1.3.1"
+    assert payload["telemetry_component_version"] == "9.2.1"
+    assert payload["telemetry_protocol"] == 9
