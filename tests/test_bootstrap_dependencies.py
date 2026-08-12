@@ -137,18 +137,22 @@ def test_failed_install_never_marks_environment_current(
     assert not bootstrap.marker_path(tmp_path).exists()
 
 
-def test_windows_launcher_bootstraps_and_materializes_mods_before_gui() -> None:
+def test_windows_launcher_updates_before_materializing_mods_and_gui() -> None:
     launcher = (
         Path(__file__).resolve().parents[1] / "Start AI GUI.bat"
     ).read_text(encoding="utf-8")
     assert "-m venv .venv" in launcher
     assert '"deltarune_agent\\bootstrap_dependencies.py"' in launcher
     assert "-m deltarune_agent.bootstrap_dependencies" not in launcher
+    assert "-m deltarune_agent.auto_update --apply" in launcher
     assert '"mods\\build_validated_packages.py"' in launcher
-    assert launcher.index("bootstrap_dependencies.py") < launcher.index(
-        "build_validated_packages.py"
-    )
-    assert launcher.index("build_validated_packages.py") < launcher.index(
-        "-m deltarune_agent gui"
-    )
+    assert launcher.count("bootstrap_dependencies.py") >= 2
+
+    first_bootstrap = launcher.index("bootstrap_dependencies.py")
+    updater = launcher.index("-m deltarune_agent.auto_update --apply")
+    last_bootstrap = launcher.rindex("bootstrap_dependencies.py")
+    mod_build = launcher.index("build_validated_packages.py")
+    gui = launcher.index("-m deltarune_agent gui")
+
+    assert first_bootstrap < updater < last_bootstrap < mod_build < gui
     assert "if %errorlevel% equ" not in launcher.casefold()
