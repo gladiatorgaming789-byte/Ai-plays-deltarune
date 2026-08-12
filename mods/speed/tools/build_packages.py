@@ -20,7 +20,7 @@ from mods.tools.deltamod_csx_loader import (
 )
 
 
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 NAME = "AI Deltarune Run Speed"
 DESCRIPTION = (
     "Direct-CSX 1x-10x simulation speed controls with localhost "
