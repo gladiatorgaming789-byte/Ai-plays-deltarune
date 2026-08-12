@@ -32,5 +32,20 @@ def test_changing_reason_does_not_count_as_new_objective():
     )
 
     assert len(manager.history) == 1
+    assert manager.change_count == 1
     assert manager.current is not None
     assert manager.current.kind is ObjectiveKind.SEEK_EXIT
+
+
+def test_objective_change_count_is_not_limited_by_retained_history():
+    manager = ObjectiveManager()
+
+    for index in range(150):
+        manager.objective_for_state(
+            "overworld",
+            "explore unknown space",
+            f"room_{index}",
+        )
+
+    assert len(manager.history) == 100
+    assert manager.change_count == 150
