@@ -1,23 +1,25 @@
 # DELTARUNE AI mod packages
 
-This folder contains the source and reproducible build records for the two DeltaMod packages used by the controller:
+A fresh `development` clone now includes the two DeltaMod packages used by the controller:
 
 - Speed: `mods/speed/deltamod/AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.0.zip`
 - Telemetry: `mods/telemetry/deltamod/Telemetry-All-Chapters-DeltaMod-CSX-v9.2.0.zip`
 
-The ZIP files are generated locally rather than stored as generated binaries in Git. On a fresh clone, double-click `Start AI GUI.bat`; after dependency setup it runs `mods/build_validated_packages.py` before opening the GUI.
+`Start AI GUI.bat` still runs `mods/build_validated_packages.py` after dependency setup and before opening the GUI. Existing ZIPs are accepted only when their exact byte size and SHA-256 match the checked-in release records. A missing or damaged ZIP is rebuilt from the committed CSX source and must reproduce those exact bytes before startup continues.
 
-The materializer builds each ZIP from the committed CSX source and accepts it only when both its byte size and SHA-256 exactly match the checked-in release record. A mismatching package is deleted and startup stops instead of exposing an unverified mod.
+Current validated candidates:
 
-Expected validated candidates:
+- Speed v1.3.0 — 23,704 bytes — SHA-256 `08ee5fcb0278c97cd2197b97df23c2be852eefd630be1d1f146bbaab1300c842`
+- Telemetry v9.2.0 — 53,404 bytes — SHA-256 `c66e2f679ce8892c6aaefc6dddb47efef571e60b239714528fde962c99f9a710`
 
-- Speed v1.3.0 — 7,894 bytes — SHA-256 `ae2ad5ae5a3c30cf9c7e48d51b052cd10febb419514672760840ed7f99fb5283`
-- Telemetry v9.2.0 — 15,293 bytes — SHA-256 `8464461d0e291f6a67b827be2cb4f06f2218a1ef8976ada9905b58c8b3e46255`
+The ZIPs use `STORED` entries (no compression) with canonical metadata. This is intentional: DEFLATE streams can vary across zlib versions, and Python's ZIP writer can vary header bytes across patch versions. The uncompressed canonical form keeps the package hash stable across Windows and Linux. The `meta.json`, `modding.xml`, and CSX payload contents are the same validated direct-CSX material; only the outer ZIP storage representation changed.
 
-You can also generate/verify both packages manually from the repository root:
+The packages can also be regenerated/verified manually from the repository root:
 
 ```powershell
 .\.venv\Scripts\python.exe .\mods\build_validated_packages.py
 ```
 
-These remain runtime-test candidates until live DeltaMod/game validation is complete.
+Only these two current validated ZIPs belong in the repository. The withdrawn speed v1.2.0 and telemetry v9.1.0 compiled packages must remain absent.
+
+These are still **runtime-test candidates** until live DeltaMod/game validation is complete.
