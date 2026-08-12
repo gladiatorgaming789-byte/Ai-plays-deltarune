@@ -43,11 +43,10 @@ def test_manual_speed_works_without_telemetry_but_reports_unverified_state():
     assert speed.source(now=100.0) == "manual"
     assert speed.verification_state(now=100.0) == "unverified"
     assert speed.scale_delay(0.18, now=100.0) == 0.06
-    assert speed.stale_warning(now=100.0) is None
-    warning = speed.runtime_warning(now=100.0)
+    warning = speed.stale_warning(now=100.0)
     assert warning is not None
     assert "not confirmed" in warning
-    assert speed.runtime_warning(now=100.1) is None
+    assert speed.stale_warning(now=100.1) is None
 
 
 def test_manual_speed_warns_when_fresh_telemetry_disagrees():
