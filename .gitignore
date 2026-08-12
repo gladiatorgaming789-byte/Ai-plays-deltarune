@@ -11,9 +11,6 @@ mods/speed/deltamod/*.g3mpatch
 mods/speed/deltamod/*.json
 mods/speed/deltamod/*.xml
 
-# The validated direct-CSX runtime-test ZIPs are materialized locally from the
-# committed sources and release metadata by mods/build_validated_packages.py.
-# Keep generated copies out of Git status; the materializer verifies exact
-# byte size and SHA-256 before exposing either package for use.
-mods/speed/deltamod/AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.0.zip
-mods/telemetry/deltamod/Telemetry-All-Chapters-DeltaMod-CSX-v9.2.0.zip
+# The two current direct-CSX runtime-test ZIPs are intentionally tracked.
+# Start AI GUI.bat verifies their exact release-record size/SHA-256 and rebuilds
+# a missing or damaged copy before opening the GUI.
