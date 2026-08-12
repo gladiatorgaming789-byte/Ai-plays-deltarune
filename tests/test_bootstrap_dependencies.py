@@ -8,7 +8,10 @@ import pytest
 import deltarune_agent.bootstrap_dependencies as bootstrap
 
 
-def _write_requirements(root: Path, text: str = "ExampleDependency==1.0\n") -> Path:
+def _write_requirements(
+    root: Path,
+    text: str = "Pillow>=10\nPyAutoGUI>=0.9.54\n",
+) -> Path:
     path = root / "requirements.txt"
     path.write_text(text, encoding="utf-8", newline="\n")
     (root / ".venv").mkdir(exist_ok=True)
@@ -23,21 +26,19 @@ def test_requirements_fingerprint_changes_with_dependency_list(tmp_path: Path) -
     assert first != second
 
 
+def test_declared_distributions_follow_branch_requirements(tmp_path: Path) -> None:
+    path = _write_requirements(
+        tmp_path,
+        "# UI dependencies\nPillow>=10,<12\nPyAutoGUI>=0.9.54,<1\nPySide6>=6.8.1,<7\n",
+    )
+    assert bootstrap.declared_distributions(path) == (
+        "Pillow",
+        "PyAutoGUI",
+        "PySide6",
+    )
+
+
 def test_dependencies_current_accepts_matching_marker(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    requirements = _write_requirements(tmp_path)
-    fingerprint = bootstrap.requirements_fingerprint(requirements)
-    bootstrap._write_marker(bootstrap.marker_path(tmp_path), fingerprint)
-    monkeypatch.setattr(bootstrap, "missing_required_modules", lambda: [])
-
-    current, reason = bootstrap.dependencies_current(tmp_path)
-
-    assert current is True
-    assert reason == "dependencies are current"
-
-
-def test_dependencies_current_rejects_missing_required_module(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     requirements = _write_requirements(tmp_path)
@@ -45,8 +46,26 @@ def test_dependencies_current_rejects_missing_required_module(
     bootstrap._write_marker(bootstrap.marker_path(tmp_path), fingerprint)
     monkeypatch.setattr(
         bootstrap,
-        "missing_required_modules",
-        lambda: ["PySide6"],
+        "missing_required_packages",
+        lambda _requirements: [],
+    )
+
+    current, reason = bootstrap.dependencies_current(tmp_path)
+
+    assert current is True
+    assert reason == "dependencies are current"
+
+
+def test_dependencies_current_rejects_missing_required_package(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    requirements = _write_requirements(tmp_path, "PySide6>=6.8.1,<7\n")
+    fingerprint = bootstrap.requirements_fingerprint(requirements)
+    bootstrap._write_marker(bootstrap.marker_path(tmp_path), fingerprint)
+    monkeypatch.setattr(
+        bootstrap,
+        "missing_required_packages",
+        lambda _requirements: ["PySide6"],
     )
 
     current, reason = bootstrap.dependencies_current(tmp_path)
@@ -71,7 +90,11 @@ def test_ensure_dependencies_installs_checks_and_records_environment(
         "_run",
         lambda command, *, cwd: calls.append(command),
     )
-    monkeypatch.setattr(bootstrap, "missing_required_modules", lambda: [])
+    monkeypatch.setattr(
+        bootstrap,
+        "missing_required_packages",
+        lambda _requirements: [],
+    )
 
     changed = bootstrap.ensure_dependencies(
         tmp_path,
