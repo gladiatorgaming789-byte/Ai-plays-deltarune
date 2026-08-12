@@ -1,0 +1,163 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
+
+ROOT = Path(__file__).resolve().parents[1]
+MODS_ROOT = ROOT / "mods"
+VALIDATED_BUILD = MODS_ROOT / "validated_deltarune_build.json"
+
+PACKAGE_SPECS = (
+    (
+        "Speed",
+        MODS_ROOT / "speed" / "tools" / "build_packages.py",
+        MODS_ROOT / "speed" / "deltamod" / "AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.0.zip",
+        MODS_ROOT / "speed" / "release_1.3.0.json",
+    ),
+    (
+        "Telemetry",
+        MODS_ROOT / "telemetry" / "tools" / "build_packages.py",
+        MODS_ROOT / "telemetry" / "deltamod" / "Telemetry-All-Chapters-DeltaMod-CSX-v9.2.0.zip",
+        MODS_ROOT / "telemetry" / "release_9.2.0.json",
+    ),
+)
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def load_json(path: Path) -> dict[str, object]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise RuntimeError(f"Expected a JSON object in {path}")
+    return value
+
+
+def expected_package(release_path: Path) -> tuple[int, str]:
+    release = load_json(release_path)
+    package = release.get("package")
+    if not isinstance(package, dict):
+        raise RuntimeError(f"Missing package record in {release_path}")
+    try:
+        size = int(package["size"])
+        checksum = str(package["sha256"]).lower()
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError(f"Invalid package record in {release_path}") from exc
+    if len(checksum) != 64:
+        raise RuntimeError(f"Invalid package SHA-256 in {release_path}")
+    return size, checksum
+
+
+def package_is_valid(path: Path, expected_size: int, expected_sha256: str) -> bool:
+    return (
+        path.is_file()
+        and path.stat().st_size == expected_size
+        and sha256_file(path) == expected_sha256
+    )
+
+
+def build_package(
+    label: str,
+    builder: Path,
+    output: Path,
+    release_path: Path,
+    *,
+    target_version: str,
+    hash_map: dict[str, str],
+) -> None:
+    expected_size, expected_sha256 = expected_package(release_path)
+    if package_is_valid(output, expected_size, expected_sha256):
+        print(f"[Mods] {label} package ready: {output.name}")
+        return
+
+    if output.exists():
+        print(f"[Mods] Replacing invalid {label.lower()} package: {output.name}")
+        output.unlink()
+    else:
+        print(f"[Mods] Building missing {label.lower()} package: {output.name}")
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="deltarune-ai-mod-build-") as temp_dir:
+        temp = Path(temp_dir)
+        hashes_path = temp / "clean_hashes.json"
+        manifest_path = temp / f"{label.lower()}_manifest.json"
+        hashes_path.write_text(
+            json.dumps(hash_map, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(builder),
+                "--target-version",
+                target_version,
+                "--clean-hashes",
+                str(hashes_path),
+                "--output",
+                str(output),
+                "--manifest",
+                str(manifest_path),
+            ],
+            cwd=ROOT,
+            check=False,
+        )
+        if result.returncode != 0:
+            output.unlink(missing_ok=True)
+            raise RuntimeError(
+                f"{label} package builder failed with exit code {result.returncode}"
+            )
+
+    actual_size = output.stat().st_size if output.is_file() else -1
+    actual_sha256 = sha256_file(output) if output.is_file() else "missing"
+    if actual_size != expected_size or actual_sha256 != expected_sha256:
+        output.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"{label} package did not reproduce the validated release bytes. "
+            f"Expected {expected_size} bytes / {expected_sha256}, got "
+            f"{actual_size} bytes / {actual_sha256}."
+        )
+    print(
+        f"[Mods] {label} package built and verified: {output.name} "
+        f"({expected_sha256[:12]}...)"
+    )
+
+
+def main() -> int:
+    try:
+        validated = load_json(VALIDATED_BUILD)
+        target_version = str(validated["deltarune_target_version"])
+        raw_hashes = validated["chapter_sha256"]
+        if not isinstance(raw_hashes, dict):
+            raise RuntimeError("validated chapter_sha256 must be a JSON object")
+        hash_map = {str(key): str(value) for key, value in raw_hashes.items()}
+        if set(hash_map) != {"1", "2", "3", "4", "5"}:
+            raise RuntimeError("validated chapter hashes must contain Chapters 1-5")
+
+        for label, builder, output, release_path in PACKAGE_SPECS:
+            build_package(
+                label,
+                builder,
+                output,
+                release_path,
+                target_version=target_version,
+                hash_map=hash_map,
+            )
+    except (OSError, KeyError, ValueError, json.JSONDecodeError, RuntimeError) as exc:
+        print(f"[Mods] ERROR: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
