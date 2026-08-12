@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import binascii
 import hashlib
 import json
 from pathlib import Path
+import struct
 import subprocess
 import sys
 import tempfile
@@ -12,7 +14,11 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 MODS_ROOT = ROOT / "mods"
 VALIDATED_BUILD = MODS_ROOT / "validated_deltarune_build.json"
-ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
+DOS_TIME = 0
+DOS_DATE = 33  # 1980-01-01
+VERSION_NEEDED = 20
+VERSION_MADE_BY_UNIX = (3 << 8) | 20
+EXTERNAL_ATTR = 0o100644 << 16
 
 PACKAGE_SPECS = (
     (
@@ -68,29 +74,85 @@ def package_is_valid(path: Path, expected_size: int, expected_sha256: str) -> bo
     )
 
 
-def canonicalize_zip_storage(path: Path) -> None:
-    """Rewrite a package with platform-independent uncompressed ZIP entries.
+def _canonical_zip_bytes(entries: list[tuple[str, bytes]]) -> bytes:
+    """Return a minimal, byte-stable ZIP_STORED archive.
 
-    DEFLATE output can vary between zlib versions even with identical inputs and
-    compression settings. The packages are tiny, so the canonical release form
-    uses ZIP_STORED plus fixed metadata. This preserves every archive member byte
-    while making the final package hash independent of the host zlib build.
+    Python's zipfile writer and zlib can change output details across Python/zlib
+    patch versions. For final release bytes we therefore write the small subset
+    of the ZIP format we need directly: stored entries, fixed DOS timestamp,
+    fixed Unix mode, no extras/comments, and a deterministic central directory.
     """
 
-    temporary = path.with_name(f".{path.name}.stored.tmp")
-    temporary.unlink(missing_ok=True)
-    try:
-        with zipfile.ZipFile(path, "r") as source, zipfile.ZipFile(temporary, "w") as target:
-            for source_info in source.infolist():
-                payload = source.read(source_info.filename)
-                info = zipfile.ZipInfo(source_info.filename, date_time=ZIP_TIMESTAMP)
-                info.compress_type = zipfile.ZIP_STORED
-                info.create_system = 3
-                info.external_attr = 0o100644 << 16
-                target.writestr(info, payload, compress_type=zipfile.ZIP_STORED)
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    output = bytearray()
+    central: list[tuple[bytes, int, int, int]] = []
+
+    for name, payload in entries:
+        name_bytes = name.encode("utf-8")
+        crc32 = binascii.crc32(payload) & 0xFFFFFFFF
+        offset = len(output)
+        size = len(payload)
+        output += struct.pack(
+            "<IHHHHHIIIHH",
+            0x04034B50,
+            VERSION_NEEDED,
+            0,
+            0,
+            DOS_TIME,
+            DOS_DATE,
+            crc32,
+            size,
+            size,
+            len(name_bytes),
+            0,
+        )
+        output += name_bytes
+        output += payload
+        central.append((name_bytes, crc32, size, offset))
+
+    central_start = len(output)
+    for name_bytes, crc32, size, offset in central:
+        output += struct.pack(
+            "<IHHHHHHIIIHHHHHII",
+            0x02014B50,
+            VERSION_MADE_BY_UNIX,
+            VERSION_NEEDED,
+            0,
+            0,
+            DOS_TIME,
+            DOS_DATE,
+            crc32,
+            size,
+            size,
+            len(name_bytes),
+            0,
+            0,
+            0,
+            0,
+            EXTERNAL_ATTR,
+            offset,
+        )
+        output += name_bytes
+
+    central_size = len(output) - central_start
+    count = len(central)
+    output += struct.pack(
+        "<IHHHHIIH",
+        0x06054B50,
+        0,
+        0,
+        count,
+        count,
+        central_size,
+        central_start,
+        0,
+    )
+    return bytes(output)
+
+
+def canonicalize_zip_storage(path: Path) -> None:
+    with zipfile.ZipFile(path, "r") as source:
+        entries = [(info.filename, source.read(info.filename)) for info in source.infolist()]
+    path.write_bytes(_canonical_zip_bytes(entries))
 
 
 def build_package(
