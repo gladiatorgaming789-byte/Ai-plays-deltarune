@@ -71,6 +71,7 @@ def test_builder_writes_one_source_payload_per_chapter(tmp_path: Path) -> None:
     result = validate_csx_package(output, expected_chapters=(1, 2))
     assert result["chapters"] == [1, 2]
     assert result["merge_support"] is True
+    assert result["patch_type"] == "csx"
     assert result["has_needed_files"] is False
 
     with zipfile.ZipFile(output) as archive:
@@ -84,13 +85,27 @@ def test_builder_writes_one_source_payload_per_chapter(tmp_path: Path) -> None:
             "Chapter2Example.csx"
         )
         assert archive.read("modding.xml").decode("utf-8").splitlines() == [
-            '<patch type="xdelta" patch="./Chapter1Example.csx" '
+            '<patch type="csx" patch="./Chapter1Example.csx" '
             'to="./chapter1_windows/data.win"/>',
-            '<patch type="xdelta" patch="./Chapter2Example.csx" '
+            '<patch type="csx" patch="./Chapter2Example.csx" '
             'to="./chapter2_windows/data.win"/>',
         ]
         metadata = json.loads(archive.read("meta.json"))
         assert "neededFiles" not in metadata
+
+
+def test_validator_rejects_raw_csx_declared_as_xdelta(tmp_path: Path) -> None:
+    output = _build(tmp_path)
+    broken = tmp_path / "broken-xdelta-routing.zip"
+    with zipfile.ZipFile(output) as source, zipfile.ZipFile(broken, "w") as target:
+        for name in source.namelist():
+            payload = source.read(name)
+            if name == "modding.xml":
+                payload = payload.replace(b'type="csx"', b'type="xdelta"')
+            target.writestr(name, payload)
+
+    with pytest.raises(ValueError, match="dedicated csx-type"):
+        validate_csx_package(broken)
 
 
 def test_builder_can_pin_fresh_clean_data_hashes(tmp_path: Path) -> None:
