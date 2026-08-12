@@ -35,6 +35,6 @@ def test_target_version_is_required() -> None:
 
 
 def test_telemetry_release_keeps_protocol_while_bumping_package() -> None:
-    assert build_packages.VERSION == "9.2.0"
+    assert build_packages.VERSION == "9.2.1"
     assert build_packages.TELEMETRY_PROTOCOL == 9
     assert "Direct-CSX" in build_packages.DESCRIPTION
