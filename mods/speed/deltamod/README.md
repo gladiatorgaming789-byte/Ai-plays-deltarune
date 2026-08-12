@@ -12,6 +12,11 @@ The replacement is the direct-CSX speed v1.3.0 package:
 
 `AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.0.zip`
 
+A fresh Git clone includes this package. `Start AI GUI.bat` also runs
+`mods/build_validated_packages.py` before the GUI starts; that script verifies
+the package byte size and SHA-256 against the checked-in release record and
+rebuilds it from `AiSpeed.csx` if it is missing or invalid.
+
 It targets DeltaMod game version `1.05` and the validated Steam build 24484059
 baseline whose Chapter 5 data contains `v0.0.253`. All five clean `data.win`
 SHA-256 values are pinned in `neededFiles`.
@@ -29,6 +34,8 @@ Candidate SHA-256:
 
 `ae2ad5ae5a3c30cf9c7e48d51b052cd10febb419514672760840ed7f99fb5283`
 
+Expected size: `7894` bytes.
+
 This is still a **runtime-test candidate** until it has been imported into the
 current DeltaMod and launched in the real game alongside telemetry v9.2.0.
 
@@ -36,9 +43,10 @@ current DeltaMod and launched in the real game alongside telemetry v9.2.0.
 
 1. Disable and remove the withdrawn speed/telemetry packages.
 2. Make DeltaMod rebuild its protected chapter copies from clean originals.
-3. Import the v1.3.0 direct-CSX candidate.
-4. Test speed alone before enabling telemetry.
-5. Then enable both candidates and launch every chapter.
+3. Run `Start AI GUI.bat`, or run `.venv\Scripts\python.exe mods\build_validated_packages.py` manually, to verify/materialize the packages.
+4. Import the v1.3.0 direct-CSX candidate.
+5. Test speed alone before enabling telemetry.
+6. Then enable both candidates and launch every chapter.
 
 The source installer is `../AiSpeed.csx`; the reproducible package builder is
 `../tools/build_packages.py`.
