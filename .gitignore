@@ -4,3 +4,10 @@ __pycache__/
 .pytest_cache/
 runs/
 memory/
+
+# Speed-mod builds are reproducible intermediates. Only the finished DeltaMod
+# ZIP releases belong in mods/speed/deltamod.
+mods/speed/.build/
+mods/speed/deltamod/*.g3mpatch
+mods/speed/deltamod/*.json
+mods/speed/deltamod/*.xml

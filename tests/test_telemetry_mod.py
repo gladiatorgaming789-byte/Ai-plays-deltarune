@@ -22,7 +22,10 @@ def test_v9_telemetry_reports_sequenced_camera_collision_and_control_state():
     assert "camera_get_view_height" in SCRIPT
     assert "camera_get_view_angle" in SCRIPT
     assert "string(global.interact)" in SCRIPT
-    assert "string(bbox_left)" in SCRIPT
+    assert "string(self.bbox_left)" in SCRIPT
+    assert "string(self.bbox_top)" in SCRIPT
+    assert "string(self.bbox_right)" in SCRIPT
+    assert "string(self.bbox_bottom)" in SCRIPT
     assert SCRIPT.index("_ai_core_message") < SCRIPT.index("var _ai_interval")
 
 

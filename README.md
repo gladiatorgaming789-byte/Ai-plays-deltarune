@@ -2,7 +2,9 @@
 
 An external, safety-first controller for experimenting with an AI agent that can
 observe Deltarune, choose a small action, send keyboard input, and record its
-progress. It does **not** patch or modify the game.
+progress. The controller itself does **not** patch or modify the game. Optional
+telemetry and speed mods are separate, reversible packages that DeltaMod applies
+to protected copies.
 
 ## Current scope
 
@@ -166,6 +168,14 @@ quick collision recovery. Turns release the old direction immediately, while
 dialogue and menu buttons retain a longer debounce. Avoid passing `--interval`
 for normal play; that option exists only to override tuned delays while debugging.
 
+With the separate speed mod installed, `--speed auto` (the default) follows its
+localhost `DRSPEED` announcements. Action holds, cooldowns, waits, and an
+explicit `--interval` are divided by the detected 1x-10x multiplier, while very
+short taps retain a registration-safe floor. The startup countdown remains
+normal wall-clock time. If speed packets become stale, automatic mode warns
+once and safely returns the AI to 1x timing. Use `--speed 1` through
+`--speed 10` for a manual override, including when telemetry is disabled.
+
 Each run automatically reloads and updates `memory/navigation.json` and
 `memory/visual_states.json`. The visual model learns from states confirmed by
 telemetry, then remains usable if telemetry is temporarily unavailable. Delete
@@ -179,7 +189,9 @@ and ranked player-observed candidates, `navigation_updates.jsonl`, `run.json`,
 rendered room maps with exact guess boxes and learned portal-role badges. A
 `telemetry_diagnostics.json` file records packet counts, rejected/out-of-order
 parts, and the latest v9 sequence health. Logs stay open and flush in small batches rather than
-reopening a file on every step.
+reopening a file on every step. `speed_diagnostics.json` and each prediction
+record include the requested/detected multiplier, synchronization source,
+packet age, effective delays, and loop timing.
 
 `--live` is intentionally required every time. At startup, the controller looks
 for `deltarune` in both the executable name and the visible window title,
@@ -213,12 +225,41 @@ On Windows, you can instead double-click `Start AI GUI.bat` in the project
 folder. It uses the project virtual environment when available, then falls back
 to the installed `py` or `python` command.
 
-The **Live input** checkbox is off by default. Enable it before pressing
-**Start AI** when you want controls sent to Deltarune; leave it off for a dry
-run. The GUI has separate plain-language AI decision and telemetry output panes
-and a live learned map. Repeated identical decisions are condensed so changes
-of goal, path checks, exit searches, interactions, and loop recovery stand out.
-Dark mode is enabled by default and can be toggled from the run controls.
+The default interface is a custom-framed PySide6 operator console. The previous
+Tk interface remains available for one transition release with:
+
+```powershell
+python -m deltarune_agent gui --legacy
+```
+
+The sidebar separates **Live Map**, **Runs**, **Profiles**, **Learning**,
+**Logs**, and **Settings**. Live Map keeps the remembered room scene dominant
+and places the current action, plain-language reason, AI leads, selection
+details, room summary, and map legend in a fixed inspector beside it. This
+prevents evidence text from covering the map and keeps every lead aligned with
+the exact scene coordinate it describes. Repeated decisions are condensed so
+goal changes, path checks, exit searches, interactions, and loop recovery stand
+out.
+
+The **Live input** checkbox remains off by default. Enable it before pressing
+**Start AI** to send controls to Deltarune; leave it off for a safe dry run. The
+speed selector defaults to **Auto**. Its status shows game speed, effective AI
+speed, and synchronization source, while F8, F9, and F10 target only the
+Deltarune window and mirror the mod's toggle/decrease/increase controls.
+
+**Runs** reads small summaries first and loads bounded tails of large event and
+prediction files in a worker thread. **Profiles** keeps learned memory and run
+history isolated. **Learning** edits validated reinforcement settings. **Logs**
+filters readable decisions, telemetry, build notices, and raw runtime output
+without replacing the complete artifacts saved on disk.
+
+**Settings** provides Castle Town, Cyber City, Hometown Sunset, and an
+artwork-free Operator theme. Backgrounds support PNG, JPEG, WebP, GIF, MP4,
+WebM, and MKV files with cover/contain/stretch modes, dimming, optional
+animation, pointer parallax, and reduced-motion controls. Custom theme JSON can
+be validated and imported from the same page. The two bundled backgrounds were
+provided by the project owner and are documented in `THIRD_PARTY_ASSETS.md`;
+select Operator when no artwork is desired.
 The map loads persistent navigation and scene memory, follows the current room
 by default, and shows the actual camera pixels the AI has seen behind visited
 cells, observed paths, weighted blocked edges, unconfirmed visual guesses,
@@ -243,8 +284,8 @@ return/backtrack, `L` loop-suppressed, and `?` not learned yet. A newly visited
 room alone never earns a progression label. Nearby transition samples combine
 into one aperture, while the destination spawn stays an arrival observation
 rather than another exit. Click a mapped cell to inspect its visit count, wall confidence,
-learned interaction approaches, and warp destination. The **AI guesses**,
-**Selected area**, and **Map key** tabs keep these details outside the pannable
+learned interaction approaches, and warp destination. The **AI leads**,
+**Selection**, **Room**, and **Map key** tabs keep these details outside the pannable
 scene so map art cannot cover the text. The **Map data** menu can clear all
 learned map data or rebuild only remembered scene images.
 Remembered scene tiles use four captured pixels per in-game world pixel and
@@ -273,6 +314,16 @@ authoritative overworld/battle mode to
 `127.0.0.1:42069`. See its README for the backup-first installation procedure.
 It deliberately does not look up or transmit nearby interactable objects.
 The controller listens automatically; use `--no-telemetry` to run vision-only.
+
+The separate mod in `mods/speed/` starts at 2x, supports 1x through 10x, and
+controls the whole GameMaker simulation without changing audio pitch. Enable
+its v1.2.0 Chapters 1-5 DeltaMod package beside the separate telemetry v9.1.0
+package. Both releases target Steam build 24484059 (Chapter 5 v0.0.253).
+Multi-code-patch merging requires G3MTool 1.2.5 or newer; the included
+backup-first updater in `mods/speed/tools/` replaces DeltaMod 2.0.1's affected
+1.2.1 merge tool without modifying Deltarune. Optional per-chapter speed
+archives and a manual UndertaleModTool script are included. There is no
+combined package.
 
 After installing the patch on one chapter, test its output without controls:
 

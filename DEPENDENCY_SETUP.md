@@ -1,6 +1,6 @@
 # Automatic dependency setup
 
-The Windows launcher now owns the project environment. A fresh machine no longer needs manual `venv`, `pip`, Pillow, PyAutoGUI, or other branch-declared dependency setup.
+The Windows launcher now owns the project environment. A fresh machine no longer needs manual `venv`, `pip`, Pillow, PyAutoGUI, or PySide6 setup.
 
 ## Normal use
 

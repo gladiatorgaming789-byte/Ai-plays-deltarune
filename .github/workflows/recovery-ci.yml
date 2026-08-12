@@ -1,0 +1,96 @@
+name: Recovery CI
+
+on:
+  push:
+    branches:
+      - development
+      - recovery/**
+  pull_request:
+    branches:
+      - development
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
+
+      - name: Compile all Python files
+        run: python -m compileall -q deltarune_agent tests
+
+      - name: Import every library module
+        shell: pwsh
+        run: |
+          @'
+          import importlib
+          import pkgutil
+          import deltarune_agent
+
+          executable_modules = {"deltarune_agent.__main__"}
+          failures = []
+          for module in pkgutil.walk_packages(
+              deltarune_agent.__path__, deltarune_agent.__name__ + "."
+          ):
+              if module.name in executable_modules:
+                  continue
+              try:
+                  importlib.import_module(module.name)
+              except BaseException as exc:
+                  failures.append(f"{module.name}: {type(exc).__name__}: {exc}")
+          if failures:
+              raise SystemExit("\n".join(failures))
+          '@ | python -
+
+      - name: Validate CLI startup
+        shell: pwsh
+        run: |
+          python -m deltarune_agent --help
+          python -m deltarune_agent run --help
+          python -m deltarune_agent telemetry --help
+          python -m deltarune_agent replay --help
+
+      - name: Check Run 20 portal and doorway behavior
+        run: >-
+          python -m pytest -q tests/test_run20_run_analysis_fixes.py
+          -k "post_entry_escape or doorway"
+
+      - name: Check Run 20 visual target behavior
+        run: >-
+          python -m pytest -q tests/test_run20_run_analysis_fixes.py
+          -k "one_sided"
+
+      - name: Check Run 20 reward and reporting behavior
+        run: >-
+          python -m pytest -q tests/test_run20_run_analysis_fixes.py
+          -k "automatic_progress or structured_progress or loop_diagnostics"
+
+      - name: Check Run 20 emergency stop behavior
+        run: >-
+          python -m pytest -q tests/test_run20_run_analysis_fixes.py
+          -k "mouse_corner"
+
+      - name: Run tests
+        run: python -m pytest -q

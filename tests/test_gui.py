@@ -8,6 +8,7 @@ from deltarune_agent.gui import (
     WallMapModel,
     decision_parts,
     format_ai_decision,
+    format_speed_status,
     format_telemetry_event,
     warp_role_badge,
     visual_guess_entries,
@@ -108,7 +109,44 @@ def test_dialogue_event_maps_player_position_not_writer_position():
 
 
 def test_gui_is_available_as_a_controller_command():
-    assert build_parser().parse_args(["gui"]).command == "gui"
+    default = build_parser().parse_args(["gui"])
+    legacy = build_parser().parse_args(["gui", "--legacy"])
+
+    assert default.command == "gui"
+    assert default.legacy is False
+    assert legacy.legacy is True
+
+
+def test_run_speed_defaults_to_auto_and_accepts_manual_override():
+    assert build_parser().parse_args(["run"]).speed == "auto"
+    assert build_parser().parse_args(["run", "--speed", "10"]).speed == "10"
+
+
+def test_speed_status_distinguishes_sync_manual_and_fallback():
+    assert format_speed_status(
+        {
+            "game_multiplier": 2,
+            "effective_multiplier": 2,
+            "source": "telemetry",
+            "synchronized": True,
+        }
+    ) == "Game: 2x | AI: 2x | synchronized"
+    assert "manual override" in format_speed_status(
+        {
+            "game_multiplier": 2,
+            "effective_multiplier": 3,
+            "source": "manual",
+            "synchronized": False,
+        }
+    )
+    assert "safe 1x fallback" in format_speed_status(
+        {
+            "game_multiplier": 4,
+            "effective_multiplier": 1,
+            "source": "safe_fallback",
+            "synchronized": False,
+        }
+    )
 
 
 def test_transient_unknown_room_does_not_replace_visible_map_room():

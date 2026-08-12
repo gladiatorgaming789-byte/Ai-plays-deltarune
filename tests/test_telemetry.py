@@ -6,6 +6,7 @@ from deltarune_agent.telemetry import (
     fuse_perception,
     merge_samples,
     parse_packet,
+    parse_speed_packet,
 )
 
 
@@ -25,6 +26,57 @@ def test_parses_gamemaker_header_and_payload():
     assert sample is not None
     assert sample.room_name == "room_home"
     assert sample.x == 120.5
+
+
+def test_parses_speed_announcement_with_gamemaker_header():
+    sample = parse_speed_packet(
+        b"\x00\x01DRSPEED|1|multiplier=2|base_fps=30|target_fps=60|end\x00",
+        received_at=10.0,
+    )
+
+    assert sample is not None
+    assert sample.multiplier == 2
+    assert sample.base_fps == 30
+    assert sample.target_fps == 60
+    assert sample.received_at == 10.0
+
+
+def test_parses_ten_x_speed_announcement():
+    sample = parse_speed_packet(
+        b"DRSPEED|1|multiplier=10|base_fps=30|target_fps=300|end",
+        received_at=20.0,
+    )
+
+    assert sample is not None
+    assert sample.multiplier == 10
+    assert sample.target_fps == 300
+
+
+def test_rejects_inconsistent_speed_announcement():
+    assert (
+        parse_speed_packet(
+            b"DRSPEED|1|multiplier=4|base_fps=30|target_fps=60|end"
+        )
+        is None
+    )
+
+
+def test_receiver_does_not_count_speed_announcement_as_invalid_telemetry():
+    receiver = TelemetryReceiver.__new__(TelemetryReceiver)
+    receiver.socket = _PacketSocket(
+        [b"DRSPEED|1|multiplier=2|base_fps=30|target_fps=60|end"]
+    )
+    receiver.latest = None
+    receiver.latest_speed = None
+    receiver.by_mode = {}
+    receiver.overworld_trace = []
+
+    assert receiver.poll() is None
+    assert receiver.latest_speed is not None
+    assert receiver.latest_speed.multiplier == 2
+    diagnostics = receiver.diagnostics()
+    assert diagnostics["invalid_packets"] == 0
+    assert diagnostics["speed_packets"] == 1
 
 
 def test_overworld_telemetry_overrides_false_battle():
@@ -394,6 +446,8 @@ def test_receiver_keeps_one_ordered_trace_sample_per_v9_sequence():
         "unstable_room_packets": 0,
         "merged_layer_packets": 2,
         "out_of_order_packets": 0,
+        "speed_packets": 0,
+        "latest_speed": None,
         "latest_version": 9,
         "latest_sequence": 32,
         "latest_parts": ["core"],

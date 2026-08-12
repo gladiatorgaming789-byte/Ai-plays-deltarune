@@ -7,7 +7,7 @@ from tkinter import messagebox, ttk
 from .build_status import BuildStatus
 from .gui import AgentGUI, WallMapModel
 from .profile_panel import ProfileBuildPanel
-from .profiles import MigrationResult, Profile, ProfileStore
+from .run19_profiles import MigrationResult, Profile, ProfileStore
 from .reinforcement_panel import ReinforcementSettingsPanel
 from .version import AGENT_REVISION
 

@@ -10,7 +10,9 @@ from .perception import GameState, Perception
 
 
 MAGIC = b"DRTEL|"
+SPEED_MAGIC = b"DRSPEED|"
 PROTOCOL_VERSION = 9
+SPEED_PROTOCOL_VERSION = 1
 SPECIALIZED_MAX_AGE = 0.20
 LEGACY_LAYER_MERGE_AGE = 0.30
 SESSION_RESTART_AGE = 1.0
@@ -29,6 +31,30 @@ V9_PARTS = {
     "render",
     "timing",
 }
+
+
+@dataclass(frozen=True)
+class SpeedSample:
+    multiplier: float
+    base_fps: float
+    target_fps: float
+    received_at: float
+    version: int = SPEED_PROTOCOL_VERSION
+
+    def is_fresh(self, now: float | None = None, max_age: float = 2.0) -> bool:
+        return (time.monotonic() if now is None else now) - self.received_at <= max_age
+
+    def as_dict(self, now: float | None = None) -> dict[str, Any]:
+        return {
+            "version": self.version,
+            "multiplier": self.multiplier,
+            "base_fps": self.base_fps,
+            "target_fps": self.target_fps,
+            "packet_age_seconds": max(
+                0.0,
+                (time.monotonic() if now is None else now) - self.received_at,
+            ),
+        }
 
 
 def facing_from_sprite(sprite_name: str | None) -> str | None:
@@ -476,6 +502,55 @@ def parse_packet(packet: bytes, received_at: float | None = None) -> TelemetrySa
     return _with_player_fields(sample)
 
 
+def parse_speed_packet(
+    packet: bytes,
+    received_at: float | None = None,
+) -> SpeedSample | None:
+    """Parse one independently broadcast DRSPEED announcement."""
+    start = packet.find(SPEED_MAGIC)
+    if start < 0:
+        return None
+    text = packet[start:].rstrip(b"\x00").decode("utf-8", errors="replace")
+    fields_ = text.split("|")
+    if len(fields_) < 6 or fields_[0] != "DRSPEED":
+        return None
+    try:
+        version = int(fields_[1])
+    except ValueError:
+        return None
+    if version != SPEED_PROTOCOL_VERSION:
+        return None
+
+    values: dict[str, str] = {}
+    for field in fields_[2:]:
+        if field == "end":
+            break
+        key, separator, value = field.partition("=")
+        if separator and key:
+            values[key] = value
+    try:
+        multiplier = float(values["multiplier"])
+        base_fps = float(values["base_fps"])
+        target_fps = float(values["target_fps"])
+    except (KeyError, ValueError, OverflowError):
+        return None
+    if (
+        not all(math.isfinite(value) for value in (multiplier, base_fps, target_fps))
+        or not 1 <= multiplier <= 10
+        or base_fps <= 0
+        or target_fps <= 0
+        or abs(target_fps - base_fps * multiplier) > max(1.0, base_fps * 0.05)
+    ):
+        return None
+    return SpeedSample(
+        multiplier=multiplier,
+        base_fps=base_fps,
+        target_fps=target_fps,
+        received_at=time.monotonic() if received_at is None else received_at,
+        version=version,
+    )
+
+
 def _same_sample_generation(
     previous: TelemetrySample,
     current: TelemetrySample,
@@ -651,6 +726,7 @@ class TelemetryReceiver:
         self.socket.bind(("127.0.0.1", port))
         self.socket.setblocking(False)
         self.latest: TelemetrySample | None = None
+        self.latest_speed: SpeedSample | None = None
         self.by_mode: dict[str, TelemetrySample] = {}
         self.overworld_trace: list[TelemetrySample] = []
         self.received_packets = 0
@@ -659,6 +735,7 @@ class TelemetryReceiver:
         self.unstable_room_packets = 0
         self.merged_layer_packets = 0
         self.out_of_order_packets = 0
+        self.speed_packets = 0
 
     def poll(self) -> TelemetrySample | None:
         self.overworld_trace = []
@@ -668,6 +745,11 @@ class TelemetryReceiver:
             except BlockingIOError:
                 break
             self.received_packets = getattr(self, "received_packets", 0) + 1
+            speed = parse_speed_packet(packet)
+            if speed is not None:
+                self.latest_speed = speed
+                self.speed_packets = getattr(self, "speed_packets", 0) + 1
+                continue
             raw = parse_packet(packet)
             if raw is None:
                 self.invalid_packets = getattr(self, "invalid_packets", 0) + 1
@@ -759,6 +841,12 @@ class TelemetryReceiver:
                 self,
                 "out_of_order_packets",
                 0,
+            ),
+            "speed_packets": getattr(self, "speed_packets", 0),
+            "latest_speed": (
+                self.latest_speed.as_dict()
+                if getattr(self, "latest_speed", None) is not None
+                else None
             ),
             "latest_version": latest.version if latest is not None else None,
             "latest_sequence": (

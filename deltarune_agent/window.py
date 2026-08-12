@@ -44,6 +44,9 @@ VIRTUAL_KEYS = {
     "z": 0x5A,
     "x": 0x58,
     "c": 0x43,
+    "f8": 0x77,
+    "f9": 0x78,
+    "f10": 0x79,
 }
 EXTENDED_KEYS = {"left", "up", "right", "down"}
 

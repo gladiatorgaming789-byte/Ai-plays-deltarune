@@ -130,6 +130,22 @@ class Run14Explorer(Run13Explorer):
         record = self.screen_regions.get(key)
         token = self._probe_token(probe)
         if record is None:
+            # A path Kris has actually walked to the edge of is player-observed
+            # geometry even when no screenshot heuristic happened to create a
+            # visual-region record first. Seed the minimal evidence record so
+            # the base implementation can promote it without depending on
+            # unrelated persisted map data.
+            self.screen_regions[key] = {
+                "guess_state": "proposed",
+                "completed_tests": 0,
+                "inspections": 0,
+                "failed_approaches": 0,
+                "approach_attempts": 0,
+                "guess_confidence": 0.62,
+                "evidence_summary": (
+                    "observed walked path reaches this room-region boundary"
+                ),
+            }
             super()._remember_path_continuation(probe)
             created = self.screen_regions.get(key)
             if created is not None and created.get("path_continuation"):

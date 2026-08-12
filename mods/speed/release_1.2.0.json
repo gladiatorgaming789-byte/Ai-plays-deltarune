@@ -1,0 +1,10 @@
+{
+  "speed_mod_version": "1.2.0",
+  "status": "withdrawn",
+  "withdrawn_on": "2026-08-06",
+  "reason": "When enabled beside telemetry v9.1.0, independently compiled GameMaker patches can corrupt shared variable-table indexes. The observed runtime failure incorrectly relocated bbox_top into gml_Object_obj_time_Step_1.",
+  "affected_packages": "All v1.2.0 G3MTool/DeltaMod ZIPs",
+  "replacement": "Direct-CSX package builder introduced for speed v1.3.0",
+  "replacement_verification": "Pending runtime validation against refreshed clean Deltarune chapter files",
+  "recovery": "Disable both old packages and rebuild DeltaMod protected copies from clean originals before testing a replacement."
+}

@@ -73,8 +73,8 @@ global." + tickName + @" += 1;
 global." + sequenceName + @" += 1;
 var _ai_sequence = global." + sequenceName + @";
 var _ai_prefix = ""DRTEL|9|" + mode + @"|"" + string(room) + ""|"" +
-    room_get_name(room) + ""|"" + string(x) + ""|"" + string(y) + ""|"" +
-    object_get_name(object_index) + ""|"";
+    room_get_name(room) + ""|"" + string(self.x) + ""|"" +
+    string(self.y) + ""|"" + object_get_name(self.object_index) + ""|"";
 
 // Send room/position every drawn frame so an observed room transition retains
 // the source position immediately before the warp. Camera, control, collision,
@@ -97,9 +97,9 @@ buffer_delete(_ai_core_buffer);
     // A sequence number lets the Python receiver merge this with the matching
     // core packet without mixing two frames together.
     var _ai_sprite = """";
-    if (sprite_index >= 0)
+    if (self.sprite_index >= 0)
     {
-        _ai_sprite = sprite_get_name(sprite_index);
+        _ai_sprite = sprite_get_name(self.sprite_index);
     }
     var _ai_camera_x = 0;
     var _ai_camera_y = 0;
@@ -119,10 +119,11 @@ buffer_delete(_ai_core_buffer);
     var _ai_motion_message = _ai_prefix + ""part=motion|seq="" +
         string(_ai_sequence) + ""|room_width="" + string(room_width) +
         ""|room_height="" + string(room_height) + ""|sprite="" + _ai_sprite +
-        ""|image_index="" + string(image_index) + ""|direction="" +
-        string(direction) + ""|hspeed="" + string(hspeed) + ""|vspeed="" +
-        string(vspeed) + ""|speed="" + string(speed) + ""|image_speed="" +
-        string(image_speed) + ""|camera_x="" + string(_ai_camera_x) +
+        ""|image_index="" + string(self.image_index) + ""|direction="" +
+        string(self.direction) + ""|hspeed="" + string(self.hspeed) +
+        ""|vspeed="" + string(self.vspeed) + ""|speed="" +
+        string(self.speed) + ""|image_speed="" + string(self.image_speed) +
+        ""|camera_x="" + string(_ai_camera_x) +
         ""|camera_y="" + string(_ai_camera_y) + ""|camera_width="" +
         string(_ai_camera_width) + ""|camera_height="" +
         string(_ai_camera_height) + ""|camera_angle="" +
@@ -142,10 +143,11 @@ buffer_delete(_ai_core_buffer);
     // failure in one optional group from corrupting packets already sent.
     var _ai_collision_buffer = buffer_create(384, buffer_grow, 1);
     var _ai_collision_message = _ai_prefix + ""part=collision|seq="" +
-        string(_ai_sequence) + ""|instance_id="" + string(id) +
-        ""|bbox_left="" + string(bbox_left) + ""|bbox_top="" + string(bbox_top) +
-        ""|bbox_right="" + string(bbox_right) + ""|bbox_bottom="" +
-        string(bbox_bottom) + ""|end"";
+        string(_ai_sequence) + ""|instance_id="" + string(self.id) +
+        ""|bbox_left="" + string(self.bbox_left) + ""|bbox_top="" +
+        string(self.bbox_top) + ""|bbox_right="" +
+        string(self.bbox_right) + ""|bbox_bottom="" +
+        string(self.bbox_bottom) + ""|end"";
     buffer_write(_ai_collision_buffer, buffer_string, _ai_collision_message);
     network_send_udp(
         global.__ai_tel_socket,
@@ -160,19 +162,20 @@ buffer_delete(_ai_core_buffer);
     var _ai_sprite_height = 0;
     var _ai_sprite_xoffset = 0;
     var _ai_sprite_yoffset = 0;
-    if (sprite_index >= 0)
+    if (self.sprite_index >= 0)
     {
-        _ai_sprite_width = sprite_get_width(sprite_index);
-        _ai_sprite_height = sprite_get_height(sprite_index);
-        _ai_sprite_xoffset = sprite_get_xoffset(sprite_index);
-        _ai_sprite_yoffset = sprite_get_yoffset(sprite_index);
+        _ai_sprite_width = sprite_get_width(self.sprite_index);
+        _ai_sprite_height = sprite_get_height(self.sprite_index);
+        _ai_sprite_xoffset = sprite_get_xoffset(self.sprite_index);
+        _ai_sprite_yoffset = sprite_get_yoffset(self.sprite_index);
     }
     var _ai_render_buffer = buffer_create(512, buffer_grow, 1);
     var _ai_render_message = _ai_prefix + ""part=render|seq="" +
-        string(_ai_sequence) + ""|depth="" + string(depth) +
-        ""|image_xscale="" + string(image_xscale) + ""|image_yscale="" +
-        string(image_yscale) + ""|image_alpha="" + string(image_alpha) +
-        ""|visible="" + string(visible) + ""|sprite_width="" +
+        string(_ai_sequence) + ""|depth="" + string(self.depth) +
+        ""|image_xscale="" + string(self.image_xscale) +
+        ""|image_yscale="" + string(self.image_yscale) +
+        ""|image_alpha="" + string(self.image_alpha) +
+        ""|visible="" + string(self.visible) + ""|sprite_width="" +
         string(_ai_sprite_width) + ""|sprite_height="" +
         string(_ai_sprite_height) + ""|sprite_xoffset="" +
         string(_ai_sprite_xoffset) + ""|sprite_yoffset="" +

@@ -89,3 +89,9 @@ def test_blank_identifier_does_not_guess_among_unrelated_windows():
         match = window_module.find_window("")
 
     assert match is None
+
+
+def test_speed_hotkeys_are_available_for_targeted_window_input():
+    assert window_module.VIRTUAL_KEYS["f8"] == 0x77
+    assert window_module.VIRTUAL_KEYS["f9"] == 0x78
+    assert window_module.VIRTUAL_KEYS["f10"] == 0x79
