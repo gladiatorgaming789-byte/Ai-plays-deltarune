@@ -12,6 +12,13 @@ The replacement is the direct-CSX telemetry v9.2.0 package:
 
 `Telemetry-All-Chapters-DeltaMod-CSX-v9.2.0.zip`
 
+On a fresh Git clone this ZIP is materialized locally from the committed
+`AiTelemetry.csx` source by `mods/build_validated_packages.py`. `Start AI GUI.bat`
+runs that materializer automatically after dependency setup and before the GUI.
+The generated ZIP is accepted only if both its byte size and SHA-256 exactly
+match the checked-in v9.2.0 release record; otherwise it is deleted and startup
+stops rather than exposing an unverified package.
+
 The package version changed for the new installation format; the localhost wire
 protocol remains `DRTEL|9|` / protocol v9, so the Python receiver does not need
 a protocol migration.
@@ -33,6 +40,8 @@ Candidate SHA-256:
 
 `8464461d0e291f6a67b827be2cb4f06f2218a1ef8976ada9905b58c8b3e46255`
 
+Expected size: `15293` bytes.
+
 This is still a **runtime-test candidate** until it has been imported into the
 current DeltaMod and launched in the real game alongside speed v1.3.0.
 
@@ -40,9 +49,10 @@ current DeltaMod and launched in the real game alongside speed v1.3.0.
 
 1. Disable and remove the withdrawn speed/telemetry packages.
 2. Make DeltaMod rebuild its protected chapter copies from clean originals.
-3. Import the v9.2.0 direct-CSX candidate.
-4. Test telemetry alone with the controller in observation-only mode.
-5. Then enable both candidates and launch every chapter.
+3. Run `Start AI GUI.bat`, or run `.venv\Scripts\python.exe mods\build_validated_packages.py` manually, to materialize and verify the package.
+4. Import the v9.2.0 direct-CSX candidate.
+5. Test telemetry alone with the controller in observation-only mode.
+6. Then enable both candidates and launch every chapter.
 
-The source installer is `../AiTelemetry.csx`; the reproducible package builder
-is `../tools/build_packages.py`.
+The source installer is `../AiTelemetry.csx`; the reproducible package builder is
+`../tools/build_packages.py`.
