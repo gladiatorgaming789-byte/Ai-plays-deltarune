@@ -27,9 +27,11 @@ The legacy `hypothesis` field is exposed to the existing routing policy only whe
 
 ### Evidence-purity rule
 
-The currently exposed legacy `hypothesis` is **not evidence for itself**. Two records with identical observed geometry/outcomes produce the same v3 belief distribution even if an older routing layer happened to label one `possible_character` and the other `possible_interactable`. A semantic decision stays committed only while the underlying observed evidence continues to justify it.
+The currently exposed legacy `hypothesis` is **not evidence for itself**. Two records with identical observed geometry/outcomes produce the same v3 belief distribution even if an older routing layer happened to label one `possible_character` and the other `possible_interactable`. The old label also cannot, by itself, keep a feature in `unknown_but_interesting`. A semantic decision stays committed only while the underlying observed evidence continues to justify it.
 
 The calibrated semantic threshold is 0.40 with a 0.07 lead over the next semantic interpretation. With the current evidence model, a compact one-side 1–2-cell obstruction can become `possible_interactable`, while a broader one-side four-cell obstruction normally remains unresolved and is investigated before commitment.
+
+Raw non-semantic visual structure can still keep a feature interesting before collision geometry exists: a sufficiently salient feature with real world-space extent and visual structure can become `unknown_but_interesting` without being called a character, object, or exit.
 
 ## 3. `unknown_but_interesting`
 
@@ -43,7 +45,9 @@ Confirmed/rejected/retired lifecycle states remain authoritative; v3 does not si
 
 V3 keeps up to ten bounded world-space observation samples per guess, including the world anchor and available camera viewpoint. With two or more distinct viewpoints it measures how much the feature's world anchor drifts.
 
-A stable world-space anchor is evidence that the observation represents one coherent feature. Large anchor drift is contradictory evidence and raises the scenery/artifact explanation. A single viewpoint is intentionally treated as unknown rather than stable.
+The legacy routing memory intentionally freezes the clearest remembered anchor, so v3 does **not** use that stabilized value as its live multi-view measurement when a current observation is available. A raw-observation bridge wraps the final Run15 screen analyzer and captures the current per-view focus/feature geometry before the legacy memory stabilizer runs. The v3 sample records whether its anchor came from `raw_observation` or the historical `stable_memory_fallback`.
+
+A stable raw world-space anchor is evidence that the observation represents one coherent feature. Large raw-anchor drift is contradictory evidence and raises the scenery/artifact explanation. A single viewpoint is intentionally treated as unknown rather than stable.
 
 ## 5. Information-gain probing
 
@@ -65,7 +69,7 @@ It cannot replace a learned warp, mapped frontier, strong exit, retryable intera
 
 The existing `WorldModel` schema remains readable. Guessing v3 wraps the already-installed Run16 persistence path and injects only optional extra fields into each saved screen-region record. Old memories therefore remain valid and are enriched lazily when loaded/observed.
 
-An order-safe bootstrap captures the persistence/planner methods at installation time, preventing an early developer/test import from bypassing later persistence extensions. The evidence-only belief calibration is installed before those wrappers become active.
+An order-safe bootstrap captures the persistence/planner methods at installation time, preventing an early developer/test import from bypassing later persistence extensions. The evidence-only belief calibration is installed before those wrappers become active. The raw-view bridge is installed only after Run15 installs the final visual analyzer, preserving analyzer ordering.
 
 ## Diagnostics
 
@@ -78,7 +82,7 @@ Run summaries now expose:
 - `guess_evidence_ledger_entries`
 - `low_multiview_consistency_guesses`
 
-Screen-region map updates also include the v3 belief/ledger/consistency/probe fields so post-run analysis can inspect the AI's reasoning lifecycle.
+Screen-region map updates also include the v3 belief/ledger/consistency/probe fields so post-run analysis can inspect the AI's reasoning lifecycle. The first foundation keeps unresolved guesses in the recorded diagnostics/map-update stream; the legacy operator guess-list remains focused on semantic guesses until v3 has real-run calibration data.
 
 ## Validation targets
 
@@ -88,7 +92,10 @@ Focused tests cover:
 - strong mapped-path evidence still committing to an exit;
 - belief revision after stronger observed geometry;
 - the legacy routing label not feeding back into the next belief calculation;
+- the legacy label alone not keeping a feature structurally interesting;
+- raw salient visual structure remaining investigable without a semantic label;
 - compact one-side evidence versus broader ambiguous one-side geometry;
+- raw current anchors overriding a deliberately frozen legacy routing anchor;
 - stable versus drifting multi-view anchors;
 - bounded information-gain probing;
 - information probing replacing only blind fallback;
