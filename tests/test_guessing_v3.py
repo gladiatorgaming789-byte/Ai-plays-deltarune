@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 from deltarune_agent.guessing_v3 import (
     BELIEF_KINDS,
@@ -10,9 +12,7 @@ from deltarune_agent.guessing_v3 import (
     information_gain_probe_plan,
     refresh_guess_record_v3,
 )
-from deltarune_agent.guessing_v3_bootstrap import install_guessing_v3
 from deltarune_agent.run4_explorer import Run4Explorer
-from deltarune_agent.world_model import WorldModel
 
 
 def _ambiguous_record() -> dict[str, object]:
@@ -202,31 +202,57 @@ def test_information_gain_probes_are_bounded() -> None:
     assert information_gain_probe_plan(explorer, room, (4, 8)) is None
 
 
-def test_v3_metadata_survives_world_model_save_and_reload(tmp_path: Path) -> None:
-    # The bootstrap captures whichever persistence layers are active in this
-    # process, so the test is valid whether Run16 was installed earlier or not.
-    install_guessing_v3()
+def test_v3_metadata_survives_production_order_save_and_reload(tmp_path: Path) -> None:
+    # Run the persistence integration in a fresh interpreter so this test never
+    # changes global monkey-patched methods for the rest of the pytest process.
     path = tmp_path / "navigation.json"
-    model = WorldModel(path)
-    key = ("room_test", 2, 3)
-    record = _ambiguous_record()
-    refresh_guess_record_v3(record, region=(2, 3))
-    model.screen_regions[key] = record
-
-    model.save()
+    script = f"""
+from pathlib import Path
+from deltarune_agent.run16_semantics import install_run16_semantics
+install_run16_semantics()
+from deltarune_agent.guessing_v3_bootstrap import install_guessing_v3
+install_guessing_v3()
+from deltarune_agent.guessing_v3 import refresh_guess_record_v3
+from deltarune_agent.world_model import WorldModel
+path = Path({str(path)!r})
+model = WorldModel(path)
+key = ('room_test', 2, 3)
+record = {{
+    'views': 3,
+    'independent_views': 2,
+    'interest': 0.24,
+    'hypothesis': None,
+    'guess_state': 'proposed',
+    'entity_approach_directions': 1,
+    'obstruction_target_cells': 4,
+    'last_seen_sequence': 1,
+    'last_seen_step': 10,
+    'anchor_world': [100.0, 100.0],
+    'evidence_viewpoints': [[0, 0]],
+}}
+refresh_guess_record_v3(record, region=(2, 3))
+model.screen_regions[key] = record
+model.save()
+loaded = WorldModel.load(path)
+restored = loaded.screen_regions[key]
+assert restored['guessing_version'] == 3
+assert restored['guess_semantic_state'] == 'unknown_but_interesting'
+assert restored['guess_beliefs']
+assert restored['guess_evidence_ledger']
+"""
+    subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).resolve().parents[1],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
     raw = json.loads(path.read_text(encoding="utf-8"))
     stored = raw["screen_regions"][0]
     assert stored["guessing_version"] == 3
     assert stored["guess_semantic_state"] == UNKNOWN_BUT_INTERESTING
     assert isinstance(stored["guess_beliefs"], dict)
     assert stored["guess_evidence_ledger"]
-
-    loaded = WorldModel.load(path)
-    restored = loaded.screen_regions[key]
-    assert restored["guessing_version"] == 3
-    assert restored["guess_semantic_state"] == UNKNOWN_BUT_INTERESTING
-    assert restored["guess_beliefs"] == stored["guess_beliefs"]
-    assert restored["guess_evidence_ledger"]
 
 
 def test_evidence_ledger_is_bounded() -> None:
