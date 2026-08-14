@@ -55,9 +55,8 @@ def main() -> None:
         _launch_gui(argv[1:])
         return
     if argv and argv[0] == "run-doctor":
-        # Run Doctor remains a lightweight artifact-analysis route. v0.4 adds
-        # historical comparison without importing live gameplay machinery.
-        from .run_doctor_compare import cli
+        # Trusted v1.0 stays on the lightweight, read-only artifact path.
+        from .run_doctor_release import cli
 
         raise SystemExit(cli(argv[1:]))
 
@@ -66,7 +65,9 @@ def main() -> None:
 
     args = build_parser().parse_args(argv)
     if args.command == "run":
-        from .run19_runner import run
+        # Standard gameplay runs install the failure-isolated automatic Doctor
+        # hook before EpisodeTracker is created.
+        from .run_doctor_runner import run
 
         run(args)
     elif args.command == "telemetry":
