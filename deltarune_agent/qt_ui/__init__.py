@@ -1,6 +1,6 @@
 """Optional PySide6 operator console.
 
-The package deliberately keeps its public import cheap.  Projects that only use
+The package deliberately keeps its public import cheap. Projects that only use
 the command-line runner must continue to work when the sizeable Qt dependency is
 not installed.
 """
@@ -21,6 +21,13 @@ def launch_qt_gui() -> int:
             "The Qt GUI needs PySide6. Install the project requirements and "
             "try again, or run `python -m deltarune_agent gui --legacy`."
         )
+
+    # Install optional page extensions before app.py imports the page classes.
+    # This keeps Automatic Run Doctor isolated from CLI-only imports.
+    from .run_doctor_extension import install_runs_page_extension
+
+    install_runs_page_extension()
+
     from .app import launch_qt_gui as _launch
 
     return _launch()
