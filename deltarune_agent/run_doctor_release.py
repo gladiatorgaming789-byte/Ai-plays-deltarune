@@ -11,9 +11,10 @@ from . import run_doctor as foundation
 from . import run_doctor_compare as comparison_engine
 from . import run_doctor_incidents as incident_engine
 from . import run_doctor_reasoning as reasoning_engine
+from . import run_doctor_calibration as calibration_engine
 
 
-RUN_DOCTOR_VERSION = "1.0.0"
+RUN_DOCTOR_VERSION = "1.0.1"
 
 
 def _historical_summary_value(run: foundation.NormalizedRun, key: str) -> int | None:
@@ -41,6 +42,25 @@ def _historical_summary_value(run: foundation.NormalizedRun, key: str) -> int | 
 # Install the corrected semantics at the trusted release boundary so historical
 # detector modules remain stable while v1 can analyze both artifact layouts.
 reasoning_engine._summary_value = _historical_summary_value
+
+
+# Preserve the pre-calibration analyzer so comparison and direct analysis can use
+# the same trusted calibration layer without changing the older v0.x modules.
+_RAW_INCIDENT_ANALYZE = incident_engine.analyze_run
+
+
+def _trusted_incident_analyze(
+    run: foundation.NormalizedRun,
+    thresholds: foundation.DoctorThresholds | None = None,
+) -> incident_engine.IncidentDoctorReport:
+    raw = _RAW_INCIDENT_ANALYZE(run, thresholds)
+    return calibration_engine.calibrate_incident_report(run, raw)
+
+
+# comparison_engine resolves incident_engine.analyze_run dynamically from the
+# shared module object, so patching the trusted release boundary keeps candidate
+# and baseline analysis consistent while leaving legacy detector modules intact.
+incident_engine.analyze_run = _trusted_incident_analyze
 
 
 def analyze_directory(
