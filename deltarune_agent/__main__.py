@@ -55,9 +55,9 @@ def main() -> None:
         _launch_gui(argv[1:])
         return
     if argv and argv[0] == "run-doctor":
-        # Run Doctor remains a lightweight artifact-analysis route. v0.3 adds
-        # incident correlation and health scoring without gameplay imports.
-        from .run_doctor_incidents import cli
+        # Run Doctor remains a lightweight artifact-analysis route. v0.4 adds
+        # historical comparison without importing live gameplay machinery.
+        from .run_doctor_compare import cli
 
         raise SystemExit(cli(argv[1:]))
 
