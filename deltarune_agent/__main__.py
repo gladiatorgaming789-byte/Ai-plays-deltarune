@@ -54,8 +54,14 @@ def main() -> None:
         _auto_update_gui(argv)
         _launch_gui(argv[1:])
         return
+    if argv and argv[0] == "run-doctor":
+        # Run Doctor is intentionally routed before the gameplay runtime so
+        # post-run analysis never needs PyAutoGUI, window capture, or input.
+        from .run_doctor import cli
 
-    # Non-GUI commands may load the full runtime, including PyAutoGUI.
+        raise SystemExit(cli(argv[1:]))
+
+    # Non-GUI gameplay commands may load the full runtime, including PyAutoGUI.
     from .runner import build_parser
 
     args = build_parser().parse_args(argv)
