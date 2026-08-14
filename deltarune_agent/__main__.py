@@ -55,9 +55,9 @@ def main() -> None:
         _launch_gui(argv[1:])
         return
     if argv and argv[0] == "run-doctor":
-        # Run Doctor is intentionally routed before the gameplay runtime so
-        # post-run analysis never needs PyAutoGUI, window capture, or input.
-        from .run_doctor import cli
+        # Run Doctor stays on the lightweight post-run path. Reasoning layers
+        # consume only saved artifacts and do not load gameplay input/capture.
+        from .run_doctor_reasoning import cli
 
         raise SystemExit(cli(argv[1:]))
 
