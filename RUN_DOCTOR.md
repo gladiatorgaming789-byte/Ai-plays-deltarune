@@ -1,6 +1,6 @@
 # Automatic Run Doctor
 
-Automatic Run Doctor is the project's read-only post-run diagnosis system. Trusted v1.0.1 analyzes recorded run artifacts after normal run finalization and reports likely reliability, perception, navigation, interaction, planning, telemetry, and timing problems without changing gameplay state.
+Automatic Run Doctor is the project's read-only post-run diagnosis system. Trusted v1.0.2 analyzes recorded run artifacts after normal run finalization and reports likely reliability, perception, navigation, interaction, planning, telemetry, and timing problems without changing gameplay state.
 
 ## Safety boundary
 
@@ -63,7 +63,8 @@ Comparisons are labeled `strong`, `moderate`, or `weak`. Weak comparisons produc
 
 - explicit no-frontier/blind-search streaks
 - repeated structured interactions with no response
-- unresolved observed character/interactable evidence correlated with blind search
+- actionable observed character/interactable evidence bypassed during blind search, correlated by exact room and recorded evidence lifecycle
+- known learned warps left unused during terminal room stalls
 - objective churn
 - unusually high evidence-filter/suppression pressure
 - missing/degraded telemetry
@@ -71,9 +72,9 @@ Comparisons are labeled `strong`, `moderate`, or `weak`. Weak comparisons produc
 
 ### Incident intelligence
 
-Overlapping findings are grouped into incidents so one failure does not become warning spam. Causal language is intentionally conservative. For example, overlapping capture degradation and blind search may be reported as a *plausible contributor* relationship, not proof of causation.
+Overlapping room-specific findings are grouped into incidents so one failure does not become warning spam. Causal language is intentionally conservative. For example, overlapping capture degradation and blind search may be reported as a *plausible contributor* relationship, not proof of causation.
 
-Run-level findings are context, not temporal bridges: a global low-visuality or suppression finding cannot glue otherwise unrelated room-specific intervals into one giant incident.
+Run-global findings are context rather than temporal events. Trusted v1.0.2 keeps unrelated global findings as separate incidents instead of merging them merely because both span the whole run.
 
 Health is scored separately for:
 
@@ -86,7 +87,7 @@ Health is scored separately for:
 
 ## v1.0.1 real-run calibration
 
-The original 4,656-event classroom-heavy Run 20 archive became available after v1.0 was released, so its automatic report was compared against a manual whole-run review and then used as a real calibration case.
+The original 4,656-event classroom-heavy Run 20 archive became available after v1.0 was released, so its automatic report was compared against a manual whole-run review and then used as the first real calibration case.
 
 The first v1.0 report correctly rediscovered the major classroom stall/blind-search problem, severe visual-capture degradation, unresolved observed entity evidence, and suspicious evidence-filter pressure. It also exposed several calibration defects:
 
@@ -96,14 +97,28 @@ The first v1.0 report correctly rediscovered the major classroom stall/blind-sea
 - the historical `objective_changes=100` value could be the old retained-history cap and therefore should not be treated as an exact count;
 - long room residence that later ended in a successful exit should be treated more cautiously than an end-of-run stall.
 
-Trusted v1.0.1 calibrates those cases using only recorded run evidence:
+Trusted v1.0.1 calibrated those cases using only recorded run evidence. Productive sustained movement, deliberate control-lock waits, and dialogue/cutscene confirms are no longer treated as stuck-action loops; historical high-speed verification gaps are surfaced; completed room residences are downgraded to efficiency signals when appropriate; and run-global findings no longer bridge unrelated room-specific incidents.
 
-- repeated movement is suppressed as a problem only when telemetry shows meaningful displacement or a room change; blocked/repeating movement with no meaningful progress remains a finding;
-- repeated `wait` during control lock and repeated `confirm` while advancing dialogue/cutscenes are treated as expected behavior;
-- historical high manual speed with no detected multiplier/DRSPEED verification receives a timing finding even when the old artifact format lacks `verification_state`;
-- the old objective-history cap is surfaced as an explicit uncertainty;
-- completed long-room residences are downgraded to efficiency signals when the run later exits and blind probing did not dominate the interval;
-- global findings no longer bridge unrelated room-specific incidents.
+## v1.0.2 multi-run calibration
+
+Two additional real runs, `20260814T033257.403Z` and `20260814T033501.085Z`, were reviewed against their automatic v1.0.1 reports and raw event/navigation histories.
+
+The new runs confirmed that v1.0.1's repeated-action calibration works: neither report recreated the old sustained-movement/wait/dialogue false-positive family. They also exposed four narrower issues:
+
+- the v0.2 unresolved-evidence detector still used the final navigation snapshot. In the 863-event run, every unresolved entity hypothesis was in `room_krishallway` while every no-frontier blind probe happened later in `room_krisroom`. In the 436-event run, some hypotheses cited by the final snapshot were not proposed until well after the earlier blind probes;
+- both runs ended in a long room residence after the agent had already recorded a successful warp out of that same room, but no terminal-stall action selected the learned warp. This is observed learned evidence that Doctor can diagnose without asserting the warp is the story route;
+- two unrelated run-global findings could still group together because both covered the whole run, even after globals were prevented from bridging room-specific incidents;
+- current-format `verification_state=unverified` high manual speed with zero DRSPEED packets was scored MEDIUM, while the equivalent historical-format condition was already calibrated to HIGH.
+
+Trusted v1.0.2 addresses those cases:
+
+- final-snapshot `unconsumed_observed_evidence` is replaced, when navigation history exists, by an exact lifecycle reconstruction. Evidence must be in the **same room**, must already have been recorded **before** the blind-probe decision, must still be in an actionable `proposed`/`approaching` zero-test state, and must overlap repeated blind probes before it becomes a scored finding;
+- terminal room stalls can emit `known_warp_underused_during_stall` only when a successful same-room warp was recorded before the stall began and no action in that interval selected a learned warp. The finding explicitly says the warp is an observed recovery option, not a proven progression route;
+- run-global findings are kept as separate incidents by default because whole-run temporal overlap is not meaningful causal evidence;
+- explicit current-format high manual speed with no DRSPEED confirmation is upgraded consistently with the historical-format calibration;
+- the Markdown banner now reports the actual trusted release version instead of the stale hard-coded `Trusted v1.0` label.
+
+The three archived real runs were used as a non-overfit replay check. The lifecycle rule removes the cross-room false correlation from the 863-event run and does not score the 436-event run's isolated one-step overlaps. It still identifies repeated same-room evidence-routing conflicts in earlier rooms of the original 4,656-event archive. The learned-warp rule fires on the two new terminal stalls but not on the original classroom terminal stall, where no learned warp out of that room existed in the recorded navigation history.
 
 These calibration rules remain diagnostic only. They do not teach the AI what route, object, dialogue option, or progression action is correct.
 
@@ -124,12 +139,14 @@ Analysis runs in `QThreadPool`; selecting or analyzing a run should not block th
 
 The loader tolerates partial/malformed JSONL where possible and reads both modern run summaries and older `run_report.policy_summary` counters. Historical runs are analyzed in place without migration or mutation.
 
+When detailed navigation-update history exists, v1.0.2 prefers exact room/time evidence reconstruction over the final navigation snapshot. Snapshot-only historical artifacts remain lower-confidence evidence and should not be used to claim an exact earlier evidence lifecycle.
+
 ## Validation model
 
-The regression suite includes both compact synthetic failure-pattern fixtures and calibration tests derived from observed behavior in the real archived Run 20. The real-run calibration specifically protects against productive sustained movement, deliberate control-lock waits, dialogue/cutscene confirms, historical speed-format gaps, the objective-history cap, and global-incident bridging.
+The regression suite includes compact synthetic failure-pattern fixtures plus calibration tests derived from real archived behavior. The v1.0.2 fixtures cover cross-room evidence rejection, future-evidence backdating, actionable same-room overlap, cooldown evidence, learned-warp availability before terminal re-entry, explicit learned-warp selection, current-format high-speed verification, and unrelated run-global incident separation.
 
 Fresh gameplay remains important because future runs can expose detector patterns that no existing archive contains. Confirmed false positives and misses should become regression fixtures before any future remediation automation is allowed.
 
 ## Next validation
 
-Rerun Run Doctor v1.0.1 against the archived calibration run, then analyze the next fresh gameplay session. Compare each automatic report with a manual whole-run review, especially incident boundaries and health scoring. Keep automatic remediation disabled until detector precision is demonstrated across multiple real runs.
+Regenerate Doctor reports for the two August 14 runs using v1.0.2, then compare the corrected reports against this manual review. A later same-speed fresh run should be used as a cleaner control for objective-churn scoring; the 10x and 1x runs are useful behavioral evidence but are not a strong apples-to-apples timing comparison. Keep automatic remediation disabled until detector precision is demonstrated across multiple real runs.
