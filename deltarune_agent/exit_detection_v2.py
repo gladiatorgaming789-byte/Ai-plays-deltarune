@@ -9,12 +9,15 @@ Exit Detection v2 separates those concepts:
 
 * visual analyzers may propose an exit-like *candidate*;
 * repeated independent views measure whether that candidate is stable;
-* mapped movement / walkability provides independent traversability evidence;
-* only sufficiently supported candidates become semantic ``possible_exit``
-  records that the planner may route toward.
+* learned open movement edges measure whether a real approach corridor exists;
+* a generic learned map-boundary probe is supporting geometry, not proof;
+* only candidates supported by both independent visual and approach evidence
+  become semantic ``possible_exit`` records that the visual planner may route
+  toward; and
+* an observed room transition remains immediate confirmation.
 
-The layer uses only observations produced while the agent plays.  It contains
-no room names, walkthrough routes, NPC identities, or progression answers.
+The layer uses only observations produced while the agent plays. It contains no
+room names, walkthrough routes, NPC identities, or progression answers.
 """
 
 from __future__ import annotations
@@ -36,9 +39,14 @@ from .world_model import WorldModel
 EXIT_DETECTION_VERSION = 2
 MAX_EXIT_CANDIDATE_VIEWPOINTS = 12
 
+MIN_APPROACH_LENGTH = 2
+
 DOORWAY_REQUIRED_VIEWS = 2
 DOORWAY_MIN_CONSISTENCY = 0.55
 DOORWAY_MIN_OPENING_SCORE = 0.72
+
+FLOOR_REQUIRED_VIEWS = 2
+FLOOR_MIN_CONSISTENCY = 0.60
 
 EDGE_REQUIRED_VIEWS = 3
 EDGE_MIN_CONSISTENCY = 0.70
@@ -56,6 +64,7 @@ EXIT_PERSISTED_FIELDS = (
     "exit_candidate_last_step",
     "exit_candidate_reasons",
     "exit_candidate_promotions",
+    "exit_approach_length",
 )
 
 _INSTALLED = False
@@ -81,10 +90,8 @@ def _clamp(value: float, minimum: float = 0.0, maximum: float = 1.0) -> float:
 
 
 def exit_candidate_source(record: Mapping[str, object]) -> str | None:
-    """Classify the *kind of observed evidence*, not whether it is a real exit."""
+    """Classify the kind of observed evidence, not whether it is a real exit."""
 
-    if record.get("path_continuation"):
-        return "mapped_path_continuation"
     summary = str(record.get("visual_summary") or record.get("feature_summary") or "")
     if summary.startswith(DOORWAY_FACADE_PREFIX):
         return "doorway_facade"
@@ -96,6 +103,11 @@ def exit_candidate_source(record: Mapping[str, object]) -> str | None:
         return "dark_edge_opening"
     if _safe_float(record.get("edge_opening_score")) >= 0.30:
         return "generic_edge_opening"
+    if record.get("path_continuation"):
+        # ``path_continuation`` is created when the learned map has an inward
+        # corridor ending at an untested boundary. It is a geometry probe, not
+        # an observed crossing and not necessarily a visually detected opening.
+        return "geometry_path_probe"
     return None
 
 
@@ -133,30 +145,43 @@ def _candidate_visual_score(record: Mapping[str, object], source: str) -> float:
     opening = _clamp(_safe_float(record.get("edge_opening_score")))
     consistency = _clamp(_safe_float(record.get("multi_view_consistency"), 0.5))
     views = max(0, _safe_int(record.get("exit_candidate_views")))
-    walkable = bool(record.get("walkable_evidence"))
+    approach = max(0, _safe_int(record.get("exit_approach_length")))
+    path_probe = bool(record.get("path_continuation"))
 
-    if source == "mapped_path_continuation":
-        return 1.0
+    if source == "geometry_path_probe":
+        return _clamp(0.16 + min(0.24, approach * 0.06))
     if source == "doorway_facade":
-        return _clamp(0.34 + opening * 0.24 + min(0.18, views * 0.06) + consistency * 0.18)
+        return _clamp(
+            0.28
+            + opening * 0.22
+            + min(0.16, views * 0.05)
+            + consistency * 0.14
+            + min(0.14, approach * 0.05)
+        )
     if source in {"floor_boundary", "scrolling_floor_boundary"}:
-        # Seeing floor touch a room boundary means "route-shaped visual clue".
-        # It is deliberately weak until movement mapping supports traversability.
-        return _clamp(0.12 + min(0.12, views * 0.03) + consistency * 0.08)
+        return _clamp(
+            0.10
+            + min(0.10, views * 0.03)
+            + consistency * 0.06
+            + min(0.14, approach * 0.05)
+            + (0.08 if path_probe else 0.0)
+        )
     if source == "dark_edge_opening":
         return _clamp(
-            0.18
-            + opening * 0.28
-            + min(0.18, views * 0.05)
-            + consistency * 0.16
-            + (0.10 if walkable else 0.0)
+            0.15
+            + opening * 0.25
+            + min(0.16, views * 0.045)
+            + consistency * 0.13
+            + min(0.15, approach * 0.05)
+            + (0.06 if path_probe else 0.0)
         )
     return _clamp(
         0.10
-        + opening * 0.20
-        + min(0.12, views * 0.04)
+        + opening * 0.18
+        + min(0.12, views * 0.035)
         + consistency * 0.10
-        + (0.08 if walkable else 0.0)
+        + min(0.12, approach * 0.04)
+        + (0.06 if path_probe else 0.0)
     )
 
 
@@ -170,12 +195,11 @@ def evaluate_exit_candidate(record: Mapping[str, object]) -> tuple[str, float, l
     score = _candidate_visual_score(record, source)
     reasons: list[str] = [f"observed source: {source.replace('_', ' ')}"]
 
+    # Only an actually observed transition is immediate truth. Everything else
+    # remains evidence that must be fused conservatively.
     if str(record.get("guess_state") or "") == "confirmed":
         reasons.append("a real room transition already confirmed this visual lead")
         return "confirmed", 1.0, reasons
-    if record.get("path_continuation"):
-        reasons.append("mapped movement continues toward the candidate")
-        return "semantic_ready", max(score, 0.95), reasons
 
     failures = max(0, _safe_int(record.get("failed_approaches")))
     misses = max(0, _safe_int(record.get("guess_misses")))
@@ -184,8 +208,16 @@ def evaluate_exit_candidate(record: Mapping[str, object]) -> tuple[str, float, l
     views = max(0, _safe_int(record.get("exit_candidate_views")))
     opening = _clamp(_safe_float(record.get("edge_opening_score")))
     width = _clamp(_safe_float(record.get("edge_width_ratio")))
-    walkable = bool(record.get("walkable_evidence"))
+    approach = max(0, _safe_int(record.get("exit_approach_length")))
+    path_probe = bool(record.get("path_continuation"))
 
+    if approach:
+        reasons.append(
+            f"{approach} consecutive learned-open approach cell"
+            + ("s" if approach != 1 else "")
+        )
+    if path_probe:
+        reasons.append("learned map ends at an untested outward boundary probe")
     if failures:
         reasons.append(f"{failures} failed approach{'es' if failures != 1 else ''}")
     if misses:
@@ -193,15 +225,30 @@ def evaluate_exit_candidate(record: Mapping[str, object]) -> tuple[str, float, l
     if sample_count >= 2:
         reasons.append(f"multi-view consistency {consistency:.0%}")
 
-    # Strong contradiction blocks visual-only promotion.  A later mapped path or
-    # real transition can still override this because both are stronger evidence.
+    # Strong contradiction blocks promotion. A real later transition can still
+    # override it because confirmed crossing evidence is stronger.
     if failures >= 2 or misses >= 3 or (sample_count >= 2 and consistency < 0.35):
         reasons.append("current observations contradict a stable traversable exit")
         return "contradicted", score, reasons
 
+    if source == "geometry_path_probe":
+        reasons.append("map-boundary geometry alone is a probe, not visual exit proof")
+        return "geometry_candidate", score, reasons
+
     if source in {"floor_boundary", "scrolling_floor_boundary"}:
-        reasons.append("visible boundary surface alone does not prove traversability")
-        return "needs_path_evidence", score, reasons
+        if not path_probe or approach < MIN_APPROACH_LENGTH:
+            reasons.append("boundary surface needs an aligned learned approach corridor")
+            return "needs_approach_evidence", score, reasons
+        if views < FLOOR_REQUIRED_VIEWS:
+            reasons.append(
+                f"needs {FLOOR_REQUIRED_VIEWS} independent boundary viewpoints; has {views}"
+            )
+            return "visual_candidate", score, reasons
+        if sample_count < 2 or consistency < FLOOR_MIN_CONSISTENCY:
+            reasons.append("boundary continuation has not stayed stable across viewpoints")
+            return "visual_candidate", score, reasons
+        reasons.append("stable boundary continuation aligns with a learned-open approach")
+        return "semantic_ready", score, reasons
 
     if source == "doorway_facade":
         if views < DOORWAY_REQUIRED_VIEWS:
@@ -215,7 +262,10 @@ def evaluate_exit_candidate(record: Mapping[str, object]) -> tuple[str, float, l
         if opening < DOORWAY_MIN_OPENING_SCORE:
             reasons.append("doorway structure score is below the promotion threshold")
             return "visual_candidate", score, reasons
-        reasons.append("doorway structure repeated stably across independent viewpoints")
+        if approach < MIN_APPROACH_LENGTH:
+            reasons.append("no sufficiently long learned-open approach reaches the facade")
+            return "needs_approach_evidence", score, reasons
+        reasons.append("stable doorway structure aligns with a learned-open approach")
         return "semantic_ready", score, reasons
 
     if source == "dark_edge_opening":
@@ -233,20 +283,29 @@ def evaluate_exit_candidate(record: Mapping[str, object]) -> tuple[str, float, l
         if width <= 0 or not EDGE_MIN_WIDTH <= width <= EDGE_MAX_WIDTH:
             reasons.append("edge-opening width is too narrow or broad to promote visually")
             return "visual_candidate", score, reasons
-        if not walkable:
-            reasons.append("no learned walkable approach reaches this region yet")
-            return "needs_path_evidence", score, reasons
-        reasons.append("stable localized opening plus learned walkable approach")
+        if approach < MIN_APPROACH_LENGTH:
+            reasons.append("no sufficiently long learned-open approach reaches the opening")
+            return "needs_approach_evidence", score, reasons
+        reasons.append("stable localized opening aligns with a learned-open approach")
         return "semantic_ready", score, reasons
 
-    reasons.append("generic edge evidence needs mapped path confirmation")
-    return "needs_path_evidence", score, reasons
+    if (
+        path_probe
+        and approach >= MIN_APPROACH_LENGTH
+        and views >= EDGE_REQUIRED_VIEWS
+        and sample_count >= 2
+        and consistency >= EDGE_MIN_CONSISTENCY
+        and opening >= EDGE_MIN_OPENING_SCORE
+    ):
+        reasons.append("generic edge structure repeatedly aligns with mapped approach geometry")
+        return "semantic_ready", score, reasons
+
+    reasons.append("generic edge evidence needs stronger repeated approach confirmation")
+    return "needs_approach_evidence", score, reasons
 
 
 def exit_record_is_actionable(record: Mapping[str, object]) -> bool:
     if str(record.get("guess_state") or "") == "confirmed":
-        return True
-    if record.get("path_continuation"):
         return True
     return str(record.get("exit_candidate_state") or "") == "semantic_ready"
 
@@ -255,11 +314,11 @@ def _adjust_exit_belief_scores(
     record: Mapping[str, object],
     scores: Mapping[str, float],
 ) -> dict[str, float]:
-    """Prevent one-frame visual evidence from dominating Guessing v3 beliefs."""
+    """Prevent visual/map heuristics from dominating Guessing v3 before fusion."""
 
     result = {str(key): float(value) for key, value in scores.items()}
     source = exit_candidate_source(record)
-    if source is None or record.get("path_continuation"):
+    if source is None:
         return result
 
     state = str(record.get("exit_candidate_state") or "visual_candidate")
@@ -267,25 +326,36 @@ def _adjust_exit_belief_scores(
         return result
 
     opening = _clamp(_safe_float(record.get("edge_opening_score")))
-    # The calibrated v3 model normally adds opening_score * 2.0.  Remove that
-    # semantic-sized boost and replace it with a candidate-sized clue.
+    path_probe = bool(record.get("path_continuation"))
+    approach = max(0, _safe_int(record.get("exit_approach_length")))
+
+    # The calibrated v3 model normally adds opening_score * 2.0 and adds 2.70
+    # for path_continuation. Both were historically semantic-sized boosts even
+    # though neither proves a crossing. Remove them until evidence fusion says
+    # the candidate is ready.
+    deduction = opening * 2.0 + (2.70 if path_probe else 0.0)
     result["possible_exit"] = max(
         0.05,
-        float(result.get("possible_exit", 0.0)) - opening * 2.0,
+        float(result.get("possible_exit", 0.0)) - deduction,
     )
     candidate_bonus = {
-        "doorway_facade": 0.62,
-        "dark_edge_opening": 0.42,
-        "floor_boundary": 0.14,
-        "scrolling_floor_boundary": 0.08,
-        "generic_edge_opening": 0.24,
-    }.get(source, 0.18)
+        "doorway_facade": 0.55,
+        "dark_edge_opening": 0.36,
+        "floor_boundary": 0.10,
+        "scrolling_floor_boundary": 0.06,
+        "generic_edge_opening": 0.20,
+        "geometry_path_probe": 0.12,
+    }.get(source, 0.16)
+    candidate_bonus += min(0.18, approach * 0.05)
+    if path_probe:
+        candidate_bonus += 0.16
     result["possible_exit"] += candidate_bonus
+
     if state == "contradicted":
-        result["possible_exit"] *= 0.48
-        result["scenery"] = float(result.get("scenery", 0.0)) + 0.75
-    elif state == "needs_path_evidence":
-        result["scenery"] = float(result.get("scenery", 0.0)) + 0.12
+        result["possible_exit"] *= 0.42
+        result["scenery"] = float(result.get("scenery", 0.0)) + 0.80
+    elif state in {"needs_approach_evidence", "geometry_candidate"}:
+        result["scenery"] = float(result.get("scenery", 0.0)) + 0.14
     return result
 
 
@@ -297,6 +367,33 @@ def _belief_scores_v2(
     assert _ORIGINAL_BELIEF_SCORES is not None
     scores = _ORIGINAL_BELIEF_SCORES(record, consistency, sample_count)
     return _adjust_exit_belief_scores(record, scores)
+
+
+def _anchor_cell(record: Mapping[str, object]) -> tuple[int, int] | None:
+    value = record.get("anchor_cell")
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return None
+    try:
+        return int(value[0]), int(value[1])
+    except (TypeError, ValueError):
+        return None
+
+
+def _update_approach_geometry(
+    self: StarterPolicy,
+    key: tuple[str, int, int],
+    record: dict[str, object],
+) -> None:
+    anchor = _anchor_cell(record)
+    direction = str(record.get("edge_hint") or "")
+    if anchor is None or direction not in {"up", "down", "left", "right"}:
+        record["exit_approach_length"] = 0
+        return
+    try:
+        length = int(self._straight_approach_length(key[0], anchor, direction))
+    except (AttributeError, TypeError, ValueError):
+        length = 0
+    record["exit_approach_length"] = max(0, min(4, length))
 
 
 def _postprocess_current_exit_candidates(
@@ -316,11 +413,15 @@ def _postprocess_current_exit_candidates(
 
         record["exit_detection_version"] = EXIT_DETECTION_VERSION
         record["exit_candidate_source"] = source
+        _update_approach_geometry(self, key, record)
+
+        # Geometry-only probes do not count as independent visual confirmations.
         viewpoints = _candidate_viewpoints(record)
-        viewpoint = _latest_viewpoint(record)
-        if viewpoint is not None and viewpoint not in viewpoints:
-            viewpoints.append(viewpoint)
-            viewpoints = viewpoints[-MAX_EXIT_CANDIDATE_VIEWPOINTS:]
+        if source != "geometry_path_probe":
+            viewpoint = _latest_viewpoint(record)
+            if viewpoint is not None and viewpoint not in viewpoints:
+                viewpoints.append(viewpoint)
+                viewpoints = viewpoints[-MAX_EXIT_CANDIDATE_VIEWPOINTS:]
         record["exit_candidate_viewpoints"] = viewpoints
         record["exit_candidate_views"] = len(viewpoints)
         record["exit_candidate_last_step"] = int(observation.step)
@@ -340,9 +441,8 @@ def _postprocess_current_exit_candidates(
             if str(record.get("guess_state") or "") not in v3.FINAL_GUESS_STATES:
                 record["guess_state"] = "proposed"
         elif record.get("hypothesis") == "possible_exit":
-            # Keep the candidate and its evidence, but do not let the legacy
-            # routing field claim a semantic exit before traversability/stability
-            # has earned that conclusion.
+            # Keep the candidate and evidence, but do not let the legacy routing
+            # field claim an exit before independent evidence fusion earns it.
             record["hypothesis"] = None
             if str(record.get("guess_state") or "") not in v3.FINAL_GUESS_STATES:
                 record["guess_state"] = "proposed"
@@ -352,13 +452,13 @@ def _postprocess_current_exit_candidates(
         v3.refresh_guess_record_v3(record, region=(key[1], key[2]))
         if state not in {"semantic_ready", "confirmed"} and record.get("hypothesis") == "possible_exit":
             # Defensive final gate: a future v3 calibration must not bypass the
-            # detector's traversability requirement merely through probability.
+            # detector's evidence-fusion requirement merely through probability.
             record["hypothesis"] = None
             if record.get("guess_semantic_state") == "possible_exit":
                 record["guess_semantic_state"] = v3.UNKNOWN_BUT_INTERESTING
-                record["guess_label"] = "Exit-like feature; traversability unresolved"
+                record["guess_label"] = "Exit-like feature; route evidence unresolved"
 
-        if previous_state != state or source == "mapped_path_continuation":
+        if previous_state != state or record.get("path_continuation"):
             self.map_updates.append(self._screen_region_map_update(key, record))
 
 
@@ -417,7 +517,8 @@ def _summary_v2(self: Run4Explorer) -> dict[str, object]:
             "exit_semantic_ready_candidates": states.get("semantic_ready", 0)
             + states.get("confirmed", 0),
             "exit_contradicted_candidates": states.get("contradicted", 0),
-            "exit_candidates_needing_path": states.get("needs_path_evidence", 0),
+            "exit_candidates_needing_approach": states.get("needs_approach_evidence", 0),
+            "exit_geometry_only_candidates": states.get("geometry_candidate", 0),
             "exit_candidate_promotions": sum(
                 max(0, _safe_int(record.get("exit_candidate_promotions")))
                 for record in candidates
@@ -437,12 +538,13 @@ def _sanitize_exit_value(field: str, value: object) -> object | None:
         "exit_candidate_views",
         "exit_candidate_last_step",
         "exit_candidate_promotions",
+        "exit_approach_length",
     }:
         return max(0, _safe_int(value))
     if field == "exit_candidate_visual_score":
         return round(_clamp(_safe_float(value)), 4)
     if field == "exit_candidate_viewpoints":
-        return _candidate_viewpoints({field: value})
+        return _candidate_viewpoints({"exit_candidate_viewpoints": value})
     if field == "exit_candidate_reasons":
         if not isinstance(value, list):
             return None
@@ -483,6 +585,8 @@ def _world_save_v2(self: WorldModel) -> None:
         temporary.write_text(json.dumps(data, indent=2), encoding="utf-8")
         temporary.replace(self.path)
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+        # Core and Guessing-v3 persistence have already succeeded. Exit
+        # diagnostics are optional and may never turn a save into a run failure.
         return
 
 
