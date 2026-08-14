@@ -41,6 +41,13 @@ from .guessing_v3_screen import install_guessing_v3_screen_observer  # noqa: E40
 
 install_guessing_v3_screen_observer()
 
+# Exit Detection v2 must be last in the visual/guess stack: it interprets the
+# final Run15 analyzer output, uses Guessing v3 multi-view measurements, and
+# prevents one-frame exit-like scenery from becoming an actionable route.
+from .exit_detection_v2 import install_exit_detection_v2  # noqa: E402
+
+install_exit_detection_v2()
+
 
 class HierarchicalPolicy:
     """Specialized reflex controllers wrapped around the learned explorer."""
