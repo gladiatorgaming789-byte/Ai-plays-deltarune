@@ -11,12 +11,25 @@ WarpRole: TypeAlias = Literal[
     "unknown",
     "new_area",
     "progression",
-    "likely_optional",
-    "return/backtrack",
+    "likely_optional",  # legacy persisted value; classifier v2 never emits it
+    "return/backtrack",  # legacy persisted value; classifier v2 never emits it
     "loop_suppressed",
+]
+WarpSemanticRole: TypeAlias = Literal[
+    "unknown",
+    "new_area",
+    "progression",
+]
+WarpBehaviorTag: TypeAlias = Literal[
+    "observed_return_leg",
+    "quick_return",
+    "return_prone",
+    "loop_risk",
 ]
 
 WARP_PORTAL_CLUSTER_RADIUS = 2
+WARP_CLASSIFICATION_VERSION = 2
+LOOP_SUPPRESSION_HARD_THRESHOLD = 2
 
 
 @dataclass(frozen=True)
@@ -169,11 +182,68 @@ def stable_portal_id(cluster: PortalCluster) -> str:
     return f"portal_{sha1(seed.encode('utf-8')).hexdigest()[:12]}"
 
 
+def semantic_portal_role(record: Mapping[str, object]) -> WarpSemanticRole:
+    """Return the strongest *meaning* supported by observed outcomes.
+
+    Return/backtrack and loop behavior are deliberately excluded here. They are
+    traversal observations, not proof that a doorway is optional or incapable
+    of becoming useful for progression later.
+    """
+
+    if _nonnegative_int(record.get("non_discovery_progress_outcomes")):
+        return "progression"
+    if str(record.get("first_novel_destination") or ""):
+        return "new_area"
+    return "unknown"
+
+
+def portal_behavior_evidence(
+    record: Mapping[str, object],
+) -> tuple[list[WarpBehaviorTag], dict[str, float | int]]:
+    """Summarize reversible traversal behavior independently of semantic role."""
+
+    backtracks = _nonnegative_int(record.get("return_backtracks"))
+    immediate_returns = _nonnegative_int(record.get("immediate_returns"))
+    suppressions = _nonnegative_int(record.get("loop_suppressions"))
+    crossings = max(1, _nonnegative_int(record.get("crossings")))
+    dwell_samples = _nonnegative_int(record.get("dwell_samples"))
+    dwell_total = _nonnegative_int(record.get("dwell_steps_total"))
+    average_dwell = dwell_total / dwell_samples if dwell_samples else 0.0
+
+    tags: list[WarpBehaviorTag] = []
+    if backtracks:
+        tags.append("observed_return_leg")
+    if immediate_returns:
+        tags.append("quick_return")
+    return_observations = backtracks + immediate_returns
+    return_tendency = min(1.0, return_observations / crossings)
+    if return_observations >= 2 and return_tendency >= 0.50:
+        tags.append("return_prone")
+    loop_risk = min(1.0, suppressions / crossings)
+    if suppressions:
+        tags.append("loop_risk")
+
+    return tags, {
+        "return_backtracks": backtracks,
+        "immediate_returns": immediate_returns,
+        "return_tendency": round(return_tendency, 3),
+        "loop_suppressions": suppressions,
+        "loop_risk": round(loop_risk, 3),
+        "mean_return_dwell_steps": round(average_dwell, 3),
+    }
+
+
 def classify_portal(record: Mapping[str, object]) -> tuple[WarpRole, float, list[str]]:
     """Classify a portal strictly from outcomes the agent has observed.
 
-    Reaching a previously unseen room is useful evidence for ``new_area`` but
-    is intentionally never treated as story progression by itself.
+    Classification v2 separates semantic meaning from traversal behavior. A
+    quick return or explicit backtrack can lower certainty, but it is never
+    enough to call a warp ``likely_optional`` or ``return/backtrack``. Those old
+    labels were too strong and could prevent a real progression route from ever
+    being tested again.
+
+    Reaching a previously unseen room remains useful evidence for ``new_area``
+    but is intentionally never treated as story progression by itself.
     """
 
     progress = _nonnegative_int(record.get("non_discovery_progress_outcomes"))
@@ -181,55 +251,56 @@ def classify_portal(record: Mapping[str, object]) -> tuple[WarpRole, float, list
     backtracks = _nonnegative_int(record.get("return_backtracks"))
     immediate_returns = _nonnegative_int(record.get("immediate_returns"))
     crossings = max(1, _nonnegative_int(record.get("crossings")))
-    dwell_samples = _nonnegative_int(record.get("dwell_samples"))
-    dwell_total = _nonnegative_int(record.get("dwell_steps_total"))
     first_novel = str(record.get("first_novel_destination") or "")
+    behavior_tags, metrics = portal_behavior_evidence(record)
 
     if progress:
         confidence = min(0.99, 0.88 + 0.04 * (progress - 1))
-        return (
-            "progression",
-            confidence,
-            [
-                f"{progress} non-discovery story-progress outcome"
-                + ("s" if progress != 1 else ""),
-                "room discovery alone was excluded from this label",
-            ],
-        )
-    if suppressions:
-        confidence = min(0.96, 0.68 + 0.08 * min(3, suppressions - 1))
+        basis = [
+            f"{progress} non-discovery story-progress outcome"
+            + ("s" if progress != 1 else ""),
+            "room discovery alone was excluded from this label",
+        ]
+        if behavior_tags:
+            basis.append(
+                "return/loop behavior remains recorded separately and cannot demote observed progression"
+            )
+        return "progression", confidence, basis
+
+    # Repeated explicit loop suppression remains a navigation safety state, but
+    # one loop event is not enough to turn a route into a hard-negative label.
+    if suppressions >= LOOP_SUPPRESSION_HARD_THRESHOLD:
+        confidence = min(0.94, 0.64 + 0.07 * min(4, suppressions))
         return (
             "loop_suppressed",
             confidence,
             [
-                f"suppressed after {suppressions} observed navigation-loop "
-                f"event{'s' if suppressions != 1 else ''}",
+                f"temporarily suppressed after {suppressions} observed navigation-loop events",
+                "no independent story-progress outcome has been observed",
+                "loop suppression is reversible if later positive evidence appears",
             ],
         )
-    if backtracks:
-        confidence = min(0.94, 0.72 + 0.07 * min(3, backtracks - 1))
-        return (
-            "return/backtrack",
-            confidence,
-            [
-                f"used as the return leg {backtracks} time"
-                + ("s" if backtracks != 1 else ""),
-            ],
-        )
-    average_dwell = dwell_total / dwell_samples if dwell_samples else 0.0
-    if immediate_returns >= 2 or (
-        immediate_returns >= 1 and crossings >= 2 and average_dwell <= 20.0
-    ):
-        confidence = min(0.88, 0.57 + 0.08 * min(3, immediate_returns))
-        return (
-            "likely_optional",
-            confidence,
-            [
-                f"returned without independent progress {immediate_returns} time"
-                + ("s" if immediate_returns != 1 else ""),
-                f"mean observed dwell before return: {average_dwell:.1f} steps",
-            ],
-        )
+
+    # Return evidence is intentionally *not* a semantic role. If it conflicts
+    # with novelty evidence, keep the route eligible as unknown instead of
+    # prematurely declaring it optional/return-only.
+    if backtracks or immediate_returns:
+        basis = [
+            "return behavior was observed, but return behavior does not prove the portal is optional",
+            f"observed return legs: {backtracks}",
+            f"quick returns: {immediate_returns}",
+            f"return tendency: {float(metrics['return_tendency']):.2f}",
+        ]
+        if first_novel:
+            basis.append(
+                f"the portal also reached previously unseen {first_novel}; semantic meaning remains unresolved"
+            )
+        if suppressions:
+            basis.append(
+                "one loop-suppression event is retained as caution rather than a hard role"
+            )
+        return "unknown", 0.42 if crossings > 1 else 0.34, basis
+
     if first_novel:
         return (
             "new_area",
@@ -239,6 +310,17 @@ def classify_portal(record: Mapping[str, object]) -> tuple[WarpRole, float, list
                 "no independent story-progress outcome has been observed",
             ],
         )
+
+    if suppressions:
+        return (
+            "unknown",
+            0.30,
+            [
+                "one navigation-loop suppression was observed",
+                "one suppression is insufficient for a hard negative classification",
+            ],
+        )
+
     return (
         "unknown",
         0.25 if crossings == 1 else min(0.49, 0.25 + 0.04 * (crossings - 1)),
@@ -248,9 +330,27 @@ def classify_portal(record: Mapping[str, object]) -> tuple[WarpRole, float, list
 
 def refresh_portal_classification(record: dict[str, object]) -> None:
     role, confidence, basis = classify_portal(record)
+    semantic_role = semantic_portal_role(record)
+    behavior_tags, metrics = portal_behavior_evidence(record)
+
+    record["classification_version"] = WARP_CLASSIFICATION_VERSION
     record["role"] = role
+    record["semantic_role"] = semantic_role
     record["confidence"] = round(confidence, 3)
     record["basis"] = basis
+    record["behavior_tags"] = list(behavior_tags)
+    record["return_tendency"] = metrics["return_tendency"]
+    record["loop_risk"] = metrics["loop_risk"]
+    record["mean_return_dwell_steps"] = metrics["mean_return_dwell_steps"]
+    record["classification_state"] = (
+        "confirmed"
+        if semantic_role == "progression"
+        else "observed"
+        if semantic_role == "new_area" and not behavior_tags
+        else "safety_hold"
+        if role == "loop_suppressed"
+        else "provisional"
+    )
 
 
 def _nearby_sources(left: Warp, right: Warp, radius: int) -> bool:
