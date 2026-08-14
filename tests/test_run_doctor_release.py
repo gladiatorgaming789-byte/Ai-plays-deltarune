@@ -73,13 +73,17 @@ def _write_fixture(path: Path) -> Path:
         ),
         encoding="utf-8",
     )
+    # Historical format intentionally omits verification_state. Trusted v1.0.1
+    # must infer the missing verification from the recorded evidence instead of
+    # silently treating this as healthy timing.
     (path / "speed_diagnostics.json").write_text(
         json.dumps(
             {
                 "requested": "10",
                 "detected_multiplier": None,
-                "verification_state": "unverified",
+                "effective_multiplier": 10.0,
                 "source": "manual",
+                "synchronized": False,
             }
         ),
         encoding="utf-8",
@@ -91,7 +95,7 @@ def test_trusted_release_marks_report_read_only(tmp_path: Path):
     fixture = _write_fixture(tmp_path / "run")
     report, comparison = run_doctor_release.analyze_directory(fixture)
     payload = run_doctor_release.report_payload(report, comparison)
-    assert payload["doctor_version"] == "1.0.0"
+    assert payload["doctor_version"] == "1.0.1"
     assert payload["trusted_release"] is True
     assert payload["read_only"] is True
     assert payload["mutates_learning"] is False
