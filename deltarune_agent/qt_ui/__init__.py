@@ -22,9 +22,9 @@ def launch_qt_gui() -> int:
             "try again, or run `python -m deltarune_agent gui --legacy`."
         )
 
-    # Install optional page extensions before app.py imports the page classes.
-    # This keeps Automatic Run Doctor isolated from CLI-only imports.
-    from .run_doctor_extension import install_runs_page_extension
+    # Install the Runs-page extension before app.py imports page classes. v1.0
+    # retains the v0.5 UI while routing analysis through the trusted engine.
+    from .run_doctor_v1_extension import install_runs_page_extension
 
     install_runs_page_extension()
 
