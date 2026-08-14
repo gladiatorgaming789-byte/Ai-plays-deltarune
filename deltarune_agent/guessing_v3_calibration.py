@@ -1,11 +1,12 @@
 """Evidence-purity calibration for Guessing v3.
 
 The first v3 draft treated the currently exposed legacy ``hypothesis`` as a
-small prior on the next belief update.  That risks a self-reinforcing loop: a
+small prior on the next belief update. That risks a self-reinforcing loop: a
 classification made for routing can become evidence for itself on the next
-frame.  This calibration removes that feedback.  Only observed geometry,
+frame. This calibration removes that feedback. Only observed geometry,
 interaction history, visual consistency, and other independent record fields
-contribute to the new belief scores.
+contribute to beliefs or to the decision that a feature is structurally worth
+investigating.
 """
 
 from __future__ import annotations
@@ -17,6 +18,18 @@ from . import guessing_v3 as v3
 
 CALIBRATION_VERSION = 1
 _INSTALLED = False
+
+
+def _evidence_only_structural_evidence(record: Mapping[str, object]) -> bool:
+    """Return whether independent observations justify retaining a visual lead."""
+
+    return bool(
+        record.get("path_continuation")
+        or v3._safe_float(record.get("edge_opening_score")) >= 0.30
+        or v3._safe_int(record.get("entity_approach_directions")) > 0
+        or v3._safe_int(record.get("obstruction_target_cells")) > 0
+        or record.get("choice_retry")
+    )
 
 
 def _evidence_only_belief_scores(
@@ -97,8 +110,9 @@ def install_guessing_v3_calibration() -> None:
         return
     # With the self-prior removed, strong compact one-side object evidence lands
     # a little above 0.40 while a broader four-cell one-side obstruction remains
-    # below it.  This preserves the useful ambiguity boundary intentionally.
+    # below it. This preserves the useful ambiguity boundary intentionally.
     v3.SEMANTIC_COMMIT_THRESHOLD = 0.40
+    v3._structural_evidence = _evidence_only_structural_evidence
     v3._belief_scores = _evidence_only_belief_scores
     v3.GUESSING_V3_CALIBRATION_VERSION = CALIBRATION_VERSION
     _INSTALLED = True
