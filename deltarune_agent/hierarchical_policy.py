@@ -15,12 +15,14 @@ from .run16_semantics import install_run16_semantics
 from .run20_reporting import install_run20_reporting
 from .telemetry import TelemetrySample
 from .visual_freshness import VisualFreshnessGuard
+from .warp_classification_v2 import install_warp_classification_v2
 
 
-# Install persistence, portal classification, and report corrections before the
-# runner imports the tracker helpers that capture them by value.
+# Install persistence, portal classification, report corrections, and the v2
+# warp re-test rules before the runner imports the newest explorer class.
 install_run16_semantics()
 install_run20_reporting()
+install_warp_classification_v2()
 from .run20_run_analysis_fixes import Run20RunAnalysisExplorer  # noqa: E402
 
 
