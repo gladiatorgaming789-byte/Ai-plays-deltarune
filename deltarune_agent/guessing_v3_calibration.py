@@ -18,6 +18,40 @@ from . import guessing_v3 as v3
 
 CALIBRATION_VERSION = 1
 _INSTALLED = False
+RAW_VISUAL_INTEREST_MIN = 0.18
+
+
+def _valid_feature_box(value: object) -> bool:
+    if not isinstance(value, (list, tuple)) or len(value) != 4:
+        return False
+    try:
+        left, top, right, bottom = (float(component) for component in value)
+    except (TypeError, ValueError):
+        return False
+    return right > left and bottom > top
+
+
+def _raw_visual_structure(record: Mapping[str, object]) -> bool:
+    """Keep a salient observed feature without assigning it a semantic type."""
+
+    if v3._safe_float(record.get("interest")) < RAW_VISUAL_INTEREST_MIN:
+        return False
+    has_extent = any(
+        _valid_feature_box(record.get(field))
+        for field in (
+            "feature_box_world",
+            "visual_box_world",
+            "passage_box_world",
+            "obstruction_box_world",
+        )
+    )
+    if not has_extent:
+        return False
+    return (
+        v3._safe_float(record.get("contrast")) >= 0.08
+        or v3._safe_float(record.get("edge_density")) >= 0.08
+        or v3._safe_float(record.get("colorfulness")) >= 0.08
+    )
 
 
 def _evidence_only_structural_evidence(record: Mapping[str, object]) -> bool:
@@ -29,6 +63,7 @@ def _evidence_only_structural_evidence(record: Mapping[str, object]) -> bool:
         or v3._safe_int(record.get("entity_approach_directions")) > 0
         or v3._safe_int(record.get("obstruction_target_cells")) > 0
         or record.get("choice_retry")
+        or _raw_visual_structure(record)
     )
 
 
@@ -118,4 +153,8 @@ def install_guessing_v3_calibration() -> None:
     _INSTALLED = True
 
 
-__all__ = ["CALIBRATION_VERSION", "install_guessing_v3_calibration"]
+__all__ = [
+    "CALIBRATION_VERSION",
+    "RAW_VISUAL_INTEREST_MIN",
+    "install_guessing_v3_calibration",
+]
