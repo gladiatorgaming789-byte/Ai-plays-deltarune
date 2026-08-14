@@ -8,8 +8,6 @@ mutates learned state.
 from __future__ import annotations
 
 from dataclasses import replace
-import hashlib
-from statistics import mean
 from typing import Any, Iterable, Mapping
 
 from . import run_doctor as foundation
@@ -83,23 +81,40 @@ def _is_actionable_region(update: Mapping[str, Any]) -> bool:
     return completed == 0
 
 
+def _longest_consecutive(steps: list[int]) -> int:
+    if not steps:
+        return 0
+    longest = 1
+    current = 1
+    for first, second in zip(steps, steps[1:]):
+        if second == first + 1:
+            current += 1
+            longest = max(longest, current)
+        else:
+            current = 1
+    return longest
+
+
 def _evidence_routing_findings(
     run: foundation.NormalizedRun,
+    updates: list[tuple[int, Mapping[str, Any]]] | None = None,
 ) -> list[foundation.RunDoctorFinding]:
     """Correlate blind probes with evidence proven usable before that exact step.
 
     v0.2 used the final navigation snapshot, which could back-date future evidence
     or combine evidence from another room. v1.0.2 reconstructs the latest recorded
-    screen-region state strictly before each blind-probe decision.
+    screen-region state strictly before each blind-probe decision. Qualifying
+    episodes are aggregated to one finding per room to avoid warning spam.
     """
 
-    updates = _screen_region_updates(run)
+    updates = _screen_region_updates(run) if updates is None else updates
     if not updates or not run.events:
         return []
 
+    record_type = tuple[int, float | None, str, tuple[tuple[str, tuple[int, ...]], ...]]
     states: dict[tuple[str, tuple[int, ...]], Mapping[str, Any]] = {}
     update_index = 0
-    overlap_records: list[tuple[int, float | None, str, tuple[tuple[str, tuple[int, ...]], ...]]] = []
+    overlap_records: list[record_type] = []
 
     for fallback, event in enumerate(run.events):
         step = foundation._step(event, fallback)
@@ -138,14 +153,14 @@ def _evidence_routing_findings(
     if not overlap_records:
         return []
 
-    # Keep separate episodes separate. A handful of isolated overlaps should not
-    # become a run-wide HIGH finding merely because the same room is revisited.
-    episodes: list[list[tuple[int, float | None, str, tuple[tuple[str, tuple[int, ...]], ...]]]] = []
-    by_room: dict[str, list[tuple[int, float | None, str, tuple[tuple[str, tuple[int, ...]], ...]]]] = {}
+    by_room: dict[str, list[record_type]] = {}
     for record in overlap_records:
         by_room.setdefault(record[2], []).append(record)
+
+    findings: list[foundation.RunDoctorFinding] = []
     for room in sorted(by_room):
         records = sorted(by_room[room], key=lambda item: item[0])
+        episodes: list[list[record_type]] = []
         current = [records[0]]
         for record in records[1:]:
             if record[0] - current[-1][0] <= 5:
@@ -155,39 +170,46 @@ def _evidence_routing_findings(
                 current = [record]
         episodes.append(current)
 
-    findings: list[foundation.RunDoctorFinding] = []
-    for episode in episodes:
-        # Require repeated evidence-routing conflict. One or two isolated blind
-        # probes are useful trace data but are too weak for a scored finding.
-        if len(episode) < 3:
+        # One or two isolated decisions are trace evidence, not enough to score.
+        qualifying = [episode for episode in episodes if len(episode) >= 3]
+        if not qualifying:
             continue
-        steps = [record[0] for record in episode]
-        longest = 1
-        current_run = 1
-        for first, second in zip(steps, steps[1:]):
-            if second == first + 1:
-                current_run += 1
-                longest = max(longest, current_run)
-            else:
-                current_run = 1
+
+        qualifying_records = [record for episode in qualifying for record in episode]
+        all_steps = [record[0] for record in qualifying_records]
+        episode_summaries = []
+        longest = 0
+        for episode in qualifying:
+            steps = [record[0] for record in episode]
+            episode_longest = _longest_consecutive(steps)
+            longest = max(longest, episode_longest)
+            episode_summaries.append(
+                {
+                    "start_step": steps[0],
+                    "end_step": steps[-1],
+                    "overlap_steps": len(episode),
+                    "longest_consecutive_overlap": episode_longest,
+                }
+            )
+
         unique_regions = sorted(
             {
                 (hypothesis, region)
-                for _step, _elapsed, _room, evidence in episode
+                for _step, _elapsed, _room, evidence in qualifying_records
                 for hypothesis, region in evidence
             },
             key=lambda item: (item[0], item[1]),
         )
-        room = episode[0][2]
-        severity = "high" if len(episode) >= 20 or longest >= 10 else "medium"
+        total = len(qualifying_records)
+        severity = "high" if total >= 20 or longest >= 10 else "medium"
         findings.append(
             foundation.RunDoctorFinding(
                 finding_id=foundation._finding_id(
                     "actionable_evidence_blind_overlap",
                     room,
-                    steps[0],
-                    steps[-1],
-                    len(episode),
+                    all_steps[0],
+                    all_steps[-1],
+                    total,
                     longest,
                 ),
                 finding_type="unconsumed_observed_evidence",
@@ -206,22 +228,27 @@ def _evidence_routing_findings(
                     "same-room evidence remained actionable."
                 ),
                 evidence=foundation.EvidenceRange(
-                    steps[0],
-                    steps[-1],
-                    episode[0][1],
-                    episode[-1][1],
+                    all_steps[0],
+                    all_steps[-1],
+                    qualifying_records[0][1],
+                    qualifying_records[-1][1],
                 ),
                 room=room,
                 measured={
-                    "blind_probe_steps_with_actionable_evidence": len(episode),
+                    "blind_probe_steps_with_actionable_evidence": total,
                     "longest_consecutive_overlap": longest,
+                    "qualifying_episode_count": len(qualifying),
+                    "episodes": episode_summaries,
                     "actionable_regions": [
                         {"hypothesis": hypothesis, "region": list(region)}
                         for hypothesis, region in unique_regions
                     ],
                     "actionable_region_count": len(unique_regions),
                 },
-                threshold={"minimum_overlap_steps": 3},
+                threshold={
+                    "minimum_overlap_steps_per_episode": 3,
+                    "maximum_gap_within_episode": 5,
+                },
                 uncertainties=(
                     "The finding proves recorded evidence was actionable before these decisions; "
                     "it does not assert that any specific hypothesis was the correct story route.",
@@ -350,10 +377,9 @@ def _known_warp_underuse_findings(
 
 def _requested_multiplier(value: Any) -> float | None:
     try:
-        result = float(value)
+        return float(value)
     except (TypeError, ValueError, OverflowError):
         return None
-    return result
 
 
 def _calibrate_current_speed(
@@ -382,6 +408,12 @@ def _calibrate_current_speed(
             "synchronized": speed.get("synchronized"),
         }
     )
+    uncertainty = (
+        "The artifacts prove missing speed verification, not the game's unknown true multiplier."
+    )
+    uncertainties = tuple(finding.uncertainties)
+    if uncertainty not in uncertainties:
+        uncertainties += (uncertainty,)
     return replace(
         finding,
         severity="high",
@@ -396,10 +428,7 @@ def _calibrate_current_speed(
             "behavioral calibration; otherwise compare timing-sensitive conclusions cautiously."
         ),
         measured=measured,
-        uncertainties=tuple(finding.uncertainties)
-        + (
-            "The artifacts prove missing speed verification, not the game's unknown true multiplier.",
-        ),
+        uncertainties=uncertainties,
     )
 
 
@@ -408,17 +437,24 @@ def calibrate_base_report(
     raw_base: foundation.RunDoctorReport,
 ) -> foundation.RunDoctorReport:
     base = v101.calibrate_base_report(run, raw_base)
+    lifecycle_updates = _screen_region_updates(run)
+    has_lifecycle_history = bool(lifecycle_updates)
     findings: list[foundation.RunDoctorFinding] = []
     for finding in base.findings:
-        # Replace the v0.2 final-snapshot correlation with exact room/time lifecycle
-        # evidence whenever navigation history is available.
-        if finding.finding_type == "unconsumed_observed_evidence":
+        # Exact lifecycle evidence supersedes the older final-snapshot correlation.
+        # Snapshot-only historical runs keep the v1.0.1 lower-confidence finding
+        # rather than silently losing a detector family they cannot reconstruct.
+        if (
+            finding.finding_type == "unconsumed_observed_evidence"
+            and has_lifecycle_history
+        ):
             continue
         if finding.finding_type == "speed_verification_problem":
             finding = _calibrate_current_speed(run, finding)
         findings.append(finding)
 
-    findings.extend(_evidence_routing_findings(run))
+    if has_lifecycle_history:
+        findings.extend(_evidence_routing_findings(run, lifecycle_updates))
     findings.extend(_known_warp_underuse_findings(run, findings))
 
     # Stable ID de-duplication protects comparison output if future detector layers
