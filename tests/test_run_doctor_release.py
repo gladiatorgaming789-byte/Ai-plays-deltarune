@@ -53,6 +53,8 @@ def _write_fixture(path: Path) -> Path:
                 "screen_regions": [
                     {
                         "room": "fixture_room",
+                        "region_x": 4,
+                        "region_y": 5,
                         "hypothesis": "possible_interactable",
                         "guess_state": "proposed",
                         "completed_tests": 0,
@@ -60,6 +62,27 @@ def _write_fixture(path: Path) -> Path:
                 ]
             }
         ),
+        encoding="utf-8",
+    )
+    # v1.0.2 correlates evidence with the recorded lifecycle instead of
+    # back-dating the final navigation snapshot. Establish the hypothesis before
+    # the synthetic blind-search interval so this fixture remains a true positive.
+    (path / "navigation_updates.jsonl").write_text(
+        json.dumps(
+            {
+                "step": 100,
+                "update": {
+                    "type": "screen_region",
+                    "room": "fixture_room",
+                    "region": [4, 5],
+                    "hypothesis": "possible_interactable",
+                    "guess_state": "proposed",
+                    "completed_tests": 0,
+                    "inspections": 0,
+                },
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
     (path / "telemetry_diagnostics.json").write_text(
@@ -73,7 +96,7 @@ def _write_fixture(path: Path) -> Path:
         ),
         encoding="utf-8",
     )
-    # Historical format intentionally omits verification_state. Trusted v1.0.1
+    # Historical format intentionally omits verification_state. Trusted v1.0.2
     # must infer the missing verification from the recorded evidence instead of
     # silently treating this as healthy timing.
     (path / "speed_diagnostics.json").write_text(
@@ -95,7 +118,7 @@ def test_trusted_release_marks_report_read_only(tmp_path: Path):
     fixture = _write_fixture(tmp_path / "run")
     report, comparison = run_doctor_release.analyze_directory(fixture)
     payload = run_doctor_release.report_payload(report, comparison)
-    assert payload["doctor_version"] == "1.0.1"
+    assert payload["doctor_version"] == "1.0.2"
     assert payload["trusted_release"] is True
     assert payload["read_only"] is True
     assert payload["mutates_learning"] is False
