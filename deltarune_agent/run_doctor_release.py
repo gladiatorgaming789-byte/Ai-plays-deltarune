@@ -1,4 +1,4 @@
-"""Trusted Automatic Run Doctor v1.0 report/CLI surface."""
+"""Trusted Automatic Run Doctor release surface."""
 
 from __future__ import annotations
 
@@ -11,10 +11,10 @@ from . import run_doctor as foundation
 from . import run_doctor_compare as comparison_engine
 from . import run_doctor_incidents as incident_engine
 from . import run_doctor_reasoning as reasoning_engine
-from . import run_doctor_calibration as calibration_engine
+from . import run_doctor_calibration_v102 as calibration_engine
 
 
-RUN_DOCTOR_VERSION = "1.0.1"
+RUN_DOCTOR_VERSION = "1.0.2"
 
 
 def _historical_summary_value(run: foundation.NormalizedRun, key: str) -> int | None:
@@ -40,7 +40,7 @@ def _historical_summary_value(run: foundation.NormalizedRun, key: str) -> int | 
 # v0.2 accidentally returned None as soon as summary.json lacked a counter,
 # preventing its intended fallback to historical run_report.policy_summary.
 # Install the corrected semantics at the trusted release boundary so historical
-# detector modules remain stable while v1 can analyze both artifact layouts.
+# detector modules remain stable while the trusted release can analyze both layouts.
 reasoning_engine._summary_value = _historical_summary_value
 
 
@@ -107,7 +107,7 @@ def render_markdown(
         text = text.replace(
             marker,
             marker
-            + "\n> Trusted v1.0 report: read-only diagnostics; learned memory, rewards, and policy are not modified.\n",
+            + f"\n> Trusted Run Doctor {RUN_DOCTOR_VERSION} report: read-only diagnostics; learned memory, rewards, and policy are not modified.\n",
             1,
         )
     return text
