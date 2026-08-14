@@ -7,6 +7,7 @@ from .actions import Action
 from .aligned_navigation_maps import install_aligned_navigation_exporter
 from .battle import BattleController
 from .dialogue import DialogueReader
+from .guessing_v3 import install_guessing_v3
 from .objectives import ObjectiveManager
 from .observer import Observation
 from .perception import GameState, Perception
@@ -18,11 +19,13 @@ from .visual_freshness import VisualFreshnessGuard
 from .warp_classification_v2 import install_warp_classification_v2
 
 
-# Install persistence, portal classification, report corrections, and the v2
-# warp re-test rules before the runner imports the newest explorer class.
+# Install persistence, portal classification, report corrections, warp re-test
+# rules, and evidence-led Guessing v3 before the runner imports the newest
+# explorer class or loads navigation memory.
 install_run16_semantics()
 install_run20_reporting()
 install_warp_classification_v2()
+install_guessing_v3()
 from .run20_run_analysis_fixes import Run20RunAnalysisExplorer  # noqa: E402
 
 
