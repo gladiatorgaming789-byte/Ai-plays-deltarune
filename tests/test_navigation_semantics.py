@@ -4,7 +4,10 @@ from collections import Counter
 import json
 from pathlib import Path
 
-from deltarune_agent.navigation_semantics import canonicalize_warp_observations
+from deltarune_agent.navigation_semantics import (
+    WARP_CLASSIFICATION_VERSION,
+    canonicalize_warp_observations,
+)
 from deltarune_agent.world_model import WorldModel
 
 
@@ -44,7 +47,11 @@ def test_new_room_discovery_is_new_area_not_story_progression() -> None:
 
     assert model.warps[warp] == 1
     assert model.transitions[("room_a", "room_b")] == 1
+    assert record["classification_version"] == WARP_CLASSIFICATION_VERSION
     assert record["role"] == "new_area"
+    assert record["semantic_role"] == "new_area"
+    assert record["classification_state"] == "observed"
+    assert record["behavior_tags"] == []
     assert record["first_novel_destination"] == "room_b"
     assert record["non_discovery_progress_outcomes"] == 0
     assert "no independent story-progress" in " ".join(record["basis"])
@@ -58,11 +65,13 @@ def test_new_room_discovery_is_new_area_not_story_progression() -> None:
 
     model.record_warp_progress(portal_id, "cutscene advanced story", step=30)
     assert record["role"] == "progression"
+    assert record["semantic_role"] == "progression"
+    assert record["classification_state"] == "confirmed"
     assert record["non_discovery_progress_outcomes"] == 1
     assert record["progress_outcomes"] == {"cutscene advanced story": 1}
 
 
-def test_return_evidence_distinguishes_optional_and_backtrack_directions() -> None:
+def test_return_evidence_is_behavior_not_optional_or_return_semantic_role() -> None:
     model = WorldModel()
     outbound = ("hall", 8, 4, "right", "side_room", 1, 4)
     returning = ("side_room", 1, 4, "left", "hall", 8, 4)
@@ -82,12 +91,51 @@ def test_return_evidence_distinguishes_optional_and_backtrack_directions() -> No
         returned_via=returning_id,
     )
 
-    assert model.warp_portals[outbound_id]["role"] == "likely_optional"
-    assert model.warp_portals[returning_id]["role"] == "return/backtrack"
-    assert model.warp_portals[outbound_id]["dwell_steps_total"] == 7
+    outbound_record = model.warp_portals[outbound_id]
+    return_record = model.warp_portals[returning_id]
+
+    assert outbound_record["role"] == "unknown"
+    assert outbound_record["semantic_role"] == "new_area"
+    assert outbound_record["classification_state"] == "provisional"
+    assert "quick_return" in outbound_record["behavior_tags"]
+    assert "likely_optional" not in {outbound_record["role"], return_record["role"]}
+    assert "return/backtrack" not in {outbound_record["role"], return_record["role"]}
+
+    assert return_record["role"] == "unknown"
+    assert return_record["semantic_role"] == "unknown"
+    assert "observed_return_leg" in return_record["behavior_tags"]
+    assert outbound_record["dwell_steps_total"] == 7
 
 
-def test_suppression_is_persisted_but_progress_has_precedence() -> None:
+def test_return_prone_route_can_later_promote_to_progression() -> None:
+    model = WorldModel()
+    outbound = ("room_a", 5, 5, "right", "room_b", 1, 5)
+    returning = ("room_b", 1, 5, "left", "room_a", 5, 5)
+    outbound_id = model.record_warp_transition(outbound, destination_was_novel=True)
+    returning_id = model.record_warp_transition(returning, destination_was_novel=False)
+
+    # Two observed quick returns are enough to establish return-prone behavior,
+    # but not enough to declare the route optional or return-only.
+    model.record_warp_return(outbound_id, dwell_steps=6, returned_via=returning_id)
+    model.record_warp_transition(outbound, destination_was_novel=False)
+    model.record_warp_return(outbound_id, dwell_steps=8, returned_via=returning_id)
+
+    record = model.warp_portals[outbound_id]
+    assert record["role"] == "unknown"
+    assert record["semantic_role"] == "new_area"
+    assert "return_prone" in record["behavior_tags"]
+    assert record["return_tendency"] > 0.0
+
+    model.record_warp_progress(outbound_id, "observed story progress after crossing")
+
+    assert record["role"] == "progression"
+    assert record["semantic_role"] == "progression"
+    assert record["classification_state"] == "confirmed"
+    assert "return_prone" in record["behavior_tags"]
+    assert "cannot demote observed progression" in " ".join(record["basis"])
+
+
+def test_single_loop_suppression_is_caution_not_hard_role() -> None:
     model = WorldModel()
     warp = ("room_a", 5, 5, "up", "room_b", 5, 9)
     portal_id = model.record_warp_transition(
@@ -96,13 +144,33 @@ def test_suppression_is_persisted_but_progress_has_precedence() -> None:
     )
 
     model.record_warp_suppression(portal_id, "A-B-A room loop", step=50)
-    assert model.warp_portals[portal_id]["role"] == "loop_suppressed"
-    assert model.warp_portals[portal_id]["suppression_reasons"] == {
-        "A-B-A room loop": 1
-    }
+    record = model.warp_portals[portal_id]
+
+    assert record["role"] == "unknown"
+    assert "loop_risk" in record["behavior_tags"]
+    assert record["suppression_reasons"] == {"A-B-A room loop": 1}
+
+
+def test_repeated_loop_suppression_is_temporary_but_progress_has_precedence() -> None:
+    model = WorldModel()
+    warp = ("room_a", 5, 5, "up", "room_b", 5, 9)
+    portal_id = model.record_warp_transition(
+        warp,
+        destination_was_novel=False,
+    )
+
+    model.record_warp_suppression(portal_id, "A-B-A room loop", step=50)
+    model.record_warp_suppression(portal_id, "A-B-A room loop", step=70)
+    record = model.warp_portals[portal_id]
+
+    assert record["role"] == "loop_suppressed"
+    assert record["classification_state"] == "safety_hold"
+    assert "loop_risk" in record["behavior_tags"]
 
     model.record_warp_progress(portal_id, "battle began after crossing")
-    assert model.warp_portals[portal_id]["role"] == "progression"
+    assert record["role"] == "progression"
+    assert record["semantic_role"] == "progression"
+    assert record["classification_state"] == "confirmed"
 
 
 def test_nearby_variants_keep_stable_id_and_expand_aperture(tmp_path: Path) -> None:
@@ -133,6 +201,7 @@ def test_nearby_variants_keep_stable_id_and_expand_aperture(tmp_path: Path) -> N
     assert record["aperture"]["span_cells"] == 3
     assert len(record["variants"]) == 2
     assert reloaded.portal_id_for_warp(nearby) == portal_id
+    assert record["classification_version"] == WARP_CLASSIFICATION_VERSION
 
 
 def test_version_two_memory_migrates_without_inventing_portal_meaning(
@@ -167,6 +236,8 @@ def test_version_two_memory_migrates_without_inventing_portal_meaning(
     assert len(model.warp_portals) == 1
     record = next(iter(model.warp_portals.values()))
     assert record["role"] == "unknown"
+    assert record["semantic_role"] == "unknown"
+    assert record["classification_version"] == WARP_CLASSIFICATION_VERSION
     assert record["crossings"] == 3
     assert record["first_novel_destination"] is None
     assert record["non_discovery_progress_outcomes"] == 0
@@ -176,6 +247,57 @@ def test_version_two_memory_migrates_without_inventing_portal_meaning(
     assert saved["version"] == 3
     assert saved["warps"] == [old_warp]
     assert len(saved["warp_portals"]) == 1
+
+
+def test_legacy_optional_role_is_recomputed_from_observed_counters(tmp_path: Path) -> None:
+    path = tmp_path / "navigation.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "cell_size": 8,
+                "cells": [],
+                "warps": [],
+                "warp_portals": [
+                    {
+                        "id": "portal_legacy",
+                        "from_room": "room_a",
+                        "to_room": "room_b",
+                        "action": "right",
+                        "role": "likely_optional",
+                        "confidence": 0.88,
+                        "crossings": 2,
+                        "first_novel_destination": "room_b",
+                        "immediate_returns": 1,
+                        "return_backtracks": 0,
+                        "dwell_samples": 1,
+                        "dwell_steps_total": 5,
+                        "source_samples": [{"x": 5, "y": 5, "count": 2}],
+                        "arrival_samples": [{"x": 1, "y": 5, "count": 2}],
+                        "variants": [
+                            {
+                                "from_x": 5,
+                                "from_y": 5,
+                                "to_x": 1,
+                                "to_y": 5,
+                                "action": "right",
+                                "count": 2,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    model = WorldModel.load(path)
+    record = model.warp_portals["portal_legacy"]
+
+    assert record["role"] == "unknown"
+    assert record["semantic_role"] == "new_area"
+    assert "quick_return" in record["behavior_tags"]
+    assert record["classification_version"] == WARP_CLASSIFICATION_VERSION
 
 
 def test_outcomes_cannot_be_attached_to_an_unobserved_warp() -> None:
