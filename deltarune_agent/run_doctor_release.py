@@ -5,21 +5,52 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from . import run_doctor as foundation
 from . import run_doctor_compare as comparison_engine
 from . import run_doctor_incidents as incident_engine
+from . import run_doctor_reasoning as reasoning_engine
 
 
 RUN_DOCTOR_VERSION = "1.0.0"
+
+
+def _historical_summary_value(run: foundation.NormalizedRun, key: str) -> int | None:
+    """Read counters from modern summaries or older policy reports."""
+    policy_summary = run.run_report.get("policy_summary")
+    sources = (
+        run.summary,
+        policy_summary if isinstance(policy_summary, Mapping) else {},
+    )
+    for source in sources:
+        if not isinstance(source, Mapping):
+            continue
+        value = source.get(key)
+        if value is None:
+            continue
+        try:
+            return int(value)
+        except (TypeError, ValueError, OverflowError):
+            continue
+    return None
+
+
+# v0.2 accidentally returned None as soon as summary.json lacked a counter,
+# preventing its intended fallback to historical run_report.policy_summary.
+# Install the corrected semantics at the trusted release boundary so historical
+# detector modules remain stable while v1 can analyze both artifact layouts.
+reasoning_engine._summary_value = _historical_summary_value
 
 
 def analyze_directory(
     candidate_path: Path,
     *,
     baseline_path: Path | None = None,
-) -> tuple[incident_engine.IncidentDoctorReport, comparison_engine.RegressionComparison | None]:
+) -> tuple[
+    incident_engine.IncidentDoctorReport,
+    comparison_engine.RegressionComparison | None,
+]:
     candidate = foundation.load_run(candidate_path)
     if baseline_path is not None:
         baseline = foundation.load_run(baseline_path)
@@ -46,7 +77,11 @@ def render_markdown(
     comparison: comparison_engine.RegressionComparison | None = None,
 ) -> str:
     text = comparison_engine.render_markdown(report, comparison)
-    text = text.replace("Doctor version: `0.4.0`", f"Doctor version: `{RUN_DOCTOR_VERSION}`", 1)
+    text = text.replace(
+        "Doctor version: `0.4.0`",
+        f"Doctor version: `{RUN_DOCTOR_VERSION}`",
+        1,
+    )
     marker = "# Automatic Run Doctor\n"
     if text.startswith(marker):
         text = text.replace(
