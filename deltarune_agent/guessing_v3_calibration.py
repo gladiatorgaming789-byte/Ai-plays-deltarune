@@ -139,6 +139,80 @@ def _evidence_only_belief_scores(
     return scores
 
 
+def _guess_region(record: Mapping[str, object]) -> tuple[int, int] | None:
+    guess_id = str(record.get("guess_id") or "")
+    if "@" not in guess_id:
+        return None
+    coordinates = guess_id.rsplit("@", 1)[-1]
+    if "," not in coordinates:
+        return None
+    left, right = coordinates.split(",", 1)
+    try:
+        return int(left), int(right)
+    except (TypeError, ValueError):
+        return None
+
+
+def _raw_anchor(raw: Mapping[str, object]) -> tuple[float, float] | None:
+    point = v3._point(raw.get("focus_world"))
+    if point is not None:
+        return point
+    for field in ("passage_box_world", "feature_box_world"):
+        point = v3._box_center(raw.get(field))
+        if point is not None:
+            return point
+    return None
+
+
+def _append_raw_world_sample(record: dict[str, object]) -> None:
+    """Sample the current raw anchor, falling back to stable legacy memory."""
+
+    sequence = max(0, v3._safe_int(record.get("last_seen_sequence")))
+    if sequence <= 0:
+        return
+    samples = record.get("guess_world_samples")
+    if not isinstance(samples, list):
+        samples = []
+        record["guess_world_samples"] = samples
+    if any(
+        isinstance(sample, dict) and v3._safe_int(sample.get("sequence")) == sequence
+        for sample in samples
+    ):
+        return
+
+    raw = None
+    region = _guess_region(record)
+    if region is not None:
+        try:
+            from .guessing_v3_screen import latest_raw_observation
+
+            raw = latest_raw_observation(region)
+        except (ImportError, TypeError, ValueError):
+            raw = None
+    anchor = _raw_anchor(raw) if isinstance(raw, Mapping) else None
+    if anchor is None:
+        anchor = v3._world_anchor(record)
+    if anchor is None:
+        return
+
+    viewpoint = v3._latest_viewpoint(record)
+    sample: dict[str, object] = {
+        "sequence": sequence,
+        "step": max(0, v3._safe_int(record.get("last_seen_step"))),
+        "anchor_world": [round(anchor[0], 2), round(anchor[1], 2)],
+        "anchor_source": "raw_observation" if isinstance(raw, Mapping) else "stable_memory_fallback",
+    }
+    if viewpoint is not None:
+        sample["viewpoint"] = [viewpoint[0], viewpoint[1]]
+    if isinstance(raw, Mapping):
+        if raw.get("signature"):
+            sample["signature"] = str(raw["signature"])
+        if raw.get("interest") is not None:
+            sample["raw_interest"] = round(v3._safe_float(raw.get("interest")), 4)
+    samples.append(sample)
+    del samples[:-v3.MAX_WORLD_SAMPLES]
+
+
 def install_guessing_v3_calibration() -> None:
     global _INSTALLED
     if _INSTALLED:
@@ -149,6 +223,7 @@ def install_guessing_v3_calibration() -> None:
     v3.SEMANTIC_COMMIT_THRESHOLD = 0.40
     v3._structural_evidence = _evidence_only_structural_evidence
     v3._belief_scores = _evidence_only_belief_scores
+    v3._append_world_sample = _append_raw_world_sample
     v3.GUESSING_V3_CALIBRATION_VERSION = CALIBRATION_VERSION
     _INSTALLED = True
 
