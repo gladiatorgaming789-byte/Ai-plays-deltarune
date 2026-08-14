@@ -48,9 +48,13 @@ from .exit_detection_v2 import install_exit_detection_v2  # noqa: E402
 from .exit_detection_v2_confirmation import (  # noqa: E402
     install_exit_detection_v2_confirmation,
 )
+from .exit_detection_v2_transition_guard import (  # noqa: E402
+    install_exit_detection_v2_transition_guard,
+)
 
 install_exit_detection_v2()
 install_exit_detection_v2_confirmation()
+install_exit_detection_v2_transition_guard()
 
 
 class HierarchicalPolicy:
