@@ -9,6 +9,7 @@ persistence/planner layer.
 from __future__ import annotations
 
 from . import guessing_v3 as v3
+from .guessing_v3_calibration import install_guessing_v3_calibration
 from .policy import StarterPolicy
 from .run4_explorer import Run4Explorer
 from .world_model import WorldModel
@@ -21,9 +22,16 @@ def install_guessing_v3() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
+
+    # Calibrate the belief engine before any class wrappers are installed. The
+    # calibration is evidence-only: the legacy routing label cannot become a
+    # prior for itself on the next observation.
+    install_guessing_v3_calibration()
+
     # If a developer/test deliberately used the low-level installer already,
     # respect that installation instead of rebinding its delegates to the v3
-    # wrappers themselves and creating recursion.
+    # wrappers themselves and creating recursion. The evidence-only calibration
+    # above is still safe and useful in that case.
     if getattr(v3, "_INSTALLED", False):
         _INSTALLED = True
         return
