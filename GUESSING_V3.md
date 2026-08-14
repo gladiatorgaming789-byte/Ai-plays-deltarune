@@ -25,6 +25,12 @@ Raw visual salience increases the value of investigating a feature but does not 
 
 The legacy `hypothesis` field is exposed to the existing routing policy only when a semantic belief is strong enough and sufficiently separated from the runner-up. This prevents a weak first interpretation from immediately controlling navigation.
 
+### Evidence-purity rule
+
+The currently exposed legacy `hypothesis` is **not evidence for itself**. Two records with identical observed geometry/outcomes produce the same v3 belief distribution even if an older routing layer happened to label one `possible_character` and the other `possible_interactable`. A semantic decision stays committed only while the underlying observed evidence continues to justify it.
+
+The calibrated semantic threshold is 0.40 with a 0.07 lead over the next semantic interpretation. With the current evidence model, a compact one-side 1–2-cell obstruction can become `possible_interactable`, while a broader one-side four-cell obstruction normally remains unresolved and is investigated before commitment.
+
 ## 3. `unknown_but_interesting`
 
 A feature with genuine structural evidence but insufficient semantic separation is retained as `guess_semantic_state = "unknown_but_interesting"`.
@@ -59,7 +65,7 @@ It cannot replace a learned warp, mapped frontier, strong exit, retryable intera
 
 The existing `WorldModel` schema remains readable. Guessing v3 wraps the already-installed Run16 persistence path and injects only optional extra fields into each saved screen-region record. Old memories therefore remain valid and are enriched lazily when loaded/observed.
 
-An order-safe bootstrap captures the persistence/planner methods at installation time, preventing an early developer/test import from bypassing later persistence extensions.
+An order-safe bootstrap captures the persistence/planner methods at installation time, preventing an early developer/test import from bypassing later persistence extensions. The evidence-only belief calibration is installed before those wrappers become active.
 
 ## Diagnostics
 
@@ -81,6 +87,8 @@ Focused tests cover:
 - ambiguous evidence remaining unresolved;
 - strong mapped-path evidence still committing to an exit;
 - belief revision after stronger observed geometry;
+- the legacy routing label not feeding back into the next belief calculation;
+- compact one-side evidence versus broader ambiguous one-side geometry;
 - stable versus drifting multi-view anchors;
 - bounded information-gain probing;
 - information probing replacing only blind fallback;
@@ -89,4 +97,4 @@ Focused tests cover:
 - bounded evidence/world-sample history;
 - confirmed-guess lifecycle preservation.
 
-The next empirical gate is a fresh run with existing learned memory preserved. The main metrics to inspect are false semantic commitments, `unknown_but_interesting` lifetime, information probes per confirmed/rejected guess, actions spent on weak guesses, and whether stronger evidence correctly revises earlier uncertainty.
+The next empirical gate is a fresh run with existing learned memory preserved. The main metrics to inspect are false semantic commitments, `unknown_but_interesting` lifetime, information probes per confirmed/rejected guess, actions spent on weak guesses, multi-view consistency, and whether stronger evidence correctly revises earlier uncertainty.
