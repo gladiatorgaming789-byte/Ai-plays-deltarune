@@ -32,9 +32,14 @@ from .run20_run_analysis_fixes import Run20RunAnalysisExplorer  # noqa: E402
 
 # runner.py imports this module before progress.py. Install the exact-room-bounds
 # exporter before EpisodeTracker captures its export helper. Install the newest
-# screen analyzer before the explorer observes its first screenshot.
+# screen analyzer before the explorer observes its first screenshot, then wrap
+# that final analyzer so Guessing v3 can sample raw per-view anchors before the
+# legacy memory stabilizer keeps only the clearest target geometry.
 install_aligned_navigation_exporter()
 install_run15_screen_region_analyzer()
+from .guessing_v3_screen import install_guessing_v3_screen_observer  # noqa: E402
+
+install_guessing_v3_screen_observer()
 
 
 class HierarchicalPolicy:
