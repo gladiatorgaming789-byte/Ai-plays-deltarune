@@ -94,15 +94,25 @@ def comparability(
     baseline: foundation.NormalizedRun,
     candidate: foundation.NormalizedRun,
 ) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
+    """Describe whether two runs are safe to compare as a regression pair.
+
+    Matching cosmetic/execution settings must not outweigh materially different
+    gameplay conditions. A different observed starting room and a different
+    game-speed configuration together force weak comparability. One material
+    mismatch caps the comparison at moderate even when other fields match.
+    """
     score = 0
+    hard_mismatches = 0
     reasons: list[str] = []
     caveats: list[str] = []
+
     baseline_room = _start_room(baseline)
     candidate_room = _start_room(candidate)
     if baseline_room and baseline_room == candidate_room:
         score += 2
         reasons.append("same observed starting room")
     elif baseline_room and candidate_room:
+        hard_mismatches += 1
         caveats.append("different observed starting rooms")
     else:
         caveats.append("starting room unavailable for one or both runs")
@@ -117,10 +127,19 @@ def comparability(
             reasons.append(f"same {key} configuration")
         else:
             caveats.append(f"different {key} configuration")
+            if key == "speed":
+                hard_mismatches += 1
 
     if baseline.agent_revision != candidate.agent_revision:
         reasons.append("different agent revisions (expected for regression testing)")
-    level = "strong" if score >= 4 else "moderate" if score >= 2 else "weak"
+
+    if hard_mismatches >= 2:
+        level = "weak"
+    elif hard_mismatches == 1:
+        level = "moderate" if score >= 2 else "weak"
+    else:
+        level = "strong" if score >= 4 else "moderate" if score >= 2 else "weak"
+
     if level == "weak":
         caveats.append("aggregate improvement/regression verdict should be treated cautiously")
     return level, tuple(reasons), tuple(caveats)
@@ -256,9 +275,7 @@ def render_markdown(
         lines.append("Caveats: " + "; ".join(comparison.caveats))
         lines.append("")
     directional = [
-        metric
-        for metric in comparison.metrics
-        if metric.classification != "neutral"
+        metric for metric in comparison.metrics if metric.classification != "neutral"
     ]
     if directional:
         lines.extend(["### Directional metrics", ""])
