@@ -120,16 +120,18 @@ def _expected_repetition(
         samples = int(movement["position_samples"])
         path_distance = float(movement["path_distance"])
         net_distance = float(movement["net_displacement"])
-        expected_floor = max(8.0, max(1, samples - 1) * 0.75)
+        path_floor = max(12.0, max(1, samples - 1) * 2.0)
+        net_floor = max(10.0, max(1, samples - 1) * 1.5)
         if (
             _room_changed(events)
-            or path_distance >= expected_floor
-            or net_distance >= max(8.0, expected_floor * 0.67)
+            or path_distance >= path_floor
+            or net_distance >= net_floor
         ):
             return True, {
                 "expected_reason": "productive_sustained_movement",
                 **movement,
-                "productive_distance_floor": round(expected_floor, 3),
+                "productive_path_distance_floor": round(path_floor, 3),
+                "productive_net_displacement_floor": round(net_floor, 3),
             }
         return False, movement
 
