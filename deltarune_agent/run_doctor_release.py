@@ -15,9 +15,10 @@ from . import run_doctor_calibration_v103 as calibration_engine
 from . import run_doctor_memory_v103 as memory_engine
 from . import run_doctor_menu_v103 as menu_engine
 from . import run_doctor_interactions_v103 as interaction_engine
+from . import run_doctor_autonomy_v104 as autonomy_engine
 
 
-RUN_DOCTOR_VERSION = "1.0.3"
+RUN_DOCTOR_VERSION = "1.0.4"
 
 
 def _historical_summary_value(run: foundation.NormalizedRun, key: str) -> int | None:
@@ -52,7 +53,8 @@ def _trusted_incident_analyze(
     calibrated = calibration_engine.calibrate_incident_report(run, raw)
     calibrated = memory_engine.augment_incident_report(run, calibrated)
     calibrated = menu_engine.augment_incident_report(run, calibrated)
-    return interaction_engine.augment_incident_report(run, calibrated)
+    calibrated = interaction_engine.augment_incident_report(run, calibrated)
+    return autonomy_engine.augment_incident_report(run, calibrated)
 
 
 incident_engine.analyze_run = _trusted_incident_analyze
