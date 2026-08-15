@@ -1,0 +1,106 @@
+{
+  "record_version": 1,
+  "steam_build_id": "24484059",
+  "telemetry_protocol": 9,
+  "manual_source": "AiTelemetry.csx",
+  "manual_source_sha256": "c3239c679fdbab5a700930628a5ea19a6a7046a3620fb4656fd1a84a73848977",
+  "g3mtool_version": "1.2.5",
+  "source": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\DELTARUNE\\Deltarune.zip",
+  "chapters": [
+    {
+      "chapter": 1,
+      "clean_size": 13072876,
+      "clean_sha256": "82c2bb61b8d78cd287120f6301588fecba34ec5a890bac711b7a8774c760ec70",
+      "clean_md5": "0ccbfd7c4f9fb1b86de1e2aaec0bacc9",
+      "patched_size": 13199980,
+      "patched_sha256": "1195c2f02061399b784f9debfbe6c0503901f655c993011fe7b168c6ecf33841",
+      "payload_size": 100830,
+      "payload_sha256": "cfe687a3a3a8f0bb25ece87ea4dbafacd196042fdbe0a60a81f422b5dcc0740b",
+      "changed_code_entries": [
+        "gml_Object_obj_choicer_neo_Draw_0",
+        "gml_Object_obj_choicer_old_Draw_0",
+        "gml_Object_obj_heart_Draw_0",
+        "gml_Object_obj_mainchara_Draw_0",
+        "gml_Object_obj_mainchara_Step_0",
+        "gml_Object_obj_savemenu_Draw_0",
+        "gml_Object_obj_writer_Draw_0"
+      ]
+    },
+    {
+      "chapter": 2,
+      "clean_size": 66949110,
+      "clean_sha256": "047c5ab003e3e017a709c02757e119c81e0327760169512110fd276b19241e68",
+      "clean_md5": "1592c9bffa2d9e53ddeedc0c4f9a07d6",
+      "patched_size": 67334390,
+      "patched_sha256": "a2b800862150069e88e613fbb992fe703fdb3d0ade0fc13c92f433450f7dd391",
+      "payload_size": 259856,
+      "payload_sha256": "e33735cab1d110f22574818d0dd01f07461bfdfc8cec259a7f7e46cc130f7a5e",
+      "changed_code_entries": [
+        "gml_Object_obj_choicer_neo_Draw_0",
+        "gml_Object_obj_choicer_old_Draw_0",
+        "gml_Object_obj_heart_Draw_0",
+        "gml_Object_obj_mainchara_Draw_0",
+        "gml_Object_obj_mainchara_Step_0",
+        "gml_Object_obj_savemenu_Draw_0",
+        "gml_Object_obj_writer_Draw_0"
+      ]
+    },
+    {
+      "chapter": 3,
+      "clean_size": 126284402,
+      "clean_sha256": "c1a0925343694ec9b9adcbf2f916a720b02fd1b999286cfe8fe6a52f3320f714",
+      "clean_md5": "b43158db2e958e767ebb1aae72fb05a1",
+      "patched_size": 126868594,
+      "patched_sha256": "98726ea3afd775beae6ee199cfa4e75e57acf1fe04fa7157db579fc2d5c20e7d",
+      "payload_size": 388414,
+      "payload_sha256": "2d0d1ce216b17ce1097792688def7abf7ff7756e754d26be5486ffa4f4e282a2",
+      "changed_code_entries": [
+        "gml_Object_obj_choicer_neo_Draw_0",
+        "gml_Object_obj_choicer_old_Draw_0",
+        "gml_Object_obj_heart_Draw_0",
+        "gml_Object_obj_mainchara_Draw_0",
+        "gml_Object_obj_mainchara_Step_0",
+        "gml_Object_obj_savemenu_Draw_0",
+        "gml_Object_obj_writer_Draw_0"
+      ]
+    },
+    {
+      "chapter": 4,
+      "clean_size": 132041918,
+      "clean_sha256": "ed64789586238b52375e994e1c1cf13694dd2d0dab57d13e639b9c892e37d8f2",
+      "clean_md5": "27e36f883f4ade21707dc8261072d416",
+      "patched_size": 132697406,
+      "patched_sha256": "1cc06286bf228f6b4bf7a2f0e431337e6a2553a50fd81a71ffad88c6adfeec45",
+      "payload_size": 416852,
+      "payload_sha256": "98003fe3c0eb96992466fd5c57f6214ae18e87a19e4bf9b124a9ff65fb076d16",
+      "changed_code_entries": [
+        "gml_Object_obj_choicer_neo_Draw_0",
+        "gml_Object_obj_choicer_old_Draw_0",
+        "gml_Object_obj_heart_Draw_0",
+        "gml_Object_obj_mainchara_Draw_0",
+        "gml_Object_obj_mainchara_Step_0",
+        "gml_Object_obj_savemenu_Draw_0",
+        "gml_Object_obj_writer_Draw_0"
+      ]
+    },
+    {
+      "chapter": 5,
+      "clean_size": 165423612,
+      "clean_sha256": "370dfd141d2955d5a1960122919b16e4092b52ffbb85fda541bc4680c6b3b85c",
+      "clean_md5": "9c80e6300e0548d933cc006f3c22760d",
+      "patched_size": 166305788,
+      "patched_sha256": "a0ed161aa9e983e64c236b49cf7a2ab4ef4cbdfa7a5dbf347071919c47e6e954",
+      "payload_size": 625541,
+      "payload_sha256": "4a393ecd3b2c4d3c9e2785d83f9293e1a00c4e6c59624d4e59a855545410efa0",
+      "changed_code_entries": [
+        "gml_Object_obj_choicer_neo_Draw_0",
+        "gml_Object_obj_choicer_old_Draw_0",
+        "gml_Object_obj_heart_Draw_0",
+        "gml_Object_obj_mainchara_Draw_0",
+        "gml_Object_obj_mainchara_Step_0",
+        "gml_Object_obj_savemenu_Draw_0",
+        "gml_Object_obj_writer_Draw_0"
+      ]
+    }
+  ]
+}
