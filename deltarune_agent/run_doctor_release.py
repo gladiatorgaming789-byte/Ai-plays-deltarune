@@ -11,10 +11,10 @@ from . import run_doctor as foundation
 from . import run_doctor_compare as comparison_engine
 from . import run_doctor_incidents as incident_engine
 from . import run_doctor_reasoning as reasoning_engine
-from . import run_doctor_calibration_v102 as calibration_engine
+from . import run_doctor_calibration_v103 as calibration_engine
 
 
-RUN_DOCTOR_VERSION = "1.0.2"
+RUN_DOCTOR_VERSION = "1.0.3"
 
 
 def _historical_summary_value(run: foundation.NormalizedRun, key: str) -> int | None:
