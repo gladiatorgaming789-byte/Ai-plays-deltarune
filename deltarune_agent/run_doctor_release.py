@@ -14,6 +14,7 @@ from . import run_doctor_reasoning as reasoning_engine
 from . import run_doctor_calibration_v103 as calibration_engine
 from . import run_doctor_memory_v103 as memory_engine
 from . import run_doctor_menu_v103 as menu_engine
+from . import run_doctor_interactions_v103 as interaction_engine
 
 
 RUN_DOCTOR_VERSION = "1.0.3"
@@ -50,7 +51,8 @@ def _trusted_incident_analyze(
     raw = _RAW_INCIDENT_ANALYZE(run, thresholds)
     calibrated = calibration_engine.calibrate_incident_report(run, raw)
     calibrated = memory_engine.augment_incident_report(run, calibrated)
-    return menu_engine.augment_incident_report(run, calibrated)
+    calibrated = menu_engine.augment_incident_report(run, calibrated)
+    return interaction_engine.augment_incident_report(run, calibrated)
 
 
 incident_engine.analyze_run = _trusted_incident_analyze
