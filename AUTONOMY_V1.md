@@ -24,14 +24,16 @@ Autonomy does not replace persisted world memory. Recovery tier, active goal, un
 The planner escalates only when ordinary progress pressure exists:
 
 0. `normal` — existing Run21 behavior.
-1. `frontier` — a reachable learned frontier exists; expensive recovery is capped here.
+1. `frontier` — a reachable learned frontier remains the first recovery preference.
 2. `evidence` — rank strong observed semantic evidence, response-producing interaction retries, information probes, and observed progression warps.
 3. `bounded_test` — admit weak one-sided entity tests and unresolved boundary tests under explicit action budgets.
 4. `learned_route` — admit ordinary learned warps and multi-room plans over the observed warp graph.
 5. `controlled_backtrack` — allow learned return/suppressed links after strong room-completion pressure, while Run21's short anti-bounce hold remains authoritative.
 6. `broad_reset` — final fallback using the least-visited safe learned direction after structured options are exhausted.
 
-A story-progress event resets the ladder. Newly learned map evidence can de-escalate expensive recovery back toward evidence-first reasoning. A reachable frontier caps the ladder at `frontier` even during a long story stall.
+A story-progress event resets the ladder. Newly learned map evidence can de-escalate expensive recovery back toward evidence-first reasoning.
+
+A reachable frontier gets a **48-decision no-new-evidence grace period** rather than an unlimited veto on recovery. During that grace period, ordinary frontier-first Run21 behavior remains authoritative. If following/approaching frontier state produces no newly learned cell, open edge, interaction, or warp for the full grace period, Autonomy may escalate and put the still-available frontier into the same unified ranking as other learned evidence. Any new learned map evidence resets the frontier grace period. This prevents a stale or repeatedly revisited frontier from pinning recovery forever while still strongly preferring real unexplored space.
 
 ## Uncertainty budgets
 
@@ -46,7 +48,7 @@ A budget may reset only when its evidence fingerprint changes, for example:
 - belief distribution crosses a coarse evidence bucket;
 - confirmed interaction/transition evidence appears.
 
-Known warps are not uncertainty-budgeted; their cost is controlled by cooldown, loop-risk, recovery level, and learned route reachability.
+Known warps are not uncertainty-budgeted; their cost is controlled by cooldown, loop-risk, recovery level, and learned route reachability. Frontier options that survive beyond the initial grace period are budgeted when they enter unified recovery ranking, so an unchanged frontier cannot consume recovery forever.
 
 ## Unified option ranking
 
@@ -62,6 +64,8 @@ Every recovery option is converted to a common score using only learned evidence
 - fraction of uncertainty budget already spent.
 
 Loop risk is a planning penalty, not a warp semantic role. A portal classified as progression remains progression even if it recently participated in a return loop.
+
+After the frontier grace period expires, a reachable frontier remains a high-scoring option rather than disappearing. It can therefore still beat a weaker interaction/warp hypothesis, but it must win on observed evidence instead of permanently blocking every other recovery family.
 
 ## Goal commitment
 
@@ -84,6 +88,16 @@ The planner may conclude that an observed route offers more unexplored/informati
 
 Warp options are penalized using observed return tendency, recorded loop risk, recent room history, entry-room status, and suppressed-link history. Run21's short repeated-link hold is a hard temporary safety rule. Older blanket/suppressed-link state may still be relaxed by the existing strong-recovery compatibility layer.
 
+## Detector/lifecycle composition
+
+Autonomy coordinates existing detector lifecycles rather than bypassing them:
+
+- weak one-sided entity probes remain hard-bounded by Run21's five-action active approach limit and concrete no-response rejection;
+- semantic and geometry visual candidates respect active visual cooldowns, while expired cooldowns can become eligible again;
+- information probes remain bounded by Guessing v3's two-probe limit;
+- unresolved exits remain non-semantic until Exit Detection v2 reaches `semantic_ready` or an observed crossing confirms them;
+- Run21's immediate entry guard and short repeated-link hold remain authoritative even during controlled recovery.
+
 ## Diagnostics
 
 Every Autonomy prediction snapshot records:
@@ -96,7 +110,7 @@ Every Autonomy prediction snapshot records:
 - confidence, information value, novelty, distance, loop risk and failure cost;
 - uncertainty budget limit/spent/remaining.
 
-Run summaries add recovery-level changes, escalations/de-escalations, budget actions/exhaustions/evidence resets, goal switches/commitment holds, selections by kind, long-horizon plans, loop-risk avoids, broad resets, and empty-tier escalations.
+Run summaries add recovery-level changes, escalations/de-escalations, budget actions/exhaustions/evidence resets, goal switches/commitment holds, selections by kind, long-horizon plans, loop-risk avoids, broad resets, empty-tier escalations, frontier grace escalations, and frontier actions selected after unified ranking.
 
 ## Shadow replay
 
@@ -124,8 +138,9 @@ The first substantial live run should preserve existing learned memory and prefe
 - materially less high-level goal churn;
 - no repeated same-link burst caused by Autonomy;
 - learned warps remain reconsiderable during genuine stalls;
-- reachable frontiers prevent premature expensive recovery;
+- productive frontiers keep winning while stale/no-new-evidence frontiers stop pinning recovery forever;
 - new evidence reopens an exhausted option only when its fingerprint actually changes;
+- no active-cooldown visual/geometry candidate is routed prematurely;
 - no persistent unresolved Exit Detection v2 semantic leak;
 - shadow replay shows no unexplained large-score selection inconsistency;
 - Run Doctor v1.0.4 produces no new false-positive family on normal dialogue/menu settling.
