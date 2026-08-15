@@ -13,6 +13,7 @@ from . import run_doctor_incidents as incident_engine
 from . import run_doctor_reasoning as reasoning_engine
 from . import run_doctor_calibration_v103 as calibration_engine
 from . import run_doctor_memory_v103 as memory_engine
+from . import run_doctor_menu_v103 as menu_engine
 
 
 RUN_DOCTOR_VERSION = "1.0.3"
@@ -38,15 +39,7 @@ def _historical_summary_value(run: foundation.NormalizedRun, key: str) -> int | 
     return None
 
 
-# v0.2 accidentally returned None as soon as summary.json lacked a counter,
-# preventing its intended fallback to historical run_report.policy_summary.
-# Install the corrected semantics at the trusted release boundary so historical
-# detector modules remain stable while the trusted release can analyze both layouts.
 reasoning_engine._summary_value = _historical_summary_value
-
-
-# Preserve the pre-calibration analyzer so comparison and direct analysis can use
-# the same trusted calibration layer without changing the older v0.x modules.
 _RAW_INCIDENT_ANALYZE = incident_engine.analyze_run
 
 
@@ -56,12 +49,10 @@ def _trusted_incident_analyze(
 ) -> incident_engine.IncidentDoctorReport:
     raw = _RAW_INCIDENT_ANALYZE(run, thresholds)
     calibrated = calibration_engine.calibrate_incident_report(run, raw)
-    return memory_engine.augment_incident_report(run, calibrated)
+    calibrated = memory_engine.augment_incident_report(run, calibrated)
+    return menu_engine.augment_incident_report(run, calibrated)
 
 
-# comparison_engine resolves incident_engine.analyze_run dynamically from the
-# shared module object, so patching the trusted release boundary keeps candidate
-# and baseline analysis consistent while leaving legacy detector modules intact.
 incident_engine.analyze_run = _trusted_incident_analyze
 
 
