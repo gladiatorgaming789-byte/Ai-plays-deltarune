@@ -12,6 +12,7 @@ from . import run_doctor_compare as comparison_engine
 from . import run_doctor_incidents as incident_engine
 from . import run_doctor_reasoning as reasoning_engine
 from . import run_doctor_calibration_v103 as calibration_engine
+from . import run_doctor_memory_v103 as memory_engine
 
 
 RUN_DOCTOR_VERSION = "1.0.3"
@@ -54,7 +55,8 @@ def _trusted_incident_analyze(
     thresholds: foundation.DoctorThresholds | None = None,
 ) -> incident_engine.IncidentDoctorReport:
     raw = _RAW_INCIDENT_ANALYZE(run, thresholds)
-    return calibration_engine.calibrate_incident_report(run, raw)
+    calibrated = calibration_engine.calibrate_incident_report(run, raw)
+    return memory_engine.augment_incident_report(run, calibrated)
 
 
 # comparison_engine resolves incident_engine.analyze_run dynamically from the
