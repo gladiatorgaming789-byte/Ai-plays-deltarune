@@ -36,7 +36,7 @@ Persistent unresolved semantic-exit records by run:
 
 Run 8 contains 28 `geometry_candidate` leaks and 2 `needs_approach_evidence` leaks. These counts are invariant failures, not judgments about the correct game route: the semantic field disagrees with the detector's own state.
 
-**Fix:** `Run21MultiRunExplorer` re-evaluates exit semantics after every metadata refresh and when loading existing memory. Candidate evidence is preserved, but `possible_exit` is cleared unless the candidate is `semantic_ready` or confirmed by an observed crossing.
+**Fix:** Run21 re-evaluates exit semantics after every metadata refresh and when loading existing memory. Candidate evidence is preserved, but `possible_exit` is cleared unless the candidate is `semantic_ready` or confirmed by an observed crossing.
 
 ### 2. One-sided compact obstructions were over-promoted
 
@@ -47,11 +47,13 @@ The new Run Doctor replay finds repeated one-side guess-selection streaks in Run
 **Fix:** Entity Detection v2 removes the semantic-sized one-side bonus. One-side compact collision remains an `unknown_but_interesting` obstruction. During genuine story pressure it may receive a bounded concrete test instead of being ignored forever:
 
 - at most 5 approach/planner decisions per weak-candidate episode;
-- route distance no greater than 6 learned cells;
-- at most 3 weak-candidate episodes per room/story epoch;
+- route distance no greater than 6 learned cells for a cheap weak-evidence probe;
+- there is no permanent room-wide candidate-count cap: each candidate is bounded individually so candidate #4 cannot become impossible merely because three scenery candidates were encountered first;
 - one exact interaction test with no response is strong negative evidence;
 - a response-producing interaction immediately confirms the learned interactable evidence;
-- multi-side collision geometry and already confirmed response evidence are not weakened.
+- multi-side collision geometry and already confirmed response evidence are not weakened;
+- legacy **route-only** failures such as `no safe learned approach remained` are reopened for a bounded test because inability to reach a candidate is not evidence that the candidate itself is non-interactive;
+- legacy concrete no-response interaction tests remain negative evidence and are not reopened.
 
 This preserves the earlier lesson that weak evidence must remain testable without allowing it to consume dozens of decisions.
 
@@ -66,15 +68,23 @@ Direct replay detects:
 
 **Fix:** adaptive capture recovery fingerprints usable primary frames. After 8 repeated frames it periodically probes an independent backend (desktop when foreground, client BitBlt when background). A genuinely different usable alternate frame replaces the current observation and records recovery diagnostics. A static scene whose alternate backend matches the primary is left alone.
 
-### 4. Repeated two-room link ping-pong
+### 4. Repeated two-room link ping-pong and legacy cooldown conflict
 
 The existing arrival escape and rapid A-B-A checks handle immediate returns but do not cover repeated later re-entry through the same room link. Run 3 contains four bathroom/house link crossings in a short window. Run 8 crosses the same Dark World room pair seven times in 175 decisions.
 
-**Fix:** Run21 adds a temporary behavior-only guard. Three crossings of the same unordered learned link within 220 navigation steps and the same story epoch activate a 120-step exact-warp-direction cooldown. The learned portal remains in memory, its semantic role is not demoted, and the cooldown expires automatically. This complements Warp Classification v2 rather than restoring permanent `backtrack = bad` semantics.
+A second problem was exposed by Run 7's terminal stall: an older Run2 safety layer starts a 600-navigation-step cooldown on every crossed room link. Warp Classification v2 later made return-prone/arrival warps eligible again under genuine room-completion pressure, but the old blanket cooldown was still checked first. A learned recovery option could therefore remain unavailable for most or all of a stall even though the newer policy explicitly intended to reconsider it.
+
+**Fix:** Run21 adds a temporary behavior-only repeated-link guard. Three crossings of the same unordered learned link within 220 navigation steps and the same story epoch activate a 120-step exact-warp-direction hold. The learned portal remains in memory, its semantic role is not demoted, and the hold expires automatically. Separately, strong room-completion pressure can override the old blanket 600-step cooldown. The new short repeated-link hold remains authoritative even under pressure, preserving anti-ping-pong safety. This reconciles rather than replaces Warp Classification v2.
 
 ### 5. Objective churn is a symptom, not a reporting bug
 
-Several long runs show roughly 150–219 objective identity changes. `ObjectiveManager` already excludes changing explanation text from objective identity, so this is primarily genuine switching between exploration, interaction, exit search, and recovery. The calibration deliberately does not hide the signal with objective hysteresis. The next live runs should show whether churn naturally falls after weak-guess, exit-memory, capture, and room-link thrashing are reduced.
+Several long runs show roughly 150–219 objective identity changes. `ObjectiveManager` already excludes changing explanation text from objective identity, so this is primarily genuine switching between exploration, interaction, exit search, and recovery. The calibration deliberately does not hide the signal with objective hysteresis. The next live runs should show whether churn naturally falls after weak-guess, exit-memory, capture, room-link, and recovery thrashing are reduced.
+
+### 6. Run Doctor save-menu settle false positive
+
+Run 7's previous Doctor report flags a 38-step repeated-`wait` streak. Raw events show that every wait occurs in the same already-confirmed save-point menu with the explicit reason `wait for the menu to close`, and the sequence then returns to overworld. That is a demonstrated passive settle sequence, not a generic stuck-action loop.
+
+**Fix:** Trusted Run Doctor v1.0.3 suppresses this finding only when at least 90% of the interval is the confirmed save-menu settle state **and** the recorded run subsequently demonstrates that the menu actually closes. A save menu that never exits remains diagnosable.
 
 ## Run Doctor v1.0.3
 
@@ -85,9 +95,13 @@ Trusted Run Doctor v1.0.3 adds read-only detectors for the newly proven failure 
 - `unresolved_exit_semantic_leak`
 - `capture_stale_while_player_moves`
 
-The exit-memory invariant check reads the final saved `navigation.json` as well as lifecycle updates, so inherited stale semantic labels cannot disappear merely because a later run did not touch that region.
+The exit-memory invariant check reads the final saved `navigation.json` as well as lifecycle updates, so inherited stale semantic labels cannot disappear merely because a later run did not touch that region. v1.0.3 also calibrates the demonstrated save-point settle false positive.
 
 Threshold replay against all eight source runs shows the intended distribution: weak-guess findings appear in the runs where long same-candidate commitments are present; the broader link detector catches Run 3 and Run 8; moving-capture findings appear in Run 3 and Run 4; and the final-memory invariant follows the persistent exit leak as it accumulates. The very short Run 6 does not generate the weak-guess, ping-pong, or moving-capture findings, providing a useful negative control.
+
+## Speed note
+
+Run 2 explicitly requested manual 10x AI timing while recording zero DRSPEED packets. The saved speed state correctly marks this as `unverified`. The calibration does not silently reinterpret an explicitly selected manual multiplier as 1x; Run Doctor keeps the timing warning prominent. For timing-sensitive behavioral calibration, use 1x or Auto with working DRSPEED verification.
 
 ## Learning-memory policy
 
@@ -98,14 +112,16 @@ Do **not** wipe the existing learned navigation memory for this update. Run21 pe
 - interaction outcomes remain;
 - visual evidence ledgers remain;
 - unresolved exit labels are downgraded without deleting their evidence;
-- weak one-side entity labels are downgraded without deleting the collision observation.
+- weak one-side entity labels are downgraded without deleting the collision observation;
+- route-only failures are distinguished from real no-response interaction tests.
 
 A fresh live run is still required to validate behavior after migration. The main next-run measures are:
 
 - unresolved semantic-exit leak count should be zero after load/save;
-- long one-side selected-guess streaks should disappear or remain below the bounded budget;
+- long one-side selected-guess streaks should disappear or remain below the per-candidate bounded approach budget;
 - adaptive capture diagnostics should show whether alternate backends recover frozen primary captures;
 - same-link crossing bursts should be reduced while later legitimate portal reuse remains possible;
+- legacy-link cooldown pressure overrides should appear only after genuine room-completion pressure;
 - objective churn should decrease as a consequence of reduced planner thrash, not because it was hidden.
 
 No DeltaMod/GML code is changed by this calibration.
