@@ -65,14 +65,17 @@ from .adaptive_capture import install_adaptive_capture_recovery  # noqa: E402
 
 install_adaptive_capture_recovery()
 
-from .run21_multirun_fixes import Run21MultiRunExplorer  # noqa: E402
+# Run21's final compatibility layer keeps the new short repeated-link guard but
+# lets genuine room-completion pressure outlive the old blanket 600-step link
+# cooldown that otherwise prevented learned-warp recovery.
+from .run21_link_cooldowns import Run21CooldownExplorer  # noqa: E402
 
 
 class HierarchicalPolicy:
     """Specialized reflex controllers wrapped around the learned explorer."""
 
     def __init__(self, seed: int = 0, memory_path: Path | None = None):
-        self.explorer = Run21MultiRunExplorer(seed, memory_path)
+        self.explorer = Run21CooldownExplorer(seed, memory_path)
         self.objectives = ObjectiveManager()
         self.dialogue = DialogueReader()
         self.battle = BattleController()
