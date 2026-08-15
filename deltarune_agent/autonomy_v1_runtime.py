@@ -32,6 +32,28 @@ class AutonomyV1RuntimeExplorer(AutonomyV1Explorer):
         state = str(record.get("guess_state") or "proposed")
         return state not in {"confirmed", "rejected", "retired"}
 
+    def _collect_geometry_exit_options(
+        self,
+        room: str,
+        cell: tuple[int, int],
+    ) -> list[AutonomyOption]:
+        # The core layer deliberately lets an expired legacy cooldown become
+        # active again. Geometry candidates also need to honor a cooldown that
+        # is *still* active; unlike semantic visual collection, their collector
+        # does not call _visual_goal_is_cooling itself.
+        options = super()._collect_geometry_exit_options(room, cell)
+        filtered: list[AutonomyOption] = []
+        for option in options:
+            key = option.metadata.get("key")
+            if (
+                isinstance(key, tuple)
+                and len(key) == 3
+                and self._visual_goal_is_cooling(key)
+            ):
+                continue
+            filtered.append(option)
+        return filtered
+
     def _prepare_retry_interaction_goal(
         self,
         option: AutonomyOption,
