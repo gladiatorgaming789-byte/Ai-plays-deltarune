@@ -65,17 +65,17 @@ from .adaptive_capture import install_adaptive_capture_recovery  # noqa: E402
 
 install_adaptive_capture_recovery()
 
-# Run21's final explorer combines semantic migration, bounded weak-entity tests,
-# repeated-link safety, recovery-pressure compatibility, and route-only failure
-# migration learned from the eight-run calibration.
-from .run21_final import Run21Explorer  # noqa: E402
+# Autonomy v1 sits above the completed Run21 stack. It coordinates recovery
+# options without replacing the perception, semantic migration, anti-bounce,
+# or persistence behavior learned by the lower layers.
+from .autonomy_v1 import AutonomyV1Explorer  # noqa: E402
 
 
 class HierarchicalPolicy:
     """Specialized reflex controllers wrapped around the learned explorer."""
 
     def __init__(self, seed: int = 0, memory_path: Path | None = None):
-        self.explorer = Run21Explorer(seed, memory_path)
+        self.explorer = AutonomyV1Explorer(seed, memory_path)
         self.objectives = ObjectiveManager()
         self.dialogue = DialogueReader()
         self.battle = BattleController()
