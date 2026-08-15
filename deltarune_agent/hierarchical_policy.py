@@ -27,7 +27,6 @@ install_warp_classification_v2()
 from .guessing_v3_bootstrap import install_guessing_v3  # noqa: E402
 
 install_guessing_v3()
-from .run20_run_analysis_fixes import Run20RunAnalysisExplorer  # noqa: E402
 
 
 # runner.py imports this module before progress.py. Install the exact-room-bounds
@@ -41,9 +40,10 @@ from .guessing_v3_screen import install_guessing_v3_screen_observer  # noqa: E40
 
 install_guessing_v3_screen_observer()
 
-# Exit Detection v2 must be last in the visual/guess stack: it interprets the
-# final Run15 analyzer output, uses Guessing v3 multi-view measurements, and
-# prevents one-frame exit-like scenery from becoming an actionable route.
+# Exit Detection v2 interprets the final Run15 analyzer output and uses Guessing
+# v3 multi-view measurements. Entity Detection v2 must follow it so its belief
+# wrapper preserves Exit v2's evidence calibration while weakening only
+# one-sided entity semantics.
 from .exit_detection_v2 import install_exit_detection_v2  # noqa: E402
 from .exit_detection_v2_confirmation import (  # noqa: E402
     install_exit_detection_v2_confirmation,
@@ -51,17 +51,28 @@ from .exit_detection_v2_confirmation import (  # noqa: E402
 from .exit_detection_v2_transition_guard import (  # noqa: E402
     install_exit_detection_v2_transition_guard,
 )
+from .entity_detection_v2 import install_entity_detection_v2  # noqa: E402
 
 install_exit_detection_v2()
 install_exit_detection_v2_confirmation()
 install_exit_detection_v2_transition_guard()
+install_entity_detection_v2()
+
+# The adaptive observer wrapper rotates to an independent capture route after a
+# usable bitmap repeats for an implausibly long streak. It is safe to install
+# here because runner.py imports HierarchicalPolicy before ScreenObserver.
+from .adaptive_capture import install_adaptive_capture_recovery  # noqa: E402
+
+install_adaptive_capture_recovery()
+
+from .run21_multirun_fixes import Run21MultiRunExplorer  # noqa: E402
 
 
 class HierarchicalPolicy:
     """Specialized reflex controllers wrapped around the learned explorer."""
 
     def __init__(self, seed: int = 0, memory_path: Path | None = None):
-        self.explorer = Run20RunAnalysisExplorer(seed, memory_path)
+        self.explorer = Run21MultiRunExplorer(seed, memory_path)
         self.objectives = ObjectiveManager()
         self.dialogue = DialogueReader()
         self.battle = BattleController()
