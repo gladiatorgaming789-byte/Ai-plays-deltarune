@@ -85,5 +85,15 @@ class AutonomyV1RuntimeExplorer(AutonomyV1Explorer):
                 "normal/frontier evidence became available"
             )
 
+    def _option_payload(
+        self,
+        option: AutonomyOption,
+        *,
+        selected: bool = False,
+    ) -> dict[str, object]:
+        payload = super()._option_payload(option, selected=selected)
+        payload["base_score"] = round(option.base_score, 4)
+        return payload
+
 
 __all__ = ["AutonomyV1RuntimeExplorer"]
