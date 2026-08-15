@@ -1,0 +1,133 @@
+# Autonomy v1
+
+Autonomy v1 is the recovery and long-horizon planning layer above the Run21 navigation stack. It coordinates only evidence the agent has already learned from gameplay. It contains no room-specific route answer, NPC answer, dialogue answer, or hidden progression rule.
+
+## Trust boundary
+
+Autonomy may use:
+
+- observed open/blocked movement edges;
+- observed room transitions and warp metadata;
+- learned interaction outcomes;
+- Guessing v3 beliefs and evidence state;
+- Exit Detection v2 / Entity Detection v2 lifecycle state;
+- room/frontier coverage;
+- recent loop history;
+- story-progress events that the existing agent observed from game-state consequences.
+
+Autonomy must not use developer playthrough/wiki knowledge as a gameplay input. External sources remain developer-side validation only.
+
+Autonomy does not replace persisted world memory. Recovery tier, active goal, uncertainty budgets, and ranking state are run-local. Existing navigation memory should be preserved across this release.
+
+## Recovery ladder
+
+The planner escalates only when ordinary progress pressure exists:
+
+0. `normal` — existing Run21 behavior.
+1. `frontier` — a reachable learned frontier exists; expensive recovery is capped here.
+2. `evidence` — rank strong observed semantic evidence, response-producing interaction retries, information probes, and observed progression warps.
+3. `bounded_test` — admit weak one-sided entity tests and unresolved boundary tests under explicit action budgets.
+4. `learned_route` — admit ordinary learned warps and multi-room plans over the observed warp graph.
+5. `controlled_backtrack` — allow learned return/suppressed links after strong room-completion pressure, while Run21's short anti-bounce hold remains authoritative.
+6. `broad_reset` — final fallback using the least-visited safe learned direction after structured options are exhausted.
+
+A story-progress event resets the ladder. Newly learned map evidence can de-escalate expensive recovery back toward evidence-first reasoning. A reachable frontier caps the ladder at `frontier` even during a long story stall.
+
+## Uncertainty budgets
+
+Uncertain options have bounded action budgets. A candidate cannot refill its budget by accumulating its own failed approaches, completed tests, or approach counters.
+
+A budget may reset only when its evidence fingerprint changes, for example:
+
+- story epoch changes;
+- an additional independent view is learned;
+- multi-view consistency meaningfully changes;
+- semantic/candidate state changes;
+- belief distribution crosses a coarse evidence bucket;
+- confirmed interaction/transition evidence appears.
+
+Known warps are not uncertainty-budgeted; their cost is controlled by cooldown, loop-risk, recovery level, and learned route reachability.
+
+## Unified option ranking
+
+Every recovery option is converted to a common score using only learned evidence:
+
+- base value by evidence family;
+- confidence;
+- information value;
+- novelty;
+- route distance;
+- temporary loop risk;
+- previous failure cost;
+- fraction of uncertainty budget already spent.
+
+Loop risk is a planning penalty, not a warp semantic role. A portal classified as progression remains progression even if it recently participated in a return loop.
+
+## Goal commitment
+
+An active recovery goal receives a short six-decision commitment window. It remains selected while a challenger is only slightly better. A materially stronger option, invalid target, state change, exhausted budget, new evidence, or room change may break commitment immediately.
+
+This is intended to reduce `explore → inspect → seek_exit → inspect` thrashing without hiding the objective-change metric. If Autonomy works, objective churn should fall naturally.
+
+## Long-horizon learned-map planning
+
+Autonomy searches at most four observed warp hops. Remote room utility is computed only from learned state such as:
+
+- unresolved frontiers;
+- unresolved observed evidence;
+- retryable learned interactions;
+- how little of that room has been mapped.
+
+The planner may conclude that an observed route offers more unexplored/informative state. It never concludes that the route is the correct story route.
+
+## Loop prediction
+
+Warp options are penalized using observed return tendency, recorded loop risk, recent room history, entry-room status, and suppressed-link history. Run21's short repeated-link hold is a hard temporary safety rule. Older blanket/suppressed-link state may still be relaxed by the existing strong-recovery compatibility layer.
+
+## Diagnostics
+
+Every Autonomy prediction snapshot records:
+
+- recovery level, reason, age, story epoch/stall;
+- active goal and age;
+- whether goal commitment held;
+- selected option;
+- top ranked options and scores;
+- confidence, information value, novelty, distance, loop risk and failure cost;
+- uncertainty budget limit/spent/remaining.
+
+Run summaries add recovery-level changes, escalations/de-escalations, budget actions/exhaustions/evidence resets, goal switches/commitment holds, selections by kind, long-horizon plans, loop-risk avoids, broad resets, and empty-tier escalations.
+
+## Shadow replay
+
+`deltarune_agent.autonomy_shadow` re-scores saved Autonomy option snapshots after a run. It can test generic alternative ranking weights and identify unexplained selection disagreements without sending any input to the game or mutating learned memory.
+
+## Run Doctor v1.0.4
+
+Trusted Run Doctor v1.0.4 retains all v1.0.3 calibrations and adds read-only Autonomy checks for:
+
+- repeated recovery-goal switching;
+- bidirectional recovery-level thrashing;
+- uncertainty-budget overruns;
+- repeated selection of a materially lower-scored option without a recorded commitment hold;
+- long high-cost recovery residence;
+- repeated broad-reset fallback.
+
+These are internal consistency/efficiency findings. They do not claim which DELTARUNE route was correct.
+
+## Validation targets
+
+The first substantial live run should preserve existing learned memory and preferably use 1× speed or verified Auto/DRSPEED timing. Primary acceptance targets are:
+
+- no uncertainty option exceeds its budget;
+- no 10–20 action weak one-sided guess chase;
+- materially less high-level goal churn;
+- no repeated same-link burst caused by Autonomy;
+- learned warps remain reconsiderable during genuine stalls;
+- reachable frontiers prevent premature expensive recovery;
+- new evidence reopens an exhausted option only when its fingerprint actually changes;
+- no persistent unresolved Exit Detection v2 semantic leak;
+- shadow replay shows no unexplained large-score selection inconsistency;
+- Run Doctor v1.0.4 produces no new false-positive family on normal dialogue/menu settling.
+
+No DeltaMod/GML changes are part of Autonomy v1.
