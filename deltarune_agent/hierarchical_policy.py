@@ -65,17 +65,16 @@ from .adaptive_capture import install_adaptive_capture_recovery  # noqa: E402
 
 install_adaptive_capture_recovery()
 
-# Autonomy v1 sits above the completed Run21 stack. It coordinates recovery
-# options without replacing the perception, semantic migration, anti-bounce,
-# or persistence behavior learned by the lower layers.
-from .autonomy_v1 import AutonomyV1Explorer  # noqa: E402
+# Autonomy v1 sits above the completed Run21 stack. The final runtime subclass
+# preserves lower-layer cooldown and learned-interaction lifecycle contracts.
+from .autonomy_v1_runtime import AutonomyV1RuntimeExplorer  # noqa: E402
 
 
 class HierarchicalPolicy:
     """Specialized reflex controllers wrapped around the learned explorer."""
 
     def __init__(self, seed: int = 0, memory_path: Path | None = None):
-        self.explorer = AutonomyV1Explorer(seed, memory_path)
+        self.explorer = AutonomyV1RuntimeExplorer(seed, memory_path)
         self.objectives = ObjectiveManager()
         self.dialogue = DialogueReader()
         self.battle = BattleController()
