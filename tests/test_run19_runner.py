@@ -265,9 +265,10 @@ def test_population_training_requires_live_input_and_telemetry(tmp_path):
         run19_runner.run(args)
 
 
-def test_synthetic_population_run_sends_one_input_and_records_four_shadows(tmp_path):
+def test_synthetic_population_run_passes_selected_size_and_records_all_shadows(tmp_path):
     args = _args(tmp_path)
     args.training = True
+    args.population_size = 6
     args.live = True
     args.speed = "1"
     observation = Observation(
@@ -325,7 +326,14 @@ def test_synthetic_population_run_sends_one_input_and_records_four_shadows(tmp_p
         "active_candidate": "balanced",
         "candidates": [
             {"id": candidate_id, "shadow_ranking": [{"id": "move:right"}]}
-            for candidate_id in ("balanced", "explorer", "progress", "loop_safe")
+            for candidate_id in (
+                "balanced",
+                "explorer",
+                "progress",
+                "loop_safe",
+                "explorer_125",
+                "progress_125",
+            )
         ],
     }
 
@@ -418,7 +426,7 @@ def test_synthetic_population_run_sends_one_input_and_records_four_shadows(tmp_p
         run19_runner, "EpisodeTracker", return_value=tracker
     ), patch.object(
         run19_runner.TrainingWorkspace, "create", return_value=workspace
-    ), patch.object(
+    ) as create_workspace, patch.object(
         run19_runner, "ScreenObserver", return_value=SimpleNamespace(observe=lambda _step: observation)
     ), patch.object(
         run19_runner, "VisualStateDetector", return_value=detector
@@ -443,9 +451,10 @@ def test_synthetic_population_run_sends_one_input_and_records_four_shadows(tmp_p
     ):
         run19_runner.run(args)
 
+    assert create_workspace.call_args.kwargs["population_size"] == 6
     assert controller.actions == ["right"]
     assert policy.observed == 1
     assert policy.handoffs == 1
     assert len(tracker.records) == 1
-    assert len(tracker.records[0]["prediction_snapshot"]["training"]["candidates"]) == 4
+    assert len(tracker.records[0]["prediction_snapshot"]["training"]["candidates"]) == 6
     assert workspace.finalized is True

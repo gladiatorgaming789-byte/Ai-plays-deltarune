@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import pytest
+
 from deltarune_agent.gui import (
     MapTransform,
     RoomMap,
@@ -123,8 +125,20 @@ def test_run_speed_defaults_to_auto_and_accepts_manual_override():
 
 
 def test_run_population_training_is_explicit_and_off_by_default():
-    assert build_parser().parse_args(["run"]).training is False
-    assert build_parser().parse_args(["run", "--training"]).training is True
+    default = build_parser().parse_args(["run"])
+    configured = build_parser().parse_args(
+        ["run", "--training", "--population-size", "9"]
+    )
+    assert default.training is False
+    assert default.population_size == 4
+    assert configured.training is True
+    assert configured.population_size == 9
+
+
+@pytest.mark.parametrize("value", ("1", "17"))
+def test_run_population_size_rejects_values_outside_safe_range(value: str):
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["run", "--population-size", value])
 
 
 def test_speed_status_distinguishes_sync_manual_and_fallback():

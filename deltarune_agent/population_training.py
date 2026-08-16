@@ -9,7 +9,7 @@ from typing import Iterable, Mapping, Sequence
 from uuid import uuid4
 
 from .reinforcement import ReinforcementMemory, RewardSettings
-from .strategy import StrategyGenome, population_genomes
+from .strategy import DEFAULT_POPULATION_SIZE, StrategyGenome, population_genomes
 
 
 TRAINING_SCHEMA_VERSION = 1
@@ -166,13 +166,17 @@ class PopulationCoordinator:
         events_path: Path,
         reward_settings: RewardSettings,
         known_rooms: Iterable[str] = (),
+        population_size: int = DEFAULT_POPULATION_SIZE,
     ) -> None:
         self.session_id = session_id or uuid4().hex
         self.events_path = events_path
         self.reward_settings = reward_settings
         self.baseline_reinforcement = baseline_reinforcement
         self.candidates: list[CandidateState] = []
-        for candidate_id, label, genome in population_genomes(baseline_genome):
+        for candidate_id, label, genome in population_genomes(
+            baseline_genome,
+            population_size,
+        ):
             directory = candidates_directory / candidate_id
             directory.mkdir(parents=True, exist_ok=True)
             reinforcement = ReinforcementMemory.load(directory / "reinforcement.json")
@@ -195,7 +199,12 @@ class PopulationCoordinator:
         self._ranking_buffer: dict[str, dict[str, float]] = {}
         self._last_options: list[dict[str, object]] = []
         self._handoff_ready_reason: str | None = None
-        self._events("training_started", candidate=self.active.candidate_id)
+        self._events(
+            "training_started",
+            candidate=self.active.candidate_id,
+            population_size=len(self.candidates),
+            candidate_ids=[candidate.candidate_id for candidate in self.candidates],
+        )
 
     @property
     def active(self) -> CandidateState:
@@ -540,6 +549,7 @@ class PopulationCoordinator:
         return {
             "schema_version": TRAINING_SCHEMA_VERSION,
             "session_id": self.session_id,
+            "population_size": len(self.candidates),
             "active_candidate": self.active.candidate_id,
             "segment": self.segment.as_dict(self.current_step),
             "handoff_pending": self._handoff_ready_reason is not None,

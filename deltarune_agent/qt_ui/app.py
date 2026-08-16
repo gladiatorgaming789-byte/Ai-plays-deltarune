@@ -31,6 +31,11 @@ from PySide6.QtWidgets import (
 from ..build_status import BuildStatus, inspect_build
 from ..gui import format_speed_status
 from ..run19_profiles import MigrationResult, Profile, ProfileStore
+from ..strategy import (
+    DEFAULT_POPULATION_SIZE,
+    MAX_POPULATION_SIZE,
+    MIN_POPULATION_SIZE,
+)
 from ..version import AGENT_REVISION
 from .background import BackgroundLayer
 from .controller import RunController
@@ -265,6 +270,18 @@ class OperatorWindow(QMainWindow):
         self.run_mode.setCurrentText(str(self.settings.value("run/mode", "Normal run")))
         self.run_mode.setMinimumWidth(165)
         primary.addWidget(self.run_mode)
+        self.population_size = QSpinBox()
+        self.population_size.setRange(MIN_POPULATION_SIZE, MAX_POPULATION_SIZE)
+        self.population_size.setValue(
+            int(self.settings.value("run/population_size", DEFAULT_POPULATION_SIZE))
+        )
+        self.population_size.setPrefix("AIs  ")
+        self.population_size.setToolTip(
+            "Strategy heads used by Population training. More heads require longer runs."
+        )
+        self.population_size.setMinimumWidth(90)
+        primary.addWidget(self.population_size)
+        self.run_mode.currentTextChanged.connect(self._run_mode_changed)
         self.steps = QSpinBox()
         self.steps.setRange(1, 10_000_000)
         self.steps.setValue(int(self.settings.value("run/steps", 2000)))
@@ -303,7 +320,13 @@ class OperatorWindow(QMainWindow):
         secondary.addWidget(self.speed_status)
         layout.addLayout(primary)
         layout.addLayout(secondary)
+        self._run_mode_changed(self.run_mode.currentText())
         return bar
+
+    def _run_mode_changed(self, mode: str) -> None:
+        self.population_size.setEnabled(
+            mode == "Population training" and not self.controller.running
+        )
 
     def _connect(self) -> None:
         self.controller.eventReceived.connect(self._controller_event)
@@ -369,12 +392,14 @@ class OperatorWindow(QMainWindow):
         self.settings.setValue("run/game_window", self.game_window.text())
         self.settings.setValue("run/speed", self.speed.currentText())
         self.settings.setValue("run/mode", self.run_mode.currentText())
+        self.settings.setValue("run/population_size", self.population_size.value())
         self.controller.start_run(
             steps=self.steps.value(),
             game_window=self.game_window.text(),
             speed=self.speed.currentText(),
             live=self.live_input.isChecked(),
             training=training,
+            population_size=self.population_size.value(),
         )
         if training:
             self.select_page("training")
@@ -399,11 +424,14 @@ class OperatorWindow(QMainWindow):
         running = state in {"starting", "running", "stopping"}
         self.start_button.setEnabled(not running)
         self.run_mode.setEnabled(not running)
+        self.population_size.setEnabled(
+            not running and self.run_mode.currentText() == "Population training"
+        )
         self.stop_button.setEnabled(state in {"starting", "running"})
         labels = {
             "starting": "STARTING",
             "running": (
-                "TRAINING LIVE"
+                f"TRAINING {self.population_size.value()} AIs"
                 if self.run_mode.currentText() == "Population training"
                 else "RUNNING LIVE" if self.live_input.isChecked() else "RUNNING DRY"
             ),

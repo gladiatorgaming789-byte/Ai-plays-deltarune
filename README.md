@@ -16,7 +16,7 @@ to protected copies.
 - Sends controls only when `--live` is supplied.
 - Records buffered events, ranked AI predictions, navigation updates, periodic
   screenshots, diagnostics, memory snapshots, and exported maps under `runs/`.
-- Can compare four isolated strategy heads in a one-game, review-then-promote
+- Can compare a configurable population of isolated strategy heads in a one-game, review-then-promote
   Population Training mode without changing active profile memory during a run.
 - Includes an emergency stop: move the mouse to the upper-left corner, or press
   `Ctrl+C` in the controller terminal.
@@ -179,11 +179,13 @@ python -m deltarune_agent run --live --steps 200
 To train navigation/interaction strategy heads over one live game, use:
 
 ```powershell
-python -m deltarune_agent run --training --live --steps 2000
+python -m deltarune_agent run --training --population-size 8 --live --steps 4000
 ```
 
-Population Training requires telemetry. One candidate owns each complete goal
-and consequence segment while all four non-mutating heads rank the same legal
+Population Training requires telemetry. Choose 2–16 AIs with
+`--population-size`; the default of 4 preserves the original Balanced,
+Explorer, Progress, and Loop-safe population. One candidate owns each complete
+goal and consequence segment while every non-mutating head ranks the same legal
 options. Profile memory is staged inside the run folder and is changed only if
 you explicitly review and promote an eligible winner in the GUI. See
 `POPULATION_TRAINING.md` for scoring, safety gates, artifacts, and rollback.
@@ -271,8 +273,9 @@ out.
 The **Live input** checkbox remains off by default. Enable it before pressing
 **Start AI** to send controls to Deltarune; leave it off for a safe dry run. The
 mode selector starts a normal run by default. Choosing **Population training**
-requires live input and telemetry, opens the live four-candidate scorecard, and
-never promotes a winner without a separate confirmation. The
+requires live input and telemetry, opens the live candidate scorecard, and
+enables an **AIs** selector for 2–16 candidates. It never promotes a winner
+without a separate confirmation. The
 speed selector defaults to **Auto**. Its status shows game speed, effective AI
 speed, and synchronization source, while F8, F9, and F10 target only the
 Deltarune window and mirror the mod's toggle/decrease/increase controls.

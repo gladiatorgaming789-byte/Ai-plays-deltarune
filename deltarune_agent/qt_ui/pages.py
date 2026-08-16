@@ -1298,7 +1298,9 @@ class TrainingPage(QWidget):
         heading.addWidget(
             PageHeader(
                 "Population Training",
-                "Four isolated strategy heads share observed world evidence; one candidate owns each complete causal segment.",
+                "A configurable population of isolated strategy heads shares "
+                "observed world evidence; one candidate owns each complete "
+                "causal segment.",
             ),
             1,
         )
@@ -1460,6 +1462,7 @@ class TrainingPage(QWidget):
         active_name = str(active_candidate.get("label") or active) if active_candidate else active
         self.active_label.setText(
             f"{'Recommended winner' if historical else 'Active candidate'}: {active_name or 'not available'}"
+            + (f" · {len(candidates)} AIs" if candidates else "")
         )
         if segment:
             self.segment_label.setText(

@@ -21,6 +21,7 @@ from .perception import (
 from .progress import EpisodeTracker
 from .run_artifacts import write_json
 from .speed import SpeedSynchronizer
+from .strategy import DEFAULT_POPULATION_SIZE, validate_population_size
 from .telemetry import TelemetryReceiver, fuse_perception
 from .training_workspace import TrainingWorkspace
 from .window import (
@@ -82,6 +83,9 @@ def run(args: argparse.Namespace) -> Path:
             "steps must be positive; interval and countdown must be non-negative"
         )
     training_enabled = bool(getattr(args, "training", False))
+    population_size = validate_population_size(
+        getattr(args, "population_size", DEFAULT_POPULATION_SIZE)
+    )
     if training_enabled and not args.live:
         raise ValueError("Population training requires --live input.")
     if training_enabled and args.no_telemetry:
@@ -110,10 +114,12 @@ def run(args: argparse.Namespace) -> Path:
         if training_enabled:
             effective_config = dict(vars(args))
             effective_config["training"] = True
+            effective_config["population_size"] = population_size
             tracker = EpisodeTracker(config=effective_config)
             training_workspace = TrainingWorkspace.create(
                 tracker.directory,
                 Path(args.memory).parent,
+                population_size=population_size,
             )
             effective_memory = training_workspace.navigation_path
             effective_visual_memory = training_workspace.visual_memory_path

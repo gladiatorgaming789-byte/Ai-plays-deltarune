@@ -11,6 +11,10 @@ from uuid import uuid4
 from PySide6.QtCore import QObject, QProcess, QTimer, Signal
 
 from ..gui import EVENT_PREFIX
+from ..strategy import (
+    DEFAULT_POPULATION_SIZE,
+    validate_population_size,
+)
 from ..window import find_window, post_window_key, remember_window
 
 
@@ -46,6 +50,7 @@ class RunController(QObject):
         speed: str,
         live: bool,
         training: bool = False,
+        population_size: int = DEFAULT_POPULATION_SIZE,
     ) -> None:
         if self.running:
             return
@@ -76,7 +81,13 @@ class RunController(QObject):
         if live:
             arguments.append("--live")
         if training:
-            arguments.append("--training")
+            arguments.extend(
+                (
+                    "--training",
+                    "--population-size",
+                    str(validate_population_size(population_size)),
+                )
+            )
         self.stateChanged.emit("starting")
         self.process.start(sys.executable, arguments)
 

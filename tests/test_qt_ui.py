@@ -59,9 +59,11 @@ def test_qt_controller_adds_training_flag_and_keeps_stop_file_out_of_memory(
             speed="Auto",
             live=True,
             training=True,
+            population_size=9,
         )
     arguments = start.call_args.args[1]
     assert "--training" in arguments
+    assert arguments[arguments.index("--population-size") + 1] == "9"
     assert "--live" in arguments
     assert controller.stop_file is not None
     assert tmp_path / "memory" not in controller.stop_file.parents
@@ -144,6 +146,12 @@ def test_operator_window_has_all_pages_and_switches_theme(qapp, tmp_path: Path) 
     qapp.processEvents()
     assert window.pages.count() == 7
     assert set(window.page_indexes) == {"map", "runs", "training", "profiles", "learning", "logs", "settings"}
+    assert window.population_size.minimum() == 2
+    assert window.population_size.maximum() == 16
+    window.run_mode.setCurrentText("Normal run")
+    assert window.population_size.isEnabled() is False
+    window.run_mode.setCurrentText("Population training")
+    assert window.population_size.isEnabled() is True
     window.select_page("settings")
     assert window.pages.currentIndex() == window.page_indexes["settings"]
     window.apply_appearance("cyber_city", BackgroundSettings(reduce_motion=True), persist=False)

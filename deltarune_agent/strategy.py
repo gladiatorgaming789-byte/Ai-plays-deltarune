@@ -9,6 +9,9 @@ from uuid import uuid4
 
 STRATEGY_SCHEMA_VERSION = 1
 STRATEGY_FILENAME = "strategy.json"
+MIN_POPULATION_SIZE = 2
+DEFAULT_POPULATION_SIZE = 4
+MAX_POPULATION_SIZE = 16
 
 
 def _coefficient(value: object, default: float) -> float:
@@ -167,19 +170,77 @@ POPULATION_VARIANTS: tuple[tuple[str, str, Mapping[str, float]], ...] = (
 )
 
 
+def validate_population_size(value: object) -> int:
+    """Return a supported population size or raise a useful error."""
+
+    try:
+        size = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("population size must be an integer") from exc
+    if not MIN_POPULATION_SIZE <= size <= MAX_POPULATION_SIZE:
+        raise ValueError(
+            f"population size must be between {MIN_POPULATION_SIZE} and "
+            f"{MAX_POPULATION_SIZE}"
+        )
+    return size
+
+
+def _scaled_multipliers(
+    multipliers: Mapping[str, float],
+    intensity: float,
+) -> dict[str, float]:
+    """Move a named strategy farther from neutral without changing its shape."""
+
+    return {
+        name: max(0.0, 1.0 + (float(multiplier) - 1.0) * float(intensity))
+        for name, multiplier in multipliers.items()
+    }
+
+
 def population_genomes(
     baseline: StrategyGenome,
+    size: int = DEFAULT_POPULATION_SIZE,
 ) -> tuple[tuple[str, str, StrategyGenome], ...]:
-    return tuple(
+    """Build a deterministic, bounded population around ``baseline``.
+
+    Sizes two through four are prefixes of the original v1 population, so the
+    default remains byte-for-byte behavior-compatible. Larger populations add
+    progressively stronger Explorer, Progress, and Loop-safe family members.
+    They are deliberately deterministic so a recorded size and baseline genome
+    reproduce the same candidates in later analysis.
+    """
+
+    requested = validate_population_size(size)
+    candidates = [
         (candidate_id, label, baseline.mutate(**dict(multipliers)))
-        for candidate_id, label, multipliers in POPULATION_VARIANTS
-    )
+        for candidate_id, label, multipliers in POPULATION_VARIANTS[:requested]
+    ]
+    extra_families = POPULATION_VARIANTS[1:]
+    for extra_index in range(max(0, requested - len(POPULATION_VARIANTS))):
+        family_id, family_label, multipliers = extra_families[
+            extra_index % len(extra_families)
+        ]
+        tier = extra_index // len(extra_families) + 1
+        intensity = 1.0 + tier * 0.25
+        intensity_id = int(round(intensity * 100))
+        candidates.append(
+            (
+                f"{family_id}_{intensity_id}",
+                f"{family_label} {intensity:.2f}x",
+                baseline.mutate(**_scaled_multipliers(multipliers, intensity)),
+            )
+        )
+    return tuple(candidates)
 
 
 __all__ = [
+    "DEFAULT_POPULATION_SIZE",
+    "MAX_POPULATION_SIZE",
+    "MIN_POPULATION_SIZE",
     "POPULATION_VARIANTS",
     "STRATEGY_FILENAME",
     "STRATEGY_SCHEMA_VERSION",
     "StrategyGenome",
     "population_genomes",
+    "validate_population_size",
 ]

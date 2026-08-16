@@ -3,7 +3,7 @@
 ## Completed: one-game Population Training v1
 
 - Versioned strategy genomes preserve the exact former Autonomy defaults.
-- Four deterministic, bounded candidates rescore shared legal options without
+- A configurable population of 2–16 deterministic, bounded candidates rescores shared legal options without
   mutating the authoritative world, goal, budget, trace, or input state.
 - Coherent causal segments use round-robin exposure, UCB1 selection, observed
   outcome scoring, disqualification rules, and deferred safe handoffs.

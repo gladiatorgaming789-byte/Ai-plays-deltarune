@@ -9,7 +9,13 @@ import pytest
 from deltarune_agent.autonomy_v1 import AutonomyOption, RecoveryLevel
 from deltarune_agent.population_training import PopulationCoordinator
 from deltarune_agent.reinforcement import ReinforcementMemory, RewardSettings
-from deltarune_agent.strategy import StrategyGenome, population_genomes
+from deltarune_agent.strategy import (
+    MAX_POPULATION_SIZE,
+    MIN_POPULATION_SIZE,
+    StrategyGenome,
+    population_genomes,
+    validate_population_size,
+)
 from deltarune_agent.training_workspace import (
     TrainingWorkspace,
     memory_inventory,
@@ -70,6 +76,39 @@ def test_population_mutations_are_deterministic_and_clamped() -> None:
         for key, value in genome.to_dict().items()
         if key != "schema_version"
     )
+
+
+def test_population_size_is_configurable_deterministic_and_distinct() -> None:
+    baseline = StrategyGenome.default()
+    for size in (MIN_POPULATION_SIZE, 3, 4, 7, MAX_POPULATION_SIZE):
+        first = population_genomes(baseline, size)
+        second = population_genomes(baseline, size)
+        assert first == second
+        assert len(first) == size
+        assert len({candidate_id for candidate_id, _label, _genome in first}) == size
+        assert all(
+            0.0 <= float(value) <= 10.0
+            for _candidate_id, _label, genome in first
+            for key, value in genome.to_dict().items()
+            if key != "schema_version"
+        )
+    seven = population_genomes(baseline, 7)
+    assert [candidate_id for candidate_id, _label, _genome in seven] == [
+        "balanced",
+        "explorer",
+        "progress",
+        "loop_safe",
+        "explorer_125",
+        "progress_125",
+        "loop_safe_125",
+    ]
+    assert len({genome for _candidate_id, _label, genome in seven}) == 7
+
+
+@pytest.mark.parametrize("value", (MIN_POPULATION_SIZE - 1, MAX_POPULATION_SIZE + 1, "many"))
+def test_population_size_rejects_unsupported_values(value: object) -> None:
+    with pytest.raises(ValueError, match="population size"):
+        validate_population_size(value)
 
 
 def test_shadow_ranking_is_pure_and_does_not_mutate_policy_state(tmp_path: Path) -> None:
@@ -326,10 +365,29 @@ def test_workspace_stages_all_mutable_memory_and_recommends_winner(tmp_path: Pat
     scores = json.loads((run / "training_scores.json").read_text(encoding="utf-8"))
     assert scores["eligible_for_promotion"] is True
     assert scores["recommended_winner"] == "progress"
+    assert scores["population_size"] == 4
     assert (run / "population_events.jsonl").is_file()
     assert (workspace.baseline_memory / "reinforcement.json").is_file()
     assert (workspace.baseline_memory / "strategy.json").is_file()
     assert all((workspace.candidates / name / "strategy.json").is_file() for name in ("balanced", "explorer", "progress", "loop_safe"))
+
+
+def test_workspace_stages_selected_population_and_records_it_in_manifest(tmp_path: Path) -> None:
+    memory = tmp_path / "profile" / "memory"
+    _write_profile(memory)
+    run = tmp_path / "run"
+    run.mkdir()
+    workspace = TrainingWorkspace.create(run, memory, population_size=7)
+    coordinator = workspace.coordinator()
+    manifest = json.loads((run / "training_manifest.json").read_text(encoding="utf-8"))
+
+    assert workspace.population_size == 7
+    assert len(workspace.candidate_ids) == 7
+    assert manifest["population_size"] == 7
+    assert manifest["candidate_ids"] == list(workspace.candidate_ids)
+    assert len(coordinator.candidates) == 7
+    assert coordinator.snapshot()["population_size"] == 7
+    assert all((workspace.candidates / candidate_id).is_dir() for candidate_id in workspace.candidate_ids)
 
 
 def test_promotion_checks_baseline_and_applies_transaction_with_backup(tmp_path: Path) -> None:

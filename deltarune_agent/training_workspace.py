@@ -17,7 +17,13 @@ from .reinforcement import (
     ReinforcementMemory,
     load_reward_settings,
 )
-from .strategy import STRATEGY_FILENAME, StrategyGenome
+from .strategy import (
+    DEFAULT_POPULATION_SIZE,
+    STRATEGY_FILENAME,
+    StrategyGenome,
+    population_genomes,
+    validate_population_size,
+)
 
 
 SHARED_MEMORY_NAMES = (
@@ -103,12 +109,20 @@ class TrainingWorkspace:
     baseline_inventory: dict[str, dict[str, object]]
     session_id: str
     baseline_genome: StrategyGenome
+    population_size: int
+    candidate_ids: tuple[str, ...]
     strategy_warning: str | None = None
 
     @classmethod
-    def create(cls, run_directory: Path, source_memory: Path) -> "TrainingWorkspace":
+    def create(
+        cls,
+        run_directory: Path,
+        source_memory: Path,
+        population_size: int = DEFAULT_POPULATION_SIZE,
+    ) -> "TrainingWorkspace":
         run_directory = Path(run_directory).resolve()
         source_memory = Path(source_memory).resolve()
+        population_size = validate_population_size(population_size)
         root = run_directory / "training_workspace"
         baseline_memory = root / "baseline_memory"
         shared = root / "shared_memory"
@@ -124,6 +138,13 @@ class TrainingWorkspace:
         baseline_reinforcement = source_memory / REINFORCEMENT_MEMORY_FILENAME
         baseline_strategy = source_memory / STRATEGY_FILENAME
         genome, warning = StrategyGenome.load(baseline_strategy)
+        candidate_ids = tuple(
+            candidate_id
+            for candidate_id, _label, _genome in population_genomes(
+                genome,
+                population_size,
+            )
+        )
         _copy_path(
             baseline_reinforcement,
             baseline_memory / REINFORCEMENT_MEMORY_FILENAME,
@@ -134,7 +155,7 @@ class TrainingWorkspace:
             ).flush(force=True)
         genome.save(baseline_memory / STRATEGY_FILENAME)
         session_id = uuid4().hex
-        for candidate_id in ("balanced", "explorer", "progress", "loop_safe"):
+        for candidate_id in candidate_ids:
             directory = candidates / candidate_id
             directory.mkdir(parents=True)
             _copy_path(
@@ -151,6 +172,8 @@ class TrainingWorkspace:
             baseline_inventory=baseline_inventory,
             session_id=session_id,
             baseline_genome=genome,
+            population_size=population_size,
+            candidate_ids=candidate_ids,
             strategy_warning=warning,
         )
         workspace.write_baseline_artifacts()
@@ -193,7 +216,8 @@ class TrainingWorkspace:
                 "workspace": str(self.root),
                 "baseline_memory": str(self.baseline_memory),
                 "shared_memory": str(self.shared_memory),
-                "candidate_ids": ["balanced", "explorer", "progress", "loop_safe"],
+                "population_size": self.population_size,
+                "candidate_ids": list(self.candidate_ids),
                 "baseline_strategy": self.baseline_genome.to_dict(),
                 "strategy_warning": self.strategy_warning,
             },
@@ -214,6 +238,7 @@ class TrainingWorkspace:
             events_path=self.events_path,
             reward_settings=reward_settings,
             known_rooms=_known_rooms(self.navigation_path),
+            population_size=self.population_size,
         )
 
     def finalize(
@@ -271,6 +296,8 @@ class TrainingWorkspace:
         result: dict[str, object] = {
             "schema_version": TRAINING_SCHEMA_VERSION,
             "session_id": self.session_id,
+            "population_size": self.population_size,
+            "candidate_ids": list(self.candidate_ids),
             "eligible_for_promotion": winner is not None,
             "recommended_winner": winner.candidate_id if winner is not None else None,
             "winner_explanation": explanation,

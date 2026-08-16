@@ -18,6 +18,11 @@ from .progress import EpisodeTracker
 from .replay import print_replay, replay_run
 from .run_artifacts import write_json
 from .telemetry import TelemetryReceiver, fuse_perception
+from .strategy import (
+    DEFAULT_POPULATION_SIZE,
+    MAX_POPULATION_SIZE,
+    MIN_POPULATION_SIZE,
+)
 from .window import (
     client_region,
     find_window,
@@ -106,7 +111,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--training",
         action="store_true",
         help=(
-            "run four isolated strategy heads over one live, telemetry-backed game"
+            "run isolated strategy heads over one live, telemetry-backed game"
+        ),
+    )
+    run.add_argument(
+        "--population-size",
+        type=int,
+        choices=range(MIN_POPULATION_SIZE, MAX_POPULATION_SIZE + 1),
+        default=DEFAULT_POPULATION_SIZE,
+        metavar=f"{MIN_POPULATION_SIZE}-{MAX_POPULATION_SIZE}",
+        help=(
+            "number of strategy heads in population training "
+            f"(default: {DEFAULT_POPULATION_SIZE})"
         ),
     )
 

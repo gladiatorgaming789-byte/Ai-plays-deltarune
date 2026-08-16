@@ -1,9 +1,10 @@
 # One-Game Population Training v1
 
-Population Training compares four strategy genomes against one real Deltarune
-run. It does not launch four games and it does not let four controllers send
-competing keys. One authoritative policy owns perception, world evidence,
-navigation state, dialogue, choices, and battle control. Four isolated strategy
+Population Training compares a configurable population of 2–16 strategy
+genomes against one real Deltarune run. It does not launch multiple games and
+it does not let multiple controllers send competing keys. One authoritative
+policy owns perception, world evidence,
+navigation state, dialogue, choices, and battle control. Isolated strategy
 heads rescore the same legal Autonomy options; one candidate owns each complete
 causal segment and is the only candidate whose recommendation can control input
 or receive reinforcement credit.
@@ -21,6 +22,13 @@ Autonomy formula. Every coefficient is clamped to 0–10.
   distance and budget cost.
 - **Loop-safe** strongly penalizes loops and failures.
 
+Four AIs is the compatibility-preserving default. With two or three AIs, the
+stable prefix of that list is used. Above four, the controller adds
+deterministic Explorer, Progress, and Loop-safe family members at 1.25x, 1.50x,
+1.75x, and 2.00x mutation intensity. Coefficients remain clamped to 0–10, IDs
+remain stable, and the chosen population can be reconstructed from the run
+manifest without random mutation noise.
+
 After a reviewed promotion, the winning `strategy.json` becomes the baseline
 for the next population. Each candidate also starts with a private copy of the
 baseline `reinforcement.json`. Shadow scoring only reads these copies; it cannot
@@ -35,9 +43,9 @@ observed story progress, or 64 active overworld decisions. The handoff occurs
 only after safe overworld control returns and after the owning action has been
 recorded and sent. The old candidate's eligibility trace is cleared.
 
-The first eight completed segments are two deterministic round-robin passes.
-Later segments use UCB1 with coefficient 0.75. Candidate points come only from
-observed outcomes:
+The first `2 × population size` completed segments are two deterministic
+round-robin passes. Later segments use UCB1 with coefficient 0.75. Candidate
+points come only from observed outcomes:
 
 | Outcome | Points |
 | --- | ---: |
@@ -63,8 +71,12 @@ story progress, fewer safety penalties, then the stable candidate ID.
 Training requires live input and telemetry:
 
 ```powershell
-python -m deltarune_agent run --training --live --steps 2000
+python -m deltarune_agent run --training --population-size 8 --live --steps 4000
 ```
+
+`--population-size` accepts 2–16 and defaults to 4. More candidates require a
+longer run because every candidate must complete at least two segments and 64
+active decisions before a winner can pass the exposure gate.
 
 The run folder is created before policy initialization. The active profile's
 SHA-256 inventory is captured, then navigation, visual state, remembered room
@@ -73,10 +85,11 @@ views, settings, and window-title memory are copied under
 stores live under `training_workspace/candidates/`. The running policy writes
 only to this workspace; the profile memory stays unchanged.
 
-The GUI's **Training** page shows the segment owner, reason and age, four shadow
-recommendations, exposure, points, normalized score, safety state, and the
-eligibility explanation. Promotion is never automatic. The operator must click
-**Review and promote winner** and confirm it.
+The GUI run bar exposes the same **AIs** selector whenever Population training
+is selected. The **Training** page shows the segment owner, reason and age, all
+shadow recommendations, exposure, points, normalized score, safety state, and
+the eligibility explanation. Promotion is never automatic. The operator must
+click **Review and promote winner** and confirm it.
 
 Before promotion, the current profile inventory must exactly match the training
 baseline. The promotion builds and verifies a complete staged memory directory
@@ -99,7 +112,8 @@ exposure and the run has:
 - successful input cleanup; and
 - no critical finding from Automatic Run Doctor.
 
-Every population run preserves `training_manifest.json`,
+Every population run records its exact `population_size` and `candidate_ids`
+and preserves `training_manifest.json`,
 `baseline_fingerprints.json`, `population_events.jsonl`,
 `training_scores.json`, all candidate genome/reinforcement snapshots, the
 shared staged memory, and the ordinary detailed run artifacts. Crashes,
