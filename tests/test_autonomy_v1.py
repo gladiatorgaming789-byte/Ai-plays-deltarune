@@ -23,6 +23,23 @@ def _budget_stub() -> AutonomyV1Explorer:
     return explorer
 
 
+def test_option_snapshot_exports_base_score_for_shadow_replay() -> None:
+    explorer = AutonomyV1Explorer.__new__(AutonomyV1Explorer)
+    option = AutonomyOption(
+        option_id="evidence:E1",
+        kind="semantic_entity",
+        required_level=RecoveryLevel.EVIDENCE,
+        base_score=4.75,
+        score=7.25,
+    )
+
+    payload = explorer._option_payload(option, selected=True)
+
+    assert payload["base_score"] == 4.75
+    assert payload["score"] == 7.25
+    assert payload["selected"] is True
+
+
 def test_recovery_frontier_caps_expensive_escalation(monkeypatch) -> None:
     explorer = AutonomyV1Explorer.__new__(AutonomyV1Explorer)
     explorer.story_stall_steps = 500

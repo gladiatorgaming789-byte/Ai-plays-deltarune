@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
+from html import escape
 import json
 from pathlib import Path
 import shutil
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QGroupBox,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -38,6 +40,8 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStackedWidget,
     QTabWidget,
+    QTableWidget,
+    QTableWidgetItem,
     QTextBrowser,
     QToolButton,
     QVBoxLayout,
@@ -65,7 +69,13 @@ from ..reinforcement import (
 )
 from ..run19_profiles import Profile, ProfileStore
 from ..world_model import EXPLORATION_REGION_CELLS
-from .artifacts import RunSummary, scan_runs, tail_jsonl
+from .artifacts import (
+    AutonomyWorkbenchSummary,
+    RunSummary,
+    scan_runs,
+    summarize_autonomy_predictions,
+    tail_jsonl,
+)
 from .map_view import RoomMapView
 from .themes import BackgroundSettings, Theme, load_theme_file
 
@@ -629,12 +639,37 @@ class RunsPage(QWidget):
         self.timeline.setReadOnly(True)
         self.predictions = QPlainTextEdit()
         self.predictions.setReadOnly(True)
+        self.autonomy_panel = QWidget()
+        autonomy_layout = QVBoxLayout(self.autonomy_panel)
+        _layout_margins(autonomy_layout, 12)
+        autonomy_note = QLabel(
+            "Read-only view of the AI's recovery goal, ranked alternatives, "
+            "uncertainty budgets, and shadow-policy consistency."
+        )
+        autonomy_note.setWordWrap(True)
+        autonomy_layout.addWidget(autonomy_note)
+        self.autonomy_summary = QTextBrowser()
+        self.autonomy_summary.setMinimumHeight(190)
+        autonomy_layout.addWidget(self.autonomy_summary, 2)
+        self.autonomy_options = QTableWidget(0, 8)
+        self.autonomy_options.setHorizontalHeaderLabels(
+            ("Rank", "Choice", "Option", "Kind", "Score", "Evidence", "Cost / risk", "Budget")
+        )
+        self.autonomy_options.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.autonomy_options.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.autonomy_options.setAlternatingRowColors(True)
+        header = self.autonomy_options.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        autonomy_layout.addWidget(self.autonomy_options, 3)
         self.map_artifacts = QListWidget()
         self.map_artifacts.itemDoubleClicked.connect(self._open_artifact)
         self.diagnostics = QTextBrowser()
         self.tabs.addTab(self.overview, "Overview")
         self.tabs.addTab(self.timeline, "Timeline")
         self.tabs.addTab(self.predictions, "Predictions")
+        self.tabs.addTab(self.autonomy_panel, "Autonomy")
         self.tabs.addTab(self.map_artifacts, "Maps & frames")
         self.tabs.addTab(self.diagnostics, "Diagnostics")
         splitter.addWidget(self.tabs)
@@ -680,6 +715,8 @@ class RunsPage(QWidget):
         self._show_overview(run)
         self.timeline.setPlainText("Loading the latest decisions in the background…")
         self.predictions.setPlainText("Loading the latest predictions in the background…")
+        self.autonomy_summary.setHtml("<h2>Autonomy</h2><p>Loading saved decision snapshots…</p>")
+        self.autonomy_options.setRowCount(0)
         task = _ArtifactTask(run.directory)
         task.signals.loaded.connect(self._artifact_loaded)
         QThreadPool.globalInstance().start(task)
@@ -728,6 +765,93 @@ class RunsPage(QWidget):
             )
         self.timeline.setPlainText("\n\n".join(event_lines) or "No readable decision events.")
         self.predictions.setPlainText("\n".join(prediction_lines) or "No readable prediction records.")
+        prediction_rows = predictions if isinstance(predictions, list) else []
+        records = [
+            value
+            for _line, value in prediction_rows
+            if isinstance(value, Mapping)
+        ]
+        self._show_autonomy(summarize_autonomy_predictions(records))
+
+    @staticmethod
+    def _metric(value: float | None) -> str:
+        return "—" if value is None else f"{value:.2f}"
+
+    def _show_autonomy(self, summary: AutonomyWorkbenchSummary) -> None:
+        self.autonomy_options.setRowCount(0)
+        if not summary.available:
+            self.autonomy_summary.setHtml(
+                "<h2>Autonomy</h2><p>No Autonomy snapshots were found in the loaded "
+                "prediction window. This is expected for runs created before Autonomy v1.</p>"
+            )
+            return
+
+        shadow = summary.shadow
+        disagreements = int(shadow.get("selection_disagreements") or 0)
+        explained = int(shadow.get("commitment_explained_disagreements") or 0)
+        unexplained = int(shadow.get("unexplained_selection_disagreements") or 0)
+        overruns = int(shadow.get("budget_overrun_decisions") or 0)
+        consistency = (
+            "consistent"
+            if unexplained == 0 and overruns == 0
+            else "needs review"
+        )
+        goal = summary.active_goal_id or "none"
+        selected = summary.selected_option_id or "none"
+        commitment = "held the active goal" if summary.commitment_hold else "selected the current leader"
+        budget = summary.active_budget
+        budget_text = "none"
+        if budget:
+            budget_text = (
+                f"{escape(str(budget.get('spent', 0)))} / {escape(str(budget.get('limit', 0)))} spent"
+                f" ({escape(str(budget.get('remaining', 0)))} remaining)"
+            )
+        self.autonomy_summary.setHtml(
+            f"<h2>Autonomy v{summary.version or '?'} · {escape(summary.recovery_level)}</h2>"
+            f"<p><b>Latest snapshot:</b> step {summary.latest_step if summary.latest_step is not None else '?'}"
+            f" · room {escape(summary.latest_room or 'unknown')}<br>"
+            f"<b>Recovery reason:</b> {escape(summary.recovery_reason or 'not recorded')} "
+            f"(level age {summary.recovery_level_age}, story stall {summary.story_stall_steps})</p>"
+            f"<p><b>Active goal:</b> {escape(goal)}"
+            f" ({escape(summary.active_goal_kind or 'no kind')}, age {summary.active_goal_age})<br>"
+            f"<b>Selected:</b> {escape(selected)} · {escape(commitment)}<br>"
+            f"<b>Active uncertainty budget:</b> {budget_text}</p>"
+            f"<p><b>Shadow check:</b> {escape(consistency)} across "
+            f"{int(shadow.get('decision_count') or 0)} loaded Autonomy decisions. "
+            f"{disagreements} selection difference(s), {explained} explained by commitment, "
+            f"{unexplained} unexplained, {overruns} budget overrun(s).</p>"
+        )
+
+        self.autonomy_options.setRowCount(len(summary.options))
+        for row, option in enumerate(summary.options):
+            evidence = (
+                f"conf {self._metric(option.confidence)} · info {self._metric(option.information_value)}"
+                f" · novel {self._metric(option.novelty)}"
+            )
+            cost = (
+                f"distance {self._metric(option.distance)} · loop {self._metric(option.loop_risk)}"
+                f" · fail {self._metric(option.failure_cost)}"
+            )
+            budget_value = (
+                "not bounded"
+                if option.budget_limit <= 0
+                else f"{option.budget_spent}/{option.budget_limit} · {option.budget_remaining} left"
+            )
+            values = (
+                str(row + 1),
+                "Selected" if option.selected else "",
+                option.option_id or "unnamed",
+                f"{option.kind} · {option.required_level}",
+                self._metric(option.score),
+                evidence,
+                cost,
+                budget_value,
+            )
+            tooltip = json.dumps(option.metadata, indent=2, ensure_ascii=False, default=str)
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                item.setToolTip(tooltip)
+                self.autonomy_options.setItem(row, column, item)
 
     def _open_artifact(self, item: QListWidgetItem) -> None:
         path = str(item.data(Qt.ItemDataRole.UserRole) or "")

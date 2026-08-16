@@ -37,6 +37,7 @@ A room becoming newly visible is deliberately not enough to call the portal prog
 Traversal behavior is recorded separately:
 
 - `observed_return_leg`
+- `observed_round_trip`
 - `quick_return`
 - `return_prone`
 - `loop_risk`

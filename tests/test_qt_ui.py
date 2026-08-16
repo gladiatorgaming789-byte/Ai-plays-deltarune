@@ -23,7 +23,7 @@ if QT_AVAILABLE:
     from deltarune_agent.qt_ui.background import BackgroundLayer, bundled_background
     from deltarune_agent.qt_ui.controller import RunController
     from deltarune_agent.qt_ui.map_view import CELL_PIXELS, RoomMapView
-    from deltarune_agent.qt_ui.pages import LiveMapPage
+    from deltarune_agent.qt_ui.pages import LiveMapPage, RunsPage
     from deltarune_agent.qt_ui.themes import BUILTIN_THEMES, BackgroundSettings
     from deltarune_agent.run19_profiles import ProfileStore
     from deltarune_agent.world_model import CELL_SIZE, EXPLORATION_REGION_CELLS
@@ -206,3 +206,53 @@ def test_live_map_coalesces_high_rate_scene_rebuilds(qapp, tmp_path: Path) -> No
     assert calls == ["room_test"]
     assert refreshes.count() == 1
     assert not page._map_refresh_timer.isActive()
+
+
+def test_runs_page_autonomy_workbench_shows_selected_goal(qapp, tmp_path: Path) -> None:
+    page = RunsPage(tmp_path)
+    tabs = [page.tabs.tabText(index) for index in range(page.tabs.count())]
+    assert "Autonomy" in tabs
+    page._selected_path = str(tmp_path / "run")
+    prediction = {
+        "step": 9,
+        "prediction_snapshot": {
+            "room": "room_test",
+            "autonomy": {
+                "version": 1,
+                "recovery_level": "evidence",
+                "recovery_reason": "story progress stalled",
+                "active_goal_id": "entity:E1",
+                "active_goal_kind": "semantic_entity",
+                "active_goal_age": 2,
+                "selected_option_id": "entity:E1",
+                "commitment_hold": True,
+                "ranked_options": [
+                    {
+                        "id": "entity:E1",
+                        "kind": "semantic_entity",
+                        "required_level": "evidence",
+                        "base_score": 6.0,
+                        "score": 7.5,
+                        "confidence": 0.7,
+                        "information_value": 0.5,
+                        "novelty": 0.4,
+                        "distance": 2,
+                        "loop_risk": 0.0,
+                        "failure_cost": 0.1,
+                        "budget_spent": 1,
+                        "budget_limit": 4,
+                        "budget_remaining": 3,
+                        "selected": True,
+                    }
+                ],
+            },
+        },
+    }
+
+    page._artifact_loaded(str(tmp_path / "run"), [], [(0, prediction)])
+
+    assert "entity:E1" in page.autonomy_summary.toPlainText()
+    assert "held the active goal" in page.autonomy_summary.toPlainText()
+    assert page.autonomy_options.rowCount() == 1
+    assert page.autonomy_options.item(0, 1).text() == "Selected"
+    assert page.autonomy_options.item(0, 3).text().startswith("semantic_entity")

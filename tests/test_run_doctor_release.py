@@ -118,7 +118,7 @@ def test_trusted_release_marks_report_read_only(tmp_path: Path):
     fixture = _write_fixture(tmp_path / "run")
     report, comparison = run_doctor_release.analyze_directory(fixture)
     payload = run_doctor_release.report_payload(report, comparison)
-    assert payload["doctor_version"] == "1.0.2"
+    assert payload["doctor_version"] == "1.0.4"
     assert payload["trusted_release"] is True
     assert payload["read_only"] is True
     assert payload["mutates_learning"] is False

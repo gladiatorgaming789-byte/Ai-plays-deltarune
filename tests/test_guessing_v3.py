@@ -5,6 +5,11 @@ from pathlib import Path
 import subprocess
 import sys
 
+# These tests exercise the beliefs as consumed by the shipped policy. Import
+# the production bootstrap explicitly so their result cannot depend on which
+# other pytest module happened to be collected first.
+import deltarune_agent.hierarchical_policy  # noqa: F401
+
 from deltarune_agent.guessing_v3 import (
     BELIEF_KINDS,
     MAX_INFORMATION_PROBES,
@@ -46,7 +51,7 @@ def test_ambiguous_structural_evidence_stays_unknown_but_interesting() -> None:
     assert len(record["guess_evidence_ledger"]) == 1
 
 
-def test_strong_path_evidence_commits_to_exit() -> None:
+def test_strong_path_evidence_stays_unresolved_until_exit_fusion_confirms_it() -> None:
     record = {
         **_ambiguous_record(),
         "hypothesis": "possible_exit",
@@ -57,9 +62,11 @@ def test_strong_path_evidence_commits_to_exit() -> None:
 
     refresh_guess_record_v3(record, region=(3, 3))
 
-    assert record["guess_semantic_state"] == "possible_exit"
-    assert record["hypothesis"] == "possible_exit"
-    assert record["guess_beliefs"]["possible_exit"] > record["guess_beliefs"]["scenery"]
+    assert record["guess_semantic_state"] == UNKNOWN_BUT_INTERESTING
+    assert record["guess_beliefs"]["possible_exit"] == max(
+        record["guess_beliefs"][kind]
+        for kind in ("possible_exit", "possible_character", "possible_interactable")
+    )
 
 
 def test_belief_can_revise_after_new_observed_geometry() -> None:

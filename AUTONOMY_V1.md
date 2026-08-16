@@ -106,7 +106,7 @@ Every Autonomy prediction snapshot records:
 - active goal and age;
 - whether goal commitment held;
 - selected option;
-- top ranked options and scores;
+- top ranked options, base scores, and final scores;
 - confidence, information value, novelty, distance, loop risk and failure cost;
 - uncertainty budget limit/spent/remaining.
 
@@ -115,6 +115,8 @@ Run summaries add recovery-level changes, escalations/de-escalations, budget act
 ## Shadow replay
 
 `deltarune_agent.autonomy_shadow` re-scores saved Autonomy option snapshots after a run. It can test generic alternative ranking weights and identify unexplained selection disagreements without sending any input to the game or mutating learned memory.
+
+The GUI's Runs page includes a read-only **Autonomy** workbench. It shows the latest recovery reason, active goal, commitment state, active uncertainty budget, ranked alternatives, and a shadow consistency summary over the bounded prediction window loaded by the UI. Option metadata is available as a tooltip. Runs created before Autonomy v1 remain readable and show an explicit no-snapshot state.
 
 ## Run Doctor v1.0.4
 

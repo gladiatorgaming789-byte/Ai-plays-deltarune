@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from datetime import datetime
 import json
 from pathlib import Path
-from typing import Iterator, Mapping
+from typing import Iterable, Iterator, Mapping
+
+from ..autonomy_shadow import replay_prediction_snapshots
 
 
 SMALL_JSON_LIMIT = 4 * 1024 * 1024
@@ -41,6 +43,45 @@ class RunSummary:
                 return self.directory.stat().st_mtime
             except OSError:
                 return 0.0
+
+
+@dataclass(frozen=True)
+class AutonomyOptionSummary:
+    option_id: str
+    kind: str
+    required_level: str
+    score: float | None
+    selected: bool
+    confidence: float | None
+    information_value: float | None
+    novelty: float | None
+    distance: float | None
+    loop_risk: float | None
+    failure_cost: float | None
+    budget_spent: int
+    budget_limit: int
+    budget_remaining: int
+    metadata: Mapping[str, object]
+
+
+@dataclass(frozen=True)
+class AutonomyWorkbenchSummary:
+    available: bool
+    latest_step: int | None
+    latest_room: str
+    version: int | None
+    recovery_level: str
+    recovery_reason: str
+    recovery_level_age: int
+    story_stall_steps: int
+    active_goal_id: str
+    active_goal_kind: str
+    active_goal_age: int
+    selected_option_id: str
+    commitment_hold: bool
+    active_budget: Mapping[str, object]
+    options: tuple[AutonomyOptionSummary, ...]
+    shadow: Mapping[str, object]
 
 
 def _small_json(path: Path) -> dict[str, object]:
@@ -202,3 +243,96 @@ def tail_jsonl(path: Path, *, limit: int = 200) -> list[tuple[int, dict[str, obj
         if isinstance(value, dict):
             result.append((line_number, value))
     return result
+
+
+def summarize_autonomy_predictions(
+    predictions: Iterable[Mapping[str, object]],
+) -> AutonomyWorkbenchSummary:
+    """Build a bounded, read-only Autonomy view from loaded prediction records."""
+
+    records = [record for record in predictions if isinstance(record, Mapping)]
+    shadow = replay_prediction_snapshots(records)
+    latest_record: Mapping[str, object] | None = None
+    latest_snapshot: Mapping[str, object] | None = None
+    latest_autonomy: Mapping[str, object] | None = None
+    for record in reversed(records):
+        snapshot = record.get("prediction_snapshot")
+        if not isinstance(snapshot, Mapping):
+            continue
+        autonomy = snapshot.get("autonomy")
+        if not isinstance(autonomy, Mapping):
+            continue
+        latest_record = record
+        latest_snapshot = snapshot
+        latest_autonomy = autonomy
+        break
+
+    if latest_autonomy is None or latest_record is None or latest_snapshot is None:
+        return AutonomyWorkbenchSummary(
+            available=False,
+            latest_step=None,
+            latest_room="",
+            version=None,
+            recovery_level="",
+            recovery_reason="",
+            recovery_level_age=0,
+            story_stall_steps=0,
+            active_goal_id="",
+            active_goal_kind="",
+            active_goal_age=0,
+            selected_option_id="",
+            commitment_hold=False,
+            active_budget={},
+            options=(),
+            shadow=shadow,
+        )
+
+    selected_id = str(latest_autonomy.get("selected_option_id") or "")
+    raw_options = latest_autonomy.get("ranked_options")
+    options: list[AutonomyOptionSummary] = []
+    if isinstance(raw_options, list):
+        for raw in raw_options:
+            if not isinstance(raw, Mapping):
+                continue
+            option_id = str(raw.get("id") or "")
+            metadata = raw.get("metadata")
+            options.append(
+                AutonomyOptionSummary(
+                    option_id=option_id,
+                    kind=str(raw.get("kind") or "unknown"),
+                    required_level=str(raw.get("required_level") or "unknown"),
+                    score=_number(raw.get("score")),
+                    selected=bool(raw.get("selected")) or option_id == selected_id,
+                    confidence=_number(raw.get("confidence")),
+                    information_value=_number(raw.get("information_value")),
+                    novelty=_number(raw.get("novelty")),
+                    distance=_number(raw.get("distance")),
+                    loop_risk=_number(raw.get("loop_risk")),
+                    failure_cost=_number(raw.get("failure_cost")),
+                    budget_spent=_integer(raw.get("budget_spent")) or 0,
+                    budget_limit=_integer(raw.get("budget_limit")) or 0,
+                    budget_remaining=_integer(raw.get("budget_remaining")) or 0,
+                    metadata=dict(metadata) if isinstance(metadata, Mapping) else {},
+                )
+            )
+    active_budget = latest_autonomy.get("active_budget")
+    return AutonomyWorkbenchSummary(
+        available=True,
+        latest_step=_integer(latest_record.get("step")),
+        latest_room=str(latest_snapshot.get("room") or latest_record.get("room") or ""),
+        version=_integer(latest_autonomy.get("version")),
+        recovery_level=str(latest_autonomy.get("recovery_level") or "unknown"),
+        recovery_reason=str(latest_autonomy.get("recovery_reason") or ""),
+        recovery_level_age=_integer(latest_autonomy.get("recovery_level_age")) or 0,
+        story_stall_steps=_integer(latest_autonomy.get("story_stall_steps")) or 0,
+        active_goal_id=str(latest_autonomy.get("active_goal_id") or ""),
+        active_goal_kind=str(latest_autonomy.get("active_goal_kind") or ""),
+        active_goal_age=_integer(latest_autonomy.get("active_goal_age")) or 0,
+        selected_option_id=selected_id,
+        commitment_hold=bool(latest_autonomy.get("commitment_hold")),
+        active_budget=(
+            dict(active_budget) if isinstance(active_budget, Mapping) else {}
+        ),
+        options=tuple(options),
+        shadow=shadow,
+    )

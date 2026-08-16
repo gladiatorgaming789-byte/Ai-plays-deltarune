@@ -1074,6 +1074,7 @@ class AutonomyV1Explorer(Run21Explorer):
             "id": option.option_id,
             "kind": option.kind,
             "required_level": RECOVERY_LEVEL_NAMES[option.required_level],
+            "base_score": option.base_score,
             "score": option.score,
             "confidence": round(option.confidence, 3),
             "information_value": round(option.information_value, 3),

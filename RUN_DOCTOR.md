@@ -160,6 +160,8 @@ The PySide6 Runs page has a **Run Doctor** tab with:
 
 Analysis runs in `QThreadPool`; selecting or analyzing a run should not block the main GUI thread.
 
+The neighboring **Autonomy** tab is a separate read-only workbench. It explains the latest recovery goal and ranked choices and reports shadow-ranking disagreements across the loaded prediction window. It does not run Doctor, change weights, edit memory, or send controls.
+
 ## Historical-run compatibility
 
 The loader tolerates partial/malformed JSONL where possible and reads both modern run summaries and older `run_report.policy_summary` counters. Historical runs are analyzed in place without migration or mutation.

@@ -355,6 +355,13 @@ def stylesheet(theme: Theme) -> str:
         background: {c['field']}; border: 1px solid {c['border']}; border-radius: 6px;
         selection-background-color: {c['accent']}; selection-color: {c['accent_text']};
     }}
+    QTableWidget {{ alternate-background-color: {c['panel_alt']}; gridline-color: {c['border']}; }}
+    QHeaderView::section {{
+        background: {c['panel_alt']}; color: {c['text']}; border: 0;
+        border-right: 1px solid {c['border']}; border-bottom: 1px solid {c['border']};
+        padding: 6px 8px; font-weight: 600;
+    }}
+    QTableCornerButton::section {{ background: {c['panel_alt']}; border: 1px solid {c['border']}; }}
     QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{ padding: 6px; min-height: 20px; }}
     QTabWidget::pane {{ border: 1px solid {c['border']}; background: {c['panel']}; border-radius: 7px; }}
     QTabBar::tab {{ background: {c['panel_alt']}; padding: 8px 12px; border: 1px solid {c['border']}; }}

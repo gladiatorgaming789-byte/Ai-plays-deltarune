@@ -7,7 +7,12 @@ from typing import Any
 
 from . import navigation_semantics as semantics_module
 from . import world_model as world_model_module
-from .navigation_semantics import WARP_PORTAL_CLUSTER_RADIUS
+from .navigation_semantics import (
+    WARP_CLASSIFICATION_VERSION,
+    WARP_PORTAL_CLUSTER_RADIUS,
+    portal_behavior_evidence,
+    semantic_portal_role,
+)
 from .world_model import CELL_SIZE, WorldModel
 
 
@@ -72,31 +77,39 @@ def classify_portal(record: dict[str, object] | Any):
             )
         return "automatic_sequence", 0.97 if progress else 0.93, basis
 
-    role, confidence, basis = _ORIGINAL_CLASSIFY(record)
-    round_trips = _safe_int(record.get("round_trip_returns"))
-    if role in {"unknown", "new_area"} and round_trips > 0 and progress == 0:
-        confidence = min(0.90, 0.62 + 0.08 * min(3, round_trips - 1))
-        return (
-            "likely_optional",
-            confidence,
-            [
-                f"entered and later returned through the paired portal {round_trips} time"
-                + ("s" if round_trips != 1 else ""),
-                "no independent story-progress outcome was observed during the visit",
-            ],
-        )
-    return role, confidence, basis
+    # Cardinal crossings use the current classifier unchanged. A round trip is
+    # traversal evidence, not proof that a route is optional; Classification
+    # v2 records it through behavior tags and keeps the semantic role reversible.
+    return _ORIGINAL_CLASSIFY(record)
 
 
 def refresh_portal_classification(record: dict[str, object]) -> None:
     role, confidence, basis = classify_portal(record)
     action = str(record.get("action") or "event")
+    semantic_role = semantic_portal_role(record)
+    behavior_tags, metrics = portal_behavior_evidence(record)
+
+    record["classification_version"] = WARP_CLASSIFICATION_VERSION
     record["transition_kind"] = (
         "manual_crossing" if action in CARDINAL_DIRECTIONS else "automatic_sequence"
     )
     record["role"] = role
+    record["semantic_role"] = semantic_role
     record["confidence"] = round(float(confidence), 3)
     record["basis"] = list(basis)
+    record["behavior_tags"] = list(behavior_tags)
+    record["return_tendency"] = metrics["return_tendency"]
+    record["loop_risk"] = metrics["loop_risk"]
+    record["mean_return_dwell_steps"] = metrics["mean_return_dwell_steps"]
+    record["classification_state"] = (
+        "confirmed"
+        if semantic_role == "progression"
+        else "observed"
+        if semantic_role == "new_area" and not behavior_tags
+        else "safety_hold"
+        if role == "loop_suppressed"
+        else "provisional"
+    )
 
 
 def _load_with_extensions(cls, path: Path | None):

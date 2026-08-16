@@ -1,3 +1,7 @@
+# Run4Explorer is extended by the shipped Guessing/Exit stack. Load it
+# explicitly so isolated runs exercise the same contract as the full suite.
+import deltarune_agent.hierarchical_policy  # noqa: F401
+
 from deltarune_agent.run4_explorer import (
     EXIT_PRIORITY_COOLDOWN_STEPS,
     EXIT_PRIORITY_EPISODE_STEPS,
@@ -10,10 +14,15 @@ from deltarune_agent.run4_explorer import (
 def _strong_visual_exit():
     return {
         "hypothesis": "possible_exit",
+        "guess_semantic_state": "possible_exit",
         "guess_state": "proposed",
         "guess_confidence": 0.72,
+        "exit_detection_version": 2,
+        "exit_candidate_source": "dark_edge_opening",
+        "exit_candidate_state": "semantic_ready",
         "edge_opening_score": 0.68,
         "edge_width_ratio": 0.3,
+        "last_seen_sequence": 2,
         "completed_tests": 0,
         "failed_approaches": 0,
         "inspections": 0,
@@ -109,6 +118,9 @@ def test_broad_dark_visual_seam_does_not_activate_exit_priority():
     record = _strong_visual_exit()
     record.update(
         {
+            "hypothesis": None,
+            "guess_semantic_state": "unknown_but_interesting",
+            "exit_candidate_state": "visual_candidate",
             "edge_opening_score": 0.18,
             "edge_width_ratio": 0.91,
         }

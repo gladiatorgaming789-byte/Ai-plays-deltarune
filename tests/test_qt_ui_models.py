@@ -9,12 +9,14 @@ from deltarune_agent.qt_ui.artifacts import (
     iter_jsonl,
     load_run_summary,
     scan_runs,
+    summarize_autonomy_predictions,
     tail_jsonl,
 )
 from deltarune_agent.qt_ui.themes import (
     BUILTIN_THEMES,
     BackgroundSettings,
     discover_themes,
+    stylesheet,
     supported_background,
     theme_from_manifest,
     validate_theme_manifest,
@@ -32,6 +34,14 @@ def test_builtin_themes_have_complete_valid_manifests() -> None:
         assert validate_theme_manifest(theme.to_manifest()) == []
         assert theme.colors["accent"]
         assert theme.map_colors["player"]
+
+
+def test_theme_styles_tables_without_native_light_header_leaks() -> None:
+    sheet = stylesheet(BUILTIN_THEMES["operator"])
+
+    assert "QHeaderView::section" in sheet
+    assert "QTableCornerButton::section" in sheet
+    assert "alternate-background-color" in sheet
 
 
 def test_theme_manifest_validation_and_custom_overrides() -> None:
@@ -144,3 +154,52 @@ def test_unreadable_run_is_reported_instead_of_crashing(tmp_path: Path) -> None:
     summary = load_run_summary(run)
     assert summary.status == "unreadable"
     assert summary.error
+
+
+def test_autonomy_workbench_summarizes_latest_goal_and_shadow_window() -> None:
+    option = {
+        "id": "learned:room_next",
+        "kind": "learned_warp",
+        "required_level": "learned_route",
+        "base_score": 8.0,
+        "score": 8.0,
+        "confidence": 0.8,
+        "information_value": 0.4,
+        "novelty": 0.5,
+        "distance": 3,
+        "loop_risk": 0.1,
+        "failure_cost": 0.0,
+        "budget_spent": 1,
+        "budget_limit": 4,
+        "budget_remaining": 3,
+        "selected": True,
+        "metadata": {"target_room": "room_next"},
+    }
+    prediction = {
+        "step": 42,
+        "prediction_snapshot": {
+            "room": "room_start",
+            "autonomy": {
+                "version": 1,
+                "recovery_level": "learned_route",
+                "recovery_reason": "frontier stalled",
+                "active_goal_id": "learned:room_next",
+                "active_goal_kind": "learned_warp",
+                "active_goal_age": 2,
+                "selected_option_id": "learned:room_next",
+                "active_budget": {"spent": 1, "limit": 4, "remaining": 3},
+                "ranked_options": [option],
+            },
+        },
+    }
+
+    summary = summarize_autonomy_predictions([prediction])
+
+    assert summary.available is True
+    assert summary.latest_step == 42
+    assert summary.latest_room == "room_start"
+    assert summary.active_goal_kind == "learned_warp"
+    assert summary.options[0].selected is True
+    assert summary.options[0].metadata["target_room"] == "room_next"
+    assert summary.shadow["decision_count"] == 1
+    assert summary.shadow["unexplained_selection_disagreements"] == 0

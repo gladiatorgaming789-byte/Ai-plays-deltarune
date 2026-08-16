@@ -29,18 +29,19 @@ def test_event_transition_is_automatic_not_navigable():
     assert any("not a navigable doorway" in value for value in basis)
 
 
-def test_round_trip_outbound_portal_becomes_likely_optional():
+def test_round_trip_outbound_portal_remains_semantically_reversible():
+    record = {
+        "action": "down",
+        "crossings": 2,
+        "first_novel_destination": "room_side",
+        "round_trip_returns": 1,
+    }
     role, confidence, _basis = classify_portal(
-        {
-            "action": "down",
-            "crossings": 2,
-            "first_novel_destination": "room_side",
-            "round_trip_returns": 1,
-        }
+        record
     )
 
-    assert role == "likely_optional"
-    assert confidence >= 0.6
+    assert role == "unknown"
+    assert confidence >= 0.3
 
 
 def test_conflicting_bottom_boundary_actions_use_room_geometry():

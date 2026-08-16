@@ -156,3 +156,20 @@ def test_windows_launcher_updates_before_materializing_mods_and_gui() -> None:
 
     assert first_bootstrap < updater < last_bootstrap < mod_build < gui
     assert "if %errorlevel% equ" not in launcher.casefold()
+
+
+def test_windows_launcher_prefers_official_python_314_without_path_aliases() -> None:
+    launcher = (
+        Path(__file__).resolve().parents[1] / "Start AI GUI.bat"
+    ).read_text(encoding="utf-8")
+
+    python_314 = launcher.index('"%PY_LAUNCHER%" -3.14')
+    python_313 = launcher.index('"%PY_LAUNCHER%" -3.13')
+    direct_install = launcher.index(
+        "%LocalAppData%\\Programs\\Python\\Python%%V\\python.exe"
+    )
+    path_fallback = launcher.index(":try_python")
+
+    assert "%LocalAppData%\\Programs\\Python\\Launcher\\py.exe" in launcher
+    assert python_314 < python_313
+    assert direct_install < path_fallback

@@ -12,7 +12,7 @@ Start AI GUI.bat
 
 On first launch the script:
 
-1. looks for Python 3.13, 3.12, or 3.11;
+1. looks for official Python 3.14, 3.13, 3.12, or 3.11, including the standard per-user launcher and install directories even when they are not on `PATH`;
 2. creates the project-local `.venv` when it does not exist;
 3. runs the stdlib-only `deltarune_agent/bootstrap_dependencies.py` file directly inside that environment, before importing the `deltarune_agent` package;
 4. installs the current branch's `requirements.txt` with pip;
@@ -34,7 +34,7 @@ This complements the Git auto-updater: the launcher handles a brand-new checkout
 
 ## Only machine prerequisite
 
-Python itself is not checked into this repository. The launcher requires Python 3.11 or newer to be installed on Windows once. It prefers 3.13, then 3.12, then 3.11.
+Python itself is not checked into this repository. The launcher requires official Python 3.11 or newer to be installed on Windows once. It prefers 3.14, then 3.13, 3.12, and 3.11. It searches the Python launcher, the standard python.org per-user and all-user install directories, and only then falls back to a compatible `python` command on `PATH`.
 
 If Python is missing, the launcher stops without changing the system and tells you to install Python, then you can double-click it again.
 

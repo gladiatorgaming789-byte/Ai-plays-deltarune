@@ -317,13 +317,14 @@ The controller listens automatically; use `--no-telemetry` to run vision-only.
 
 The separate mod in `mods/speed/` starts at 2x, supports 1x through 10x, and
 controls the whole GameMaker simulation without changing audio pitch. Enable
-its v1.2.0 Chapters 1-5 DeltaMod package beside the separate telemetry v9.1.0
-package. Both releases target Steam build 24484059 (Chapter 5 v0.0.253).
-Multi-code-patch merging requires G3MTool 1.2.5 or newer; the included
-backup-first updater in `mods/speed/tools/` replaces DeltaMod 2.0.1's affected
-1.2.1 merge tool without modifying Deltarune. Optional per-chapter speed
-archives and a manual UndertaleModTool script are included. There is no
-combined package.
+**AI Support 1.0.0** for normal combined telemetry-and-speed use. It atomically
+composes Speed 1.3.1 and Telemetry 9.2.1 because current DeltaMod CSX execution
+does not reliably accumulate two separate CSX patches targeting the same
+`data.win`. The standalone component packages remain available for isolated
+diagnosis, but must not be enabled together. These runtime-test candidates
+target Steam build 24484059 (Chapter 5 v0.0.253). See
+`MOD_PACKAGE_STATUS.md` for exact hashes and the remaining Chapters 1-5 live
+release gate.
 
 After installing the patch on one chapter, test its output without controls:
 
@@ -346,10 +347,4 @@ planner, or reinforcement learning without changing capture or input code.
 
 ## Next milestones
 
-1. Validate telemetry v9 packet health, exact transition sources, and its
-   invisible native autosave on a clean Chapter 1 patch.
-2. Compare the next live run's prediction report with actual story progress and
-   tune only evidence-backed thresholds.
-3. Add optional on-screen text understanding for richer dialogue goals without
-   reading hidden game state.
-4. Add battle-phase and projectile-aware control.
+The ordered, evidence-gated project plan is maintained in `ROADMAP.md`.

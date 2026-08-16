@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+# Entity and exit calibrations are part of the shipped Guessing-v3 stack.
+# Loading them explicitly keeps isolated and full-suite runs equivalent.
+import deltarune_agent.hierarchical_policy  # noqa: F401
+
 from deltarune_agent import guessing_v3 as v3
 from deltarune_agent.guessing_v3_calibration import install_guessing_v3_calibration
 
 
-# This changes only the v3 belief function/threshold; it does not monkey-patch
-# explorer or persistence classes, so it is safe during normal pytest collection.
+# This remains idempotent when the production bootstrap already installed it.
 install_guessing_v3_calibration()
 
 
@@ -52,7 +55,7 @@ def test_ambiguous_broad_one_side_obstruction_stays_unresolved() -> None:
     assert record["guess_beliefs"]["possible_interactable"] < 0.40
 
 
-def test_compact_one_side_obstruction_can_commit_to_interactable() -> None:
+def test_compact_one_side_obstruction_stays_unresolved_in_production_stack() -> None:
     record = {
         **_base_observation(),
         "obstruction_target_cells": 2,
@@ -60,9 +63,9 @@ def test_compact_one_side_obstruction_can_commit_to_interactable() -> None:
 
     v3.refresh_guess_record_v3(record, region=(3, 3))
 
-    assert record["guess_semantic_state"] == "possible_interactable"
-    assert record["hypothesis"] == "possible_interactable"
-    assert record["guess_beliefs"]["possible_interactable"] >= 0.40
+    assert record["guess_semantic_state"] == v3.UNKNOWN_BUT_INTERESTING
+    assert record["hypothesis"] is None
+    assert record["guess_beliefs"]["possible_interactable"] < 0.40
 
 
 def test_same_geometry_produces_same_beliefs_after_previous_semantic_commit() -> None:
@@ -71,7 +74,8 @@ def test_same_geometry_produces_same_beliefs_after_previous_semantic_commit() ->
         "obstruction_target_cells": 2,
     }
     v3.refresh_guess_record_v3(first, region=(3, 3))
-    assert first["hypothesis"] == "possible_interactable"
+    assert first["hypothesis"] is None
+    assert first["guess_semantic_state"] == v3.UNKNOWN_BUT_INTERESTING
 
     second = deepcopy(first)
     # Simulate the next observation with the same independent evidence. The

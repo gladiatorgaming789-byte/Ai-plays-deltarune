@@ -200,7 +200,7 @@ def test_path_and_opening_boosts_are_reduced_before_semantic_confirmation() -> N
 
     adjusted = _adjust_exit_belief_scores(record, raw_scores)
 
-    assert adjusted["possible_exit"] < 1.6
+    assert adjusted["possible_exit"] < raw_scores["possible_exit"] / 3
     assert adjusted["possible_exit"] < raw_scores["possible_exit"]
 
 

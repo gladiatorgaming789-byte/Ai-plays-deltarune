@@ -11,6 +11,7 @@ WarpRole: TypeAlias = Literal[
     "unknown",
     "new_area",
     "progression",
+    "automatic_sequence",
     "likely_optional",  # legacy persisted value; classifier v2 never emits it
     "return/backtrack",  # legacy persisted value; classifier v2 never emits it
     "loop_suppressed",
@@ -22,6 +23,7 @@ WarpSemanticRole: TypeAlias = Literal[
 ]
 WarpBehaviorTag: TypeAlias = Literal[
     "observed_return_leg",
+    "observed_round_trip",
     "quick_return",
     "return_prone",
     "loop_risk",
@@ -204,6 +206,7 @@ def portal_behavior_evidence(
 
     backtracks = _nonnegative_int(record.get("return_backtracks"))
     immediate_returns = _nonnegative_int(record.get("immediate_returns"))
+    round_trips = _nonnegative_int(record.get("round_trip_returns"))
     suppressions = _nonnegative_int(record.get("loop_suppressions"))
     crossings = max(1, _nonnegative_int(record.get("crossings")))
     dwell_samples = _nonnegative_int(record.get("dwell_samples"))
@@ -213,9 +216,14 @@ def portal_behavior_evidence(
     tags: list[WarpBehaviorTag] = []
     if backtracks:
         tags.append("observed_return_leg")
+    if round_trips:
+        tags.append("observed_round_trip")
     if immediate_returns:
         tags.append("quick_return")
-    return_observations = backtracks + immediate_returns
+    # A recorded round trip commonly describes the same return as the
+    # direction-specific counters. Use the larger evidence count rather than
+    # adding both and inflating the route's apparent return tendency.
+    return_observations = max(backtracks + immediate_returns, round_trips)
     return_tendency = min(1.0, return_observations / crossings)
     if return_observations >= 2 and return_tendency >= 0.50:
         tags.append("return_prone")
@@ -226,6 +234,7 @@ def portal_behavior_evidence(
     return tags, {
         "return_backtracks": backtracks,
         "immediate_returns": immediate_returns,
+        "round_trip_returns": round_trips,
         "return_tendency": round(return_tendency, 3),
         "loop_suppressions": suppressions,
         "loop_risk": round(loop_risk, 3),
@@ -250,6 +259,7 @@ def classify_portal(record: Mapping[str, object]) -> tuple[WarpRole, float, list
     suppressions = _nonnegative_int(record.get("loop_suppressions"))
     backtracks = _nonnegative_int(record.get("return_backtracks"))
     immediate_returns = _nonnegative_int(record.get("immediate_returns"))
+    round_trips = _nonnegative_int(record.get("round_trip_returns"))
     crossings = max(1, _nonnegative_int(record.get("crossings")))
     first_novel = str(record.get("first_novel_destination") or "")
     behavior_tags, metrics = portal_behavior_evidence(record)
@@ -284,11 +294,12 @@ def classify_portal(record: Mapping[str, object]) -> tuple[WarpRole, float, list
     # Return evidence is intentionally *not* a semantic role. If it conflicts
     # with novelty evidence, keep the route eligible as unknown instead of
     # prematurely declaring it optional/return-only.
-    if backtracks or immediate_returns:
+    if backtracks or immediate_returns or round_trips:
         basis = [
             "return behavior was observed, but return behavior does not prove the portal is optional",
             f"observed return legs: {backtracks}",
             f"quick returns: {immediate_returns}",
+            f"observed round trips: {round_trips}",
             f"return tendency: {float(metrics['return_tendency']):.2f}",
         ]
         if first_novel:
