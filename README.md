@@ -16,6 +16,8 @@ to protected copies.
 - Sends controls only when `--live` is supplied.
 - Records buffered events, ranked AI predictions, navigation updates, periodic
   screenshots, diagnostics, memory snapshots, and exported maps under `runs/`.
+- Can compare four isolated strategy heads in a one-game, review-then-promote
+  Population Training mode without changing active profile memory during a run.
 - Includes an emergency stop: move the mouse to the upper-left corner, or press
   `Ctrl+C` in the controller terminal.
 
@@ -31,6 +33,18 @@ routes or known exits in the policy. Its learned cells, blocked edges, attempted
 paths, interactables, and room warps persist across runs in
 `memory/navigation.json`. Decision reasons and a per-run map summary are also
 saved with each run.
+
+The production explorer adds a Navigation Coherence layer above the learned
+Autonomy planner. Evidence-backed targets become bounded goal contracts instead
+of being reranked after every short movement. Learned frontiers are grouped into
+information-gain regions, coordinate-jittered warp samples are planned as one
+portal aperture, geodesic distance verifies route progress, and recent room
+trajectories penalize immediate return cycles. Recovery de-escalates with
+hysteresis, broad resets have a cooldown, and already learned straight corridors
+can use short adaptive commitments while unknown edges remain single-step. The
+Runs-page Autonomy Workbench saves and displays the exact contract, replan reason,
+route progress, cycle state, and a learned-route/target overlay. See
+`NAVIGATION_COHERENCE_V1.md` for the trust boundary and live validation gate.
 
 The explorer treats the reverse of an observed path as known rather than as a
 new frontier. Exploration coverage uses 32-pixel regions, while the display map
@@ -162,6 +176,18 @@ Review the new folder under `runs/`. When capture looks correct, enable input:
 python -m deltarune_agent run --live --steps 200
 ```
 
+To train navigation/interaction strategy heads over one live game, use:
+
+```powershell
+python -m deltarune_agent run --training --live --steps 2000
+```
+
+Population Training requires telemetry. One candidate owns each complete goal
+and consequence segment while all four non-mutating heads rank the same legal
+options. Profile memory is staged inside the run folder and is changed only if
+you explicitly review and promote an eligible winner in the GUI. See
+`POPULATION_TRAINING.md` for scoring, safety gates, artifacts, and rollback.
+
 Movement keys remain held across consecutive decisions and successful paths get
 a short directional commitment, producing continuous motion without sacrificing
 quick collision recovery. Turns release the old direction immediately, while
@@ -176,8 +202,9 @@ normal wall-clock time. If speed packets become stale, automatic mode warns
 once and safely returns the AI to 1x timing. Use `--speed 1` through
 `--speed 10` for a manual override, including when telemetry is disabled.
 
-Each run automatically reloads and updates `memory/navigation.json` and
-`memory/visual_states.json`. The visual model learns from states confirmed by
+Each normal run automatically reloads and updates `memory/navigation.json` and
+`memory/visual_states.json`; Population Training updates only its run-local
+staged copies until an eligible winner is explicitly promoted. The visual model learns from states confirmed by
 telemetry, then remains usable if telemetry is temporarily unavailable. Delete
 these files only when you intentionally want the controller to forget what it
 has learned and begin a clean evaluation.
@@ -232,8 +259,8 @@ Tk interface remains available for one transition release with:
 python -m deltarune_agent gui --legacy
 ```
 
-The sidebar separates **Live Map**, **Runs**, **Profiles**, **Learning**,
-**Logs**, and **Settings**. Live Map keeps the remembered room scene dominant
+The sidebar separates **Live Map**, **Runs**, **Training**, **Profiles**,
+**Learning**, **Logs**, and **Settings**. Live Map keeps the remembered room scene dominant
 and places the current action, plain-language reason, AI leads, selection
 details, room summary, and map legend in a fixed inspector beside it. This
 prevents evidence text from covering the map and keeps every lead aligned with
@@ -243,6 +270,9 @@ out.
 
 The **Live input** checkbox remains off by default. Enable it before pressing
 **Start AI** to send controls to Deltarune; leave it off for a safe dry run. The
+mode selector starts a normal run by default. Choosing **Population training**
+requires live input and telemetry, opens the live four-candidate scorecard, and
+never promotes a winner without a separate confirmation. The
 speed selector defaults to **Auto**. Its status shows game speed, effective AI
 speed, and synchronization source, while F8, F9, and F10 target only the
 Deltarune window and mirror the mod's toggle/decrease/increase controls.

@@ -9,8 +9,8 @@ from pathlib import Path
 import shutil
 from typing import Callable, Mapping
 
-from PySide6.QtCore import QObject, QRect, QRunnable, QSize, QThreadPool, QTimer, Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QObject, QPointF, QRect, QRunnable, QSize, QThreadPool, QTimer, Qt, QUrl, Signal
+from PySide6.QtGui import QBrush, QColor, QDesktopServices, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -68,6 +68,7 @@ from ..reinforcement import (
     save_reward_settings,
 )
 from ..run19_profiles import Profile, ProfileStore
+from ..training_workspace import promote_training_run
 from ..world_model import EXPLORATION_REGION_CELLS
 from .artifacts import (
     AutonomyWorkbenchSummary,
@@ -112,6 +113,124 @@ class PageHeader(QWidget):
         detail.setObjectName("muted")
         detail.setWordWrap(True)
         layout.addWidget(detail)
+
+
+class GoalRoutePreview(QWidget):
+    """Compact saved-route overlay for the Autonomy Workbench."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setMinimumHeight(118)
+        self.setAccessibleName("Saved goal route overlay")
+        self._route: list[tuple[int, int]] = []
+        self._current: tuple[int, int] | None = None
+        self._target: tuple[int, int] | None = None
+        self._direction = ""
+
+    @staticmethod
+    def _cell(value: object) -> tuple[int, int] | None:
+        if not isinstance(value, (list, tuple)) or len(value) != 2:
+            return None
+        try:
+            return int(value[0]), int(value[1])
+        except (TypeError, ValueError):
+            return None
+
+    def set_coherence(self, coherence: Mapping[str, object]) -> None:
+        contract_value = coherence.get("goal_contract")
+        contract = contract_value if isinstance(contract_value, Mapping) else {}
+        route_value = contract.get("route_preview")
+        self._route = (
+            [cell for value in route_value if (cell := self._cell(value)) is not None]
+            if isinstance(route_value, list)
+            else []
+        )
+        self._current = self._cell(contract.get("current_cell"))
+        self._target = self._cell(contract.get("target_cell"))
+        self._direction = str(contract.get("planned_direction") or "")
+        self.update()
+
+    def paintEvent(self, event) -> None:  # type: ignore[override]
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.fillRect(self.rect(), QColor(4, 9, 17, 190))
+        painter.setPen(QPen(QColor("#71819b"), 1))
+        painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
+
+        points = list(self._route)
+        if self._current is not None and self._current not in points:
+            points.append(self._current)
+        if self._target is not None and self._target not in points:
+            points.append(self._target)
+        if not points:
+            painter.setPen(QColor("#9eabc0"))
+            painter.drawText(
+                self.rect().adjusted(14, 10, -14, -10),
+                Qt.AlignmentFlag.AlignCenter,
+                "No active positional goal. The next saved route will appear here.",
+            )
+            return
+
+        min_x = min(point[0] for point in points)
+        max_x = max(point[0] for point in points)
+        min_y = min(point[1] for point in points)
+        max_y = max(point[1] for point in points)
+        usable_width = max(1.0, self.width() - 100.0)
+        usable_height = max(1.0, self.height() - 34.0)
+        scale = min(
+            30.0,
+            usable_width / max(1, max_x - min_x),
+            usable_height / max(1, max_y - min_y),
+        )
+        offset_x = 24.0 + (usable_width - (max_x - min_x) * scale) / 2.0
+        offset_y = 12.0 + (usable_height - (max_y - min_y) * scale) / 2.0
+
+        def screen(cell: tuple[int, int]) -> QPointF:
+            return QPointF(
+                offset_x + (cell[0] - min_x) * scale,
+                offset_y + (cell[1] - min_y) * scale,
+            )
+
+        if len(self._route) >= 2:
+            painter.setPen(QPen(QColor("#46d4c6"), 4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            for start, end in zip(self._route, self._route[1:]):
+                painter.drawLine(screen(start), screen(end))
+        for route_cell in self._route:
+            center = screen(route_cell)
+            painter.setPen(QPen(QColor("#9af4e9"), 1))
+            painter.setBrush(QBrush(QColor("#163d42")))
+            painter.drawEllipse(center, 3.5, 3.5)
+
+        if self._target is not None:
+            center = screen(self._target)
+            painter.setPen(QPen(QColor("#ff85c8"), 2))
+            painter.setBrush(QBrush(QColor("#7d285f")))
+            painter.drawRect(
+                int(center.x() - 6),
+                int(center.y() - 6),
+                12,
+                12,
+            )
+        if self._current is not None:
+            center = screen(self._current)
+            painter.setPen(QPen(QColor("#9fc6ff"), 2))
+            painter.setBrush(QBrush(QColor("#377dff")))
+            painter.drawEllipse(center, 6.5, 6.5)
+            vectors = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
+            if self._direction in vectors:
+                dx, dy = vectors[self._direction]
+                painter.drawLine(
+                    center,
+                    QPointF(center.x() + dx * 15, center.y() + dy * 15),
+                )
+
+        painter.setPen(QColor("#c8d4e8"))
+        painter.drawText(
+            self.rect().adjusted(12, 0, -12, -7),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom,
+            "Current ●   learned route ━   target ■",
+        )
 
 
 class LiveMapPage(QWidget):
@@ -643,14 +762,16 @@ class RunsPage(QWidget):
         autonomy_layout = QVBoxLayout(self.autonomy_panel)
         _layout_margins(autonomy_layout, 12)
         autonomy_note = QLabel(
-            "Read-only view of the AI's recovery goal, ranked alternatives, "
-            "uncertainty budgets, and shadow-policy consistency."
+            "Read-only view of the AI's persistent goal contract, route progress, "
+            "ranked alternatives, cycle protection, and shadow-policy consistency."
         )
         autonomy_note.setWordWrap(True)
         autonomy_layout.addWidget(autonomy_note)
         self.autonomy_summary = QTextBrowser()
         self.autonomy_summary.setMinimumHeight(190)
         autonomy_layout.addWidget(self.autonomy_summary, 2)
+        self.autonomy_route = GoalRoutePreview()
+        autonomy_layout.addWidget(self.autonomy_route)
         self.autonomy_options = QTableWidget(0, 8)
         self.autonomy_options.setHorizontalHeaderLabels(
             ("Rank", "Choice", "Option", "Kind", "Score", "Evidence", "Cost / risk", "Budget")
@@ -692,6 +813,12 @@ class RunsPage(QWidget):
             item = QListWidgetItem(
                 f"{run.name}\n{run.status.upper()} · {duration} · step {run.last_step or 0}\n"
                 f"Story {story} · reward {reward} · {run.warning_count} warning(s)"
+                + (
+                    f"\nTraining {run.training_status.replace('_', ' ')}"
+                    + (f" · winner {run.recommended_winner}" if run.recommended_winner else "")
+                    if run.training_status
+                    else ""
+                )
             )
             item.setData(Qt.ItemDataRole.UserRole, str(run.directory))
             item.setToolTip(run.error or run.stop_reason)
@@ -716,6 +843,7 @@ class RunsPage(QWidget):
         self.timeline.setPlainText("Loading the latest decisions in the background…")
         self.predictions.setPlainText("Loading the latest predictions in the background…")
         self.autonomy_summary.setHtml("<h2>Autonomy</h2><p>Loading saved decision snapshots…</p>")
+        self.autonomy_route.set_coherence({})
         self.autonomy_options.setRowCount(0)
         task = _ArtifactTask(run.directory)
         task.signals.loaded.connect(self._artifact_loaded)
@@ -731,7 +859,14 @@ class RunsPage(QWidget):
             f"<b>Events:</b> {run.events} · <b>Predictions:</b> {run.predictions} · "
             f"<b>Navigation updates:</b> {run.navigation_updates}<br>"
             f"<b>Story progress:</b> {run.story_progress if run.story_progress is not None else '?'} · "
-            f"<b>Reward:</b> {run.total_reward if run.total_reward is not None else '?'}</p>"
+            f"<b>Reward:</b> {run.total_reward if run.total_reward is not None else '?'}"
+            + (
+                f"<br><b>Training:</b> {escape(run.training_status)}"
+                + (f" · recommended {escape(run.recommended_winner)}" if run.recommended_winner else "")
+                if run.training_status
+                else ""
+            )
+            + "</p>"
             + (f"<p><b>Read warning:</b> {run.error}</p>" if run.error else "")
         )
         self.map_artifacts.clear()
@@ -779,6 +914,7 @@ class RunsPage(QWidget):
 
     def _show_autonomy(self, summary: AutonomyWorkbenchSummary) -> None:
         self.autonomy_options.setRowCount(0)
+        self.autonomy_route.set_coherence(summary.coherence)
         if not summary.available:
             self.autonomy_summary.setHtml(
                 "<h2>Autonomy</h2><p>No Autonomy snapshots were found in the loaded "
@@ -806,8 +942,78 @@ class RunsPage(QWidget):
                 f"{escape(str(budget.get('spent', 0)))} / {escape(str(budget.get('limit', 0)))} spent"
                 f" ({escape(str(budget.get('remaining', 0)))} remaining)"
             )
+        coherence = summary.coherence
+        contract_value = coherence.get("goal_contract")
+        contract = contract_value if isinstance(contract_value, Mapping) else {}
+        target = contract.get("target_cell")
+        if isinstance(target, (list, tuple)) and len(target) == 2:
+            target_text = f"({escape(str(target[0]))}, {escape(str(target[1]))})"
+        else:
+            target_text = "not positional"
+        target_room = str(contract.get("target_room") or "")
+        if target_room:
+            target_text += f" → {escape(target_room)}"
+        route_distance = contract.get("current_route_distance")
+        best_distance = contract.get("best_route_distance")
+        route_text = (
+            "not measured"
+            if route_distance is None
+            else f"{escape(str(route_distance))} cells remaining · best {escape(str(best_distance))}"
+        )
+        action_budget = (
+            f"{escape(str(contract.get('actions_spent', 0)))} / "
+            f"{escape(str(contract.get('action_budget', 0)))} actions"
+            if contract
+            else "no active contract"
+        )
+        expected = str(contract.get("expected_outcome") or "not recorded")
+        triggers_value = contract.get("replan_triggers")
+        triggers = (
+            " · ".join(escape(str(value)) for value in triggers_value)
+            if isinstance(triggers_value, list)
+            else "not recorded"
+        )
+        recent_value = coherence.get("recent_rooms")
+        recent_rooms = (
+            " → ".join(escape(str(value)) for value in recent_value)
+            if isinstance(recent_value, list) and recent_value
+            else "none recorded"
+        )
+        lease_value = coherence.get("arrival_lease")
+        lease = lease_value if isinstance(lease_value, Mapping) else {}
+        lease_text = (
+            f"{escape(str(lease.get('from_room') or '?'))} → "
+            f"{escape(str(lease.get('room') or '?'))}, "
+            f"{escape(str(lease.get('remaining', 0)))} steps remaining"
+        )
+        coherence_title = (
+            f" · Navigation Coherence v{escape(str(coherence.get('version') or '?'))}"
+            if coherence
+            else ""
+        )
+        coherence_html = (
+            f"<p><b>Contract target:</b> {target_text}<br>"
+            f"<b>Expected outcome:</b> {escape(expected)}<br>"
+            f"<b>Route progress:</b> {route_text} · "
+            f"no-progress {escape(str(contract.get('no_progress_ticks', 0)))} ticks<br>"
+            f"<b>Contract budget:</b> {action_budget}<br>"
+            f"<b>Last replan:</b> {escape(str(coherence.get('last_replan_reason') or 'not recorded'))}</p>"
+            f"<p><b>Replan triggers:</b> {triggers}<br>"
+            f"<b>Recent room trajectory:</b> {recent_rooms}<br>"
+            f"<b>Arrival lease:</b> {lease_text} · "
+            f"reset cooldown {escape(str(coherence.get('broad_reset_cooldown_remaining', 0)))}<br>"
+            f"<b>Learned choices:</b> {escape(str(coherence.get('frontier_clusters', 0)))} frontier cluster(s) · "
+            f"{escape(str(coherence.get('portal_apertures', 0)))} portal aperture(s) from "
+            f"{escape(str(coherence.get('portal_samples', 0)))} sample(s)</p>"
+            if coherence
+            else (
+                "<p><b>Navigation Coherence:</b> not recorded for this older run. "
+                "Recovery and ranked-option evidence above remains available.</p>"
+            )
+        )
         self.autonomy_summary.setHtml(
-            f"<h2>Autonomy v{summary.version or '?'} · {escape(summary.recovery_level)}</h2>"
+            f"<h2>Autonomy v{summary.version or '?'}{coherence_title} · "
+            f"{escape(summary.recovery_level)}</h2>"
             f"<p><b>Latest snapshot:</b> step {summary.latest_step if summary.latest_step is not None else '?'}"
             f" · room {escape(summary.latest_room or 'unknown')}<br>"
             f"<b>Recovery reason:</b> {escape(summary.recovery_reason or 'not recorded')} "
@@ -816,6 +1022,7 @@ class RunsPage(QWidget):
             f" ({escape(summary.active_goal_kind or 'no kind')}, age {summary.active_goal_age})<br>"
             f"<b>Selected:</b> {escape(selected)} · {escape(commitment)}<br>"
             f"<b>Active uncertainty budget:</b> {budget_text}</p>"
+            f"{coherence_html}"
             f"<p><b>Shadow check:</b> {escape(consistency)} across "
             f"{int(shadow.get('decision_count') or 0)} loaded Autonomy decisions. "
             f"{disagreements} selection difference(s), {explained} explained by commitment, "
@@ -1065,10 +1272,308 @@ class ProfilesPage(QWidget):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.store.profile_directory(profile.id))))
 
 
+class TrainingPage(QWidget):
+    promotionCompleted = Signal(object)
+
+    def __init__(
+        self,
+        runs_root: Path,
+        memory_path: Callable[[], Path],
+        can_promote: Callable[[], bool],
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self.runs_root = Path(runs_root)
+        self.memory_path = memory_path
+        self.can_promote = can_promote
+        self._run_paths: list[Path] = []
+        self._selected_run: Path | None = None
+        self._build()
+        self.reload()
+
+    def _build(self) -> None:
+        root = QVBoxLayout(self)
+        _layout_margins(root, 16)
+        heading = QHBoxLayout()
+        heading.addWidget(
+            PageHeader(
+                "Population Training",
+                "Four isolated strategy heads share observed world evidence; one candidate owns each complete causal segment.",
+            ),
+            1,
+        )
+        refresh = QPushButton("Refresh")
+        refresh.clicked.connect(self.reload)
+        heading.addWidget(refresh)
+        root.addLayout(heading)
+
+        selector = QHBoxLayout()
+        selector.addWidget(QLabel("Training run"))
+        self.run_combo = QComboBox()
+        self.run_combo.currentIndexChanged.connect(self._run_selected)
+        selector.addWidget(self.run_combo, 1)
+        self.status = QLabel("No training session")
+        self.status.setObjectName("meta")
+        selector.addWidget(self.status)
+        root.addLayout(selector)
+
+        situation = Card()
+        situation_layout = QVBoxLayout(situation)
+        self.active_label = QLabel("Waiting for a population run")
+        self.active_label.setObjectName("pageTitle")
+        situation_layout.addWidget(self.active_label)
+        self.segment_label = QLabel(
+            "Start Population training with live input and telemetry to compare candidates."
+        )
+        self.segment_label.setWordWrap(True)
+        situation_layout.addWidget(self.segment_label)
+        root.addWidget(situation)
+
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        candidate_host = QGroupBox("Candidate scorecard")
+        candidate_layout = QVBoxLayout(candidate_host)
+        self.candidate_table = QTableWidget(0, 9)
+        self.candidate_table.setHorizontalHeaderLabels(
+            (
+                "Candidate",
+                "Segments",
+                "Decisions",
+                "Points",
+                "Score",
+                "Story",
+                "Loops",
+                "Bounces",
+                "Safety",
+            )
+        )
+        self.candidate_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.candidate_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.candidate_table.setAlternatingRowColors(True)
+        header = self.candidate_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(8, QHeaderView.ResizeMode.Stretch)
+        candidate_layout.addWidget(self.candidate_table)
+        splitter.addWidget(candidate_host)
+
+        shadow_host = QGroupBox("Current shadow recommendations")
+        shadow_layout = QVBoxLayout(shadow_host)
+        self.shadow_table = QTableWidget(0, 4)
+        self.shadow_table.setHorizontalHeaderLabels(
+            ("Candidate", "Top recommendation", "Kind", "Score")
+        )
+        self.shadow_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        shadow_header = self.shadow_table.horizontalHeader()
+        shadow_header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        shadow_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        shadow_layout.addWidget(self.shadow_table)
+        splitter.addWidget(shadow_host)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+        root.addWidget(splitter, 1)
+
+        review = Card()
+        review_layout = QHBoxLayout(review)
+        self.winner_explanation = QLabel(
+            "A winner is recommended only after every exposure, telemetry, speed, cleanup, and Run Doctor gate passes."
+        )
+        self.winner_explanation.setWordWrap(True)
+        review_layout.addWidget(self.winner_explanation, 1)
+        self.promote_button = QPushButton("Review and promote winner")
+        self.promote_button.setObjectName("primary")
+        self.promote_button.setEnabled(False)
+        self.promote_button.clicked.connect(self._promote)
+        review_layout.addWidget(self.promote_button)
+        root.addWidget(review)
+
+    def set_runs_root(self, path: Path) -> None:
+        self.runs_root = Path(path)
+        self.reload()
+
+    def reload(self) -> None:
+        manifests = sorted(
+            self.runs_root.glob("*/training_manifest.json"),
+            key=lambda path: path.stat().st_mtime_ns,
+            reverse=True,
+        ) if self.runs_root.is_dir() else []
+        previous = str(self._selected_run or "")
+        self._run_paths = [path.parent for path in manifests]
+        self.run_combo.blockSignals(True)
+        self.run_combo.clear()
+        for path in self._run_paths:
+            self.run_combo.addItem(path.name, str(path))
+        if previous:
+            index = self.run_combo.findData(previous)
+            if index >= 0:
+                self.run_combo.setCurrentIndex(index)
+        self.run_combo.blockSignals(False)
+        self._run_selected(self.run_combo.currentIndex())
+
+    def _run_selected(self, index: int) -> None:
+        if not 0 <= index < len(self._run_paths):
+            self._selected_run = None
+            self._render({}, historical=True)
+            return
+        self._selected_run = self._run_paths[index]
+        try:
+            payload = json.loads(
+                (self._selected_run / "training_manifest.json").read_text(encoding="utf-8")
+            )
+            eligibility = payload.get("eligibility") if isinstance(payload, Mapping) else {}
+            self._render(eligibility if isinstance(eligibility, Mapping) else {}, historical=True, manifest=payload)
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            self._render({}, historical=True)
+
+    def handle_event(self, payload: object) -> None:
+        if not isinstance(payload, Mapping):
+            return
+        training = payload.get("training")
+        if isinstance(training, Mapping):
+            self._render(training, historical=False)
+
+    def _render(
+        self,
+        training: Mapping[str, object],
+        *,
+        historical: bool,
+        manifest: Mapping[str, object] | None = None,
+    ) -> None:
+        candidates_value = training.get("candidates")
+        candidates = [
+            candidate
+            for candidate in candidates_value
+            if isinstance(candidate, Mapping)
+        ] if isinstance(candidates_value, list) else []
+        active = str(training.get("active_candidate") or "")
+        segment_value = training.get("segment")
+        segment = segment_value if isinstance(segment_value, Mapping) else {}
+        if historical and manifest:
+            status = str(manifest.get("status") or "finished")
+            active = str(training.get("recommended_winner") or "")
+        else:
+            status = "live" if candidates else "waiting"
+        self.status.setText(status.replace("_", " ").upper())
+        active_candidate = next(
+            (candidate for candidate in candidates if str(candidate.get("id")) == active),
+            None,
+        )
+        active_name = str(active_candidate.get("label") or active) if active_candidate else active
+        self.active_label.setText(
+            f"{'Recommended winner' if historical else 'Active candidate'}: {active_name or 'not available'}"
+        )
+        if segment:
+            self.segment_label.setText(
+                f"Segment {segment.get('index', '?')} · {segment.get('start_reason', 'unknown reason')} · "
+                f"age {segment.get('age_steps', 0)} steps · {segment.get('active_decisions', 0)} active decisions"
+                + (f" · pending {segment.get('pending_end_reason')}" if segment.get("pending_end_reason") else "")
+            )
+        elif historical:
+            checks = training.get("global_checks")
+            passed = sum(bool(value) for value in checks.values()) if isinstance(checks, Mapping) else 0
+            total = len(checks) if isinstance(checks, Mapping) else 0
+            self.segment_label.setText(f"Completed training review · {passed}/{total} global safety gates passed")
+        else:
+            self.segment_label.setText("No live population event has been received.")
+
+        self.candidate_table.setRowCount(len(candidates))
+        for row, candidate in enumerate(candidates):
+            safety = "Disqualified: " + "; ".join(
+                str(value) for value in candidate.get("disqualification_reasons", [])
+            ) if candidate.get("disqualified") else (
+                "Eligible" if candidate.get("minimum_exposure_met") else "Gathering exposure"
+            )
+            values = (
+                str(candidate.get("label") or candidate.get("id") or "candidate"),
+                str(candidate.get("segments_completed", 0)),
+                str(candidate.get("active_decisions", 0)),
+                f"{float(candidate.get('total_points') or 0):+.2f}",
+                f"{float(candidate.get('normalized_score') or 0):+.3f}",
+                str(candidate.get("story_progress", 0)),
+                str(candidate.get("loop_escapes", 0)),
+                f"{candidate.get('room_bounces', 0)} ({float(candidate.get('bounce_rate') or 0):.0%})",
+                safety,
+            )
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if str(candidate.get("id")) == active:
+                    item.setToolTip("This candidate owns the current segment." if not historical else "Recommended winner.")
+                self.candidate_table.setItem(row, column, item)
+
+        shadow_value = training.get("shadow_rankings")
+        shadows = shadow_value if isinstance(shadow_value, Mapping) else {
+            str(candidate.get("id") or ""): candidate.get("shadow_ranking", [])
+            for candidate in candidates
+        }
+        labels = {str(candidate.get("id")): str(candidate.get("label") or candidate.get("id")) for candidate in candidates}
+        self.shadow_table.setRowCount(len(shadows))
+        for row, (candidate_id, ranking_value) in enumerate(sorted(shadows.items())):
+            ranking = ranking_value if isinstance(ranking_value, list) else []
+            top = ranking[0] if ranking and isinstance(ranking[0], Mapping) else {}
+            values = (
+                labels.get(str(candidate_id), str(candidate_id)),
+                str(top.get("id") or "No ranked option"),
+                str(top.get("kind") or "shared"),
+                (
+                    f"{float(top.get('score')):.3f}"
+                    if top and top.get("score") is not None
+                    else "—"
+                ),
+            )
+            for column, value in enumerate(values):
+                self.shadow_table.setItem(row, column, QTableWidgetItem(value))
+
+        explanation = str(training.get("winner_explanation") or "")
+        self.winner_explanation.setText(
+            explanation
+            or "A winner is recommended only after every exposure, telemetry, speed, cleanup, and Run Doctor gate passes."
+        )
+        eligible = bool(training.get("eligible_for_promotion"))
+        already_promoted = bool(manifest and manifest.get("status") == "promoted")
+        self.promote_button.setEnabled(historical and eligible and not already_promoted and self.can_promote())
+
+    def _promote(self) -> None:
+        if self._selected_run is None or not self.can_promote():
+            return
+        try:
+            manifest = json.loads(
+                (self._selected_run / "training_manifest.json").read_text(encoding="utf-8")
+            )
+            eligibility = manifest.get("eligibility") if isinstance(manifest, Mapping) else {}
+            winner = str(eligibility.get("recommended_winner") or "") if isinstance(eligibility, Mapping) else ""
+            explanation = str(eligibility.get("winner_explanation") or "") if isinstance(eligibility, Mapping) else ""
+            answer = QMessageBox.question(
+                self,
+                "Promote training winner?",
+                f"Promote {winner} into the active profile?\n\n{explanation}\n\n"
+                "Verified shared map/visual evidence and only this candidate's strategy and reinforcement memory will be applied. A backup is retained.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            audit = promote_training_run(self._selected_run, self.memory_path())
+            QMessageBox.information(
+                self,
+                "Training winner promoted",
+                f"Promoted {audit.get('winner')} successfully.\nBackup: {audit.get('backup_directory')}",
+            )
+            self.promotionCompleted.emit(audit)
+            self.reload()
+        except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+            QMessageBox.critical(self, "Could not promote training winner", str(exc))
+
+
 class LearningPage(QWidget):
-    def __init__(self, project_root: Path, parent=None) -> None:
+    def __init__(
+        self,
+        project_root: Path,
+        parent=None,
+        *,
+        can_modify_memory: Callable[[], bool] | None = None,
+    ) -> None:
         super().__init__(parent)
         self.project_root = project_root
+        self.can_modify_memory = can_modify_memory or (lambda: True)
         self.reward_fields: dict[str, QDoubleSpinBox] = {}
         self._build()
         self.reload()
@@ -1212,6 +1717,13 @@ class LearningPage(QWidget):
             self.learning_summary.setPlainText("No learned actions yet.")
 
     def save(self) -> None:
+        if not self.can_modify_memory():
+            QMessageBox.warning(
+                self,
+                "Learning memory is in use",
+                "Stop the active run before changing reinforcement settings.",
+            )
+            return
         try:
             settings = self._from_form()
             save_reward_settings(self.settings_path, settings)
@@ -1221,6 +1733,13 @@ class LearningPage(QWidget):
             QMessageBox.critical(self, "Could not save learning settings", str(exc))
 
     def _reset_memory(self) -> None:
+        if not self.can_modify_memory():
+            QMessageBox.warning(
+                self,
+                "Learning memory is in use",
+                "Stop the active run before resetting learned rewards.",
+            )
+            return
         if QMessageBox.question(
             self,
             "Reset learned rewards",

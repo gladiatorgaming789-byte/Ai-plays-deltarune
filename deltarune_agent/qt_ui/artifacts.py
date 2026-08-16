@@ -33,6 +33,8 @@ class RunSummary:
     total_reward: float | None
     warning_count: int
     error: str = ""
+    training_status: str = ""
+    recommended_winner: str = ""
 
     @property
     def timestamp(self) -> float:
@@ -80,6 +82,7 @@ class AutonomyWorkbenchSummary:
     selected_option_id: str
     commitment_hold: bool
     active_budget: Mapping[str, object]
+    coherence: Mapping[str, object]
     options: tuple[AutonomyOptionSummary, ...]
     shadow: Mapping[str, object]
 
@@ -128,6 +131,21 @@ def load_run_summary(directory: Path) -> RunSummary:
             recording = {}
         warnings = manifest.get("warnings")
         warning_count = len(warnings) if isinstance(warnings, list) else 0
+        training_status = ""
+        recommended_winner = ""
+        training_path = directory / "training_manifest.json"
+        if training_path.is_file():
+            try:
+                training = _small_json(training_path)
+                training_status = str(training.get("status") or "unknown")
+                eligibility = training.get("eligibility")
+                if isinstance(eligibility, Mapping):
+                    recommended_winner = str(
+                        eligibility.get("recommended_winner") or ""
+                    )
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                training_status = "unreadable"
+                warning_count += 1
 
         def first(*values: object) -> object:
             return next((value for value in values if value is not None), None)
@@ -167,6 +185,8 @@ def load_run_summary(directory: Path) -> RunSummary:
             story_progress=_integer(story),
             total_reward=_number(reward),
             warning_count=warning_count,
+            training_status=training_status,
+            recommended_winner=recommended_winner,
         )
     except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
         return RunSummary(
@@ -283,6 +303,7 @@ def summarize_autonomy_predictions(
             selected_option_id="",
             commitment_hold=False,
             active_budget={},
+            coherence={},
             options=(),
             shadow=shadow,
         )
@@ -316,6 +337,7 @@ def summarize_autonomy_predictions(
                 )
             )
     active_budget = latest_autonomy.get("active_budget")
+    coherence = latest_autonomy.get("coherence")
     return AutonomyWorkbenchSummary(
         available=True,
         latest_step=_integer(latest_record.get("step")),
@@ -333,6 +355,7 @@ def summarize_autonomy_predictions(
         active_budget=(
             dict(active_budget) if isinstance(active_budget, Mapping) else {}
         ),
+        coherence=(dict(coherence) if isinstance(coherence, Mapping) else {}),
         options=tuple(options),
         shadow=shadow,
     )

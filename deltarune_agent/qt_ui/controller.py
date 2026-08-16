@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import sys
+import tempfile
 from uuid import uuid4
 
 from PySide6.QtCore import QObject, QProcess, QTimer, Signal
@@ -44,10 +45,13 @@ class RunController(QObject):
         game_window: str,
         speed: str,
         live: bool,
+        training: bool = False,
     ) -> None:
         if self.running:
             return
-        stop_directory = self.project_root / "memory"
+        # Runtime control files must never dirty profile memory, especially
+        # while a population run is holding a baseline fingerprint.
+        stop_directory = Path(tempfile.gettempdir()) / "DeltaruneAgent"
         stop_directory.mkdir(parents=True, exist_ok=True)
         self.stop_file = stop_directory / f"qt-gui-stop-{uuid4().hex}.flag"
         self.stop_file.unlink(missing_ok=True)
@@ -71,6 +75,8 @@ class RunController(QObject):
         ]
         if live:
             arguments.append("--live")
+        if training:
+            arguments.append("--training")
         self.stateChanged.emit("starting")
         self.process.start(sys.executable, arguments)
 

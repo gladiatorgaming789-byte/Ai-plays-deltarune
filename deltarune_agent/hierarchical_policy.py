@@ -65,16 +65,36 @@ from .adaptive_capture import install_adaptive_capture_recovery  # noqa: E402
 
 install_adaptive_capture_recovery()
 
-# Autonomy v1 sits above the completed Run21 stack. The final runtime subclass
-# preserves lower-layer cooldown and learned-interaction lifecycle contracts.
-from .autonomy_v1_runtime import AutonomyV1RuntimeExplorer  # noqa: E402
+# Navigation Coherence v1 sits above the completed Autonomy runtime. It keeps
+# evidence-backed goals stable between decisions while preserving the lower
+# collision, interaction, visual-evidence, and persistence contracts.
+from .navigation_coherence import NavigationCoherenceExplorer  # noqa: E402
+from .population_training import PopulationCoordinator  # noqa: E402
 
 
 class HierarchicalPolicy:
     """Specialized reflex controllers wrapped around the learned explorer."""
 
-    def __init__(self, seed: int = 0, memory_path: Path | None = None):
-        self.explorer = AutonomyV1RuntimeExplorer(seed, memory_path)
+    def __init__(
+        self,
+        seed: int = 0,
+        memory_path: Path | None = None,
+        *,
+        training: PopulationCoordinator | None = None,
+    ):
+        if training is None:
+            self.explorer = NavigationCoherenceExplorer(seed, memory_path)
+        else:
+            if memory_path is None:
+                raise ValueError("Population training requires a staged memory path.")
+            from .population_policy import PopulationTrainingExplorer
+
+            self.explorer = PopulationTrainingExplorer(
+                seed,
+                memory_path,
+                training,
+            )
+        self.training = training
         self.objectives = ObjectiveManager()
         self.dialogue = DialogueReader()
         self.battle = BattleController()
@@ -84,6 +104,7 @@ class HierarchicalPolicy:
         self.last_dialogue_text: str | None = None
         self.last_visual_valid = True
         self._validated_step: int | None = None
+        self._training_last_safe = False
 
     def __getattr__(self, name: str):
         return getattr(self.explorer, name)
@@ -136,6 +157,12 @@ class HierarchicalPolicy:
                 visual_valid=observation.visual_valid,
             )
             self.reason = self.battle.reason
+            if self.training is not None:
+                self.training.record_shared_action(
+                    action.name,
+                    self.reason,
+                    force=True,
+                )
             room = self._room_name(telemetry)
             self.objectives.objective_for_state("battle", self.reason, room)
             return action
@@ -188,3 +215,47 @@ class HierarchicalPolicy:
         summary["last_dialogue_text"] = self.last_dialogue_text
         summary["frozen_visual_frames"] = self.visual_freshness.frozen_frames
         return summary
+
+    def observe_training_step(
+        self,
+        *,
+        step: int,
+        perception: Perception,
+        telemetry: TelemetrySample | None,
+        map_updates: list[dict[str, object]],
+    ) -> None:
+        if self.training is None:
+            return
+        room = self._room_name(telemetry)
+        player_controlled = (
+            telemetry.player_controlled if telemetry is not None else None
+        )
+        safe_overworld = (
+            perception.state is GameState.OVERWORLD
+            and telemetry is not None
+            and telemetry.mode == "overworld"
+            and player_controlled is not False
+            and getattr(self.explorer, "active_goal_contract", None) is None
+            and getattr(self.explorer, "active_interaction_key", None) is None
+            and getattr(self.explorer, "interaction_candidate", None) is None
+            and getattr(self.explorer, "pending_choice_record", None) is None
+            and not getattr(self.explorer, "menu_action_queue", ())
+        )
+        self._training_last_safe = safe_overworld
+        self.training.observe_step(
+            step=step,
+            state=perception.state.value,
+            telemetry_present=telemetry is not None,
+            room=room,
+            player_controlled=player_controlled,
+            reason=self.reason,
+            map_updates=map_updates,
+            safe_overworld=safe_overworld,
+        )
+
+    def commit_training_handoff(self) -> None:
+        if self.training is not None:
+            self.training.commit_handoff()
+
+    def training_safe_to_stop(self) -> bool:
+        return self.training is None or self._training_last_safe

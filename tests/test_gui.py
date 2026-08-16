@@ -122,6 +122,11 @@ def test_run_speed_defaults_to_auto_and_accepts_manual_override():
     assert build_parser().parse_args(["run", "--speed", "10"]).speed == "10"
 
 
+def test_run_population_training_is_explicit_and_off_by_default():
+    assert build_parser().parse_args(["run"]).training is False
+    assert build_parser().parse_args(["run", "--training"]).training is True
+
+
 def test_speed_status_distinguishes_sync_manual_and_fallback():
     assert format_speed_status(
         {

@@ -1,5 +1,21 @@
 # Deltarune AI roadmap
 
+## Completed: one-game Population Training v1
+
+- Versioned strategy genomes preserve the exact former Autonomy defaults.
+- Four deterministic, bounded candidates rescore shared legal options without
+  mutating the authoritative world, goal, budget, trace, or input state.
+- Coherent causal segments use round-robin exposure, UCB1 selection, observed
+  outcome scoring, disqualification rules, and deferred safe handoffs.
+- Run-local staged memory, SHA-256 conflict detection, eligibility gates,
+  review-only GUI promotion, verified same-volume replacement, backups, and
+  rollback keep active profiles safe.
+- Detailed training manifests, event streams, candidate snapshots, score
+  breakdowns, and GUI/Runs readers preserve auditability and old-run support.
+
+See `POPULATION_TRAINING.md` for the implemented contract and live validation
+requirements.
+
 This roadmap prioritizes trustworthy observation and measurable autonomy before adding broader game knowledge. The gameplay agent may learn only from what the player can see and from outcomes it has observed. Developer-side files and manual review are validation tools, not hidden route input.
 
 ## Current foundation
@@ -9,6 +25,7 @@ This roadmap prioritizes trustworthy observation and measurable autonomy before 
 - [x] Make the Windows launcher prefer official Python 3.14, including the normal per-user launcher/install locations when they are absent from `PATH`.
 - [x] Add the first Runs-page Autonomy workbench and export the base score needed for real shadow re-scoring.
 - [x] Keep Run Doctor and Autonomy analysis read-only.
+- [x] Add Navigation Coherence v1: persistent goal contracts, event-driven replanning, information-gain frontier clusters, portal apertures, room-cycle costs, geodesic progress gates, recovery hysteresis, reset cooldowns, and a saved-route Workbench overlay.
 
 ## Gate 1 — substantial Autonomy live run
 
@@ -23,6 +40,9 @@ Acceptance evidence:
 - stale frontiers stop pinning recovery, while productive frontiers still win;
 - learned warps become eligible during genuine stalls without becoming an immediate bounce loop;
 - the Autonomy workbench shows the actual selected goal and alternatives;
+- the Navigation Coherence contract shows falling route distance, stable target reuse, and an accurate learned-route overlay;
+- coordinate-jittered crossings appear as one planning aperture without mutating persistent warp evidence;
+- broad reset cooldown and arrival leases prevent repeated reset/return bursts;
 - shadow replay has no unexplained large-score disagreement;
 - Run Doctor findings agree with a manual whole-run review.
 
@@ -84,4 +104,4 @@ Start with reliable survival and menu control at 1x before testing accelerated b
 - keep raw artifacts, Autonomy snapshots, maps, Run Doctor reports, and configuration together;
 - promote changes only when they improve multiple runs without weakening safety or observation quality.
 
-The best next action is Gate 1: one substantial, timing-verified Autonomy run followed by a whole-run review in the Autonomy and Run Doctor tabs.
+The best next action is Gate 1: one substantial, timing-verified Navigation Coherence run followed by a whole-run review in the Autonomy and Run Doctor tabs. Compare contract reuse, route stalls, goal switches, broad resets, room-link bounces, and observed progress against the pre-coherence run.

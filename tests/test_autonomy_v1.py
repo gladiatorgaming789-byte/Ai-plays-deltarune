@@ -246,11 +246,11 @@ def test_runtime_expired_cooldown_can_be_considered_again() -> None:
     assert not explorer._active_visual_record({"guess_state": "rejected"})
 
 
-def test_hierarchical_policy_constructs_autonomy_runtime_explorer(monkeypatch) -> None:
+def test_hierarchical_policy_constructs_navigation_coherence_explorer(monkeypatch) -> None:
     sentinel = object()
     monkeypatch.setattr(
         hierarchical_module,
-        "AutonomyV1RuntimeExplorer",
+        "NavigationCoherenceExplorer",
         lambda seed, memory_path: sentinel,
     )
 

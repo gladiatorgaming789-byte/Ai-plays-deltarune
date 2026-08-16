@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -23,7 +24,7 @@ if QT_AVAILABLE:
     from deltarune_agent.qt_ui.background import BackgroundLayer, bundled_background
     from deltarune_agent.qt_ui.controller import RunController
     from deltarune_agent.qt_ui.map_view import CELL_PIXELS, RoomMapView
-    from deltarune_agent.qt_ui.pages import LiveMapPage, RunsPage
+    from deltarune_agent.qt_ui.pages import LiveMapPage, RunsPage, TrainingPage
     from deltarune_agent.qt_ui.themes import BUILTIN_THEMES, BackgroundSettings
     from deltarune_agent.run19_profiles import ProfileStore
     from deltarune_agent.world_model import CELL_SIZE, EXPLORATION_REGION_CELLS
@@ -45,6 +46,26 @@ def test_qt_controller_preserves_gui_event_protocol(qapp, tmp_path: Path) -> Non
     controller._handle_line("plain output")
     assert events == [{"step": 12, "state": "overworld"}]
     assert output == ["plain output"]
+
+
+def test_qt_controller_adds_training_flag_and_keeps_stop_file_out_of_memory(
+    qapp, tmp_path: Path
+) -> None:
+    controller = RunController(tmp_path)
+    with patch.object(controller.process, "start") as start:
+        controller.start_run(
+            steps=128,
+            game_window="deltarune",
+            speed="Auto",
+            live=True,
+            training=True,
+        )
+    arguments = start.call_args.args[1]
+    assert "--training" in arguments
+    assert "--live" in arguments
+    assert controller.stop_file is not None
+    assert tmp_path / "memory" not in controller.stop_file.parents
+    controller.stop_file.unlink(missing_ok=True)
 
 
 def test_map_scene_uses_same_scale_for_tile_guess_and_player(qapp, tmp_path: Path) -> None:
@@ -121,13 +142,60 @@ def test_operator_window_has_all_pages_and_switches_theme(qapp, tmp_path: Path) 
     window = OperatorWindow(project_root=tmp_path, store=store)
     window.show()
     qapp.processEvents()
-    assert window.pages.count() == 6
-    assert set(window.page_indexes) == {"map", "runs", "profiles", "learning", "logs", "settings"}
+    assert window.pages.count() == 7
+    assert set(window.page_indexes) == {"map", "runs", "training", "profiles", "learning", "logs", "settings"}
     window.select_page("settings")
     assert window.pages.currentIndex() == window.page_indexes["settings"]
     window.apply_appearance("cyber_city", BackgroundSettings(reduce_motion=True), persist=False)
     assert window.theme_id == "cyber_city"
     window.close()
+
+
+def test_training_page_renders_live_candidate_and_shadow_status(qapp, tmp_path: Path) -> None:
+    page = TrainingPage(
+        tmp_path / "runs",
+        memory_path=lambda: tmp_path / "memory",
+        can_promote=lambda: True,
+    )
+    page.handle_event(
+        {
+            "training": {
+                "active_candidate": "explorer",
+                "segment": {
+                    "index": 3,
+                    "start_reason": "goal contract completed",
+                    "age_steps": 9,
+                    "active_decisions": 7,
+                },
+                "candidates": [
+                    {
+                        "id": "explorer",
+                        "label": "Explorer",
+                        "segments_completed": 1,
+                        "active_decisions": 44,
+                        "total_points": 12.5,
+                        "normalized_score": 11.57,
+                        "story_progress": 0,
+                        "loop_escapes": 1,
+                        "room_bounces": 0,
+                        "bounce_rate": 0,
+                        "minimum_exposure_met": False,
+                        "disqualified": False,
+                    }
+                ],
+                "shadow_rankings": {
+                    "explorer": [
+                        {"id": "frontier:room:1", "kind": "frontier_cluster", "score": 9.1}
+                    ]
+                },
+            }
+        }
+    )
+    assert "Explorer" in page.active_label.text()
+    assert "Segment 3" in page.segment_label.text()
+    assert page.candidate_table.rowCount() == 1
+    assert page.shadow_table.item(0, 1).text() == "frontier:room:1"
+    assert page.promote_button.isEnabled() is False
 
 
 def test_custom_theme_import_is_immediately_available_to_window(qapp, tmp_path: Path) -> None:
@@ -226,6 +294,33 @@ def test_runs_page_autonomy_workbench_shows_selected_goal(qapp, tmp_path: Path) 
                 "active_goal_age": 2,
                 "selected_option_id": "entity:E1",
                 "commitment_hold": True,
+                "coherence": {
+                    "version": 1,
+                    "last_replan_reason": "ranked entity candidate",
+                    "recent_rooms": ["room_old", "room_test"],
+                    "arrival_lease": {
+                        "from_room": "room_old",
+                        "room": "room_test",
+                        "remaining": 7,
+                    },
+                    "broad_reset_cooldown_remaining": 0,
+                    "frontier_clusters": 2,
+                    "portal_samples": 3,
+                    "portal_apertures": 1,
+                    "goal_contract": {
+                        "target_cell": [5, 6],
+                        "current_cell": [3, 6],
+                        "planned_direction": "right",
+                        "route_preview": [[3, 6], [4, 6], [5, 6]],
+                        "expected_outcome": "test the observed entity once",
+                        "replan_triggers": ["material evidence"],
+                        "actions_spent": 1,
+                        "action_budget": 10,
+                        "best_route_distance": 2,
+                        "current_route_distance": 2,
+                        "no_progress_ticks": 0,
+                    },
+                },
                 "ranked_options": [
                     {
                         "id": "entity:E1",
@@ -253,6 +348,11 @@ def test_runs_page_autonomy_workbench_shows_selected_goal(qapp, tmp_path: Path) 
 
     assert "entity:E1" in page.autonomy_summary.toPlainText()
     assert "held the active goal" in page.autonomy_summary.toPlainText()
+    assert "test the observed entity once" in page.autonomy_summary.toPlainText()
+    assert "room_old → room_test" in page.autonomy_summary.toPlainText()
+    assert page.autonomy_route._route == [(3, 6), (4, 6), (5, 6)]
+    assert page.autonomy_route._current == (3, 6)
+    assert page.autonomy_route._target == (5, 6)
     assert page.autonomy_options.rowCount() == 1
     assert page.autonomy_options.item(0, 1).text() == "Selected"
     assert page.autonomy_options.item(0, 3).text().startswith("semantic_entity")

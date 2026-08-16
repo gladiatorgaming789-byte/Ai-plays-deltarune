@@ -41,6 +41,7 @@ from .pages import (
     ProfilesPage,
     RunsPage,
     SettingsPage,
+    TrainingPage,
 )
 from .themes import (
     BUILTIN_THEMES,
@@ -54,6 +55,7 @@ from .themes import (
 PAGE_DEFINITIONS = (
     ("map", "◈  Live Map"),
     ("runs", "▤  Runs"),
+    ("training", "⌁  Training"),
     ("profiles", "♙  Profiles"),
     ("learning", "⌁  Learning"),
     ("logs", "≡  Logs"),
@@ -210,12 +212,20 @@ class OperatorWindow(QMainWindow):
             can_modify_memory=lambda: not self.controller.running,
         )
         self.runs_page = RunsPage(self.store.runs_directory(self.active_profile.id))
+        self.training_page = TrainingPage(
+            self.store.runs_directory(self.active_profile.id),
+            memory_path=lambda: self.store.memory_directory(self.active_profile.id),
+            can_promote=lambda: not self.controller.running,
+        )
         self.profiles_page = ProfilesPage(
             self.project_root,
             self.store,
             can_switch=lambda: not self.controller.running,
         )
-        self.learning_page = LearningPage(self.project_root)
+        self.learning_page = LearningPage(
+            self.project_root,
+            can_modify_memory=lambda: not self.controller.running,
+        )
         self.logs_page = LogsPage()
         self.settings_page = SettingsPage(
             self.themes,
@@ -226,6 +236,7 @@ class OperatorWindow(QMainWindow):
         for identifier, page in (
             ("map", self.live_page),
             ("runs", self.runs_page),
+            ("training", self.training_page),
             ("profiles", self.profiles_page),
             ("learning", self.learning_page),
             ("logs", self.logs_page),
@@ -249,6 +260,11 @@ class OperatorWindow(QMainWindow):
         secondary.setSpacing(7)
         self.live_input = QCheckBox("Live input")
         primary.addWidget(self.live_input)
+        self.run_mode = QComboBox()
+        self.run_mode.addItems(["Normal run", "Population training"])
+        self.run_mode.setCurrentText(str(self.settings.value("run/mode", "Normal run")))
+        self.run_mode.setMinimumWidth(165)
+        primary.addWidget(self.run_mode)
         self.steps = QSpinBox()
         self.steps.setRange(1, 10_000_000)
         self.steps.setValue(int(self.settings.value("run/steps", 2000)))
@@ -300,6 +316,7 @@ class OperatorWindow(QMainWindow):
         self.profiles_page.profileActivated.connect(self._profile_activated)
         self.settings_page.appearanceChanged.connect(self.apply_appearance)
         self.settings_page.themeImported.connect(self._theme_imported)
+        self.training_page.promotionCompleted.connect(self._training_promoted)
 
     def _theme_imported(self, theme: object) -> None:
         if isinstance(theme, Theme):
@@ -329,6 +346,14 @@ class OperatorWindow(QMainWindow):
     def start_run(self) -> None:
         if self.controller.running:
             return
+        training = self.run_mode.currentText() == "Population training"
+        if training and not self.live_input.isChecked():
+            QMessageBox.warning(
+                self,
+                "Population training needs live input",
+                "Enable Live input before starting Population training. Telemetry must also be running in Deltarune.",
+            )
+            return
         if not self.build_status.safe_for_testing:
             answer = QMessageBox.warning(
                 self,
@@ -343,12 +368,16 @@ class OperatorWindow(QMainWindow):
         self.settings.setValue("run/steps", self.steps.value())
         self.settings.setValue("run/game_window", self.game_window.text())
         self.settings.setValue("run/speed", self.speed.currentText())
+        self.settings.setValue("run/mode", self.run_mode.currentText())
         self.controller.start_run(
             steps=self.steps.value(),
             game_window=self.game_window.text(),
             speed=self.speed.currentText(),
             live=self.live_input.isChecked(),
+            training=training,
         )
+        if training:
+            self.select_page("training")
 
     def send_speed_key(self, key: str) -> None:
         try:
@@ -358,6 +387,7 @@ class OperatorWindow(QMainWindow):
 
     def _controller_event(self, payload: object) -> None:
         self.live_page.handle_event(payload)
+        self.training_page.handle_event(payload)
         if isinstance(payload, dict):
             if payload.get("kind") == "runtime_status":
                 status = str(payload.get("status") or "running")
@@ -368,10 +398,15 @@ class OperatorWindow(QMainWindow):
     def _controller_state(self, state: str) -> None:
         running = state in {"starting", "running", "stopping"}
         self.start_button.setEnabled(not running)
+        self.run_mode.setEnabled(not running)
         self.stop_button.setEnabled(state in {"starting", "running"})
         labels = {
             "starting": "STARTING",
-            "running": "RUNNING LIVE" if self.live_input.isChecked() else "RUNNING DRY",
+            "running": (
+                "TRAINING LIVE"
+                if self.run_mode.currentText() == "Population training"
+                else "RUNNING LIVE" if self.live_input.isChecked() else "RUNNING DRY"
+            ),
             "stopping": "STOPPING SAFELY",
             "stopped": "STOPPED",
             "error": "STOPPED · ERROR",
@@ -385,6 +420,7 @@ class OperatorWindow(QMainWindow):
         self.logs_page.append("Runtime", f"AI exited with code {exit_code}.", "error" if exit_code else "info")
         self.speed_status.setText("Game unknown · AI stopped")
         self.runs_page.reload()
+        self.training_page.reload()
         if self._closing_after_stop:
             self._closing_after_stop = False
             QTimer.singleShot(0, self.close)
@@ -394,8 +430,15 @@ class OperatorWindow(QMainWindow):
         self.live_page.reload_memory()
         self.learning_page.reload()
         self.runs_page.set_runs_root(self.store.runs_directory(profile.id))
+        self.training_page.set_runs_root(self.store.runs_directory(profile.id))
         self._update_profile_labels()
         self.logs_page.append("Runtime", f'Activated profile "{profile.name}".')
+
+    def _training_promoted(self, audit: object) -> None:
+        self.live_page.reload_memory()
+        self.learning_page.reload()
+        self.runs_page.reload()
+        self.logs_page.append("Training", f"Promoted training winner: {audit}")
 
     def _update_profile_labels(self) -> None:
         self.sidebar_profile.setText(f"◆  {self.active_profile.name}")

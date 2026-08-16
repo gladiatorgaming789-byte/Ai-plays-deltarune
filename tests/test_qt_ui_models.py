@@ -131,6 +131,30 @@ def test_run_summary_combines_small_manifests_without_reading_jsonl(tmp_path: Pa
     assert scan_runs(tmp_path) == [summary]
 
 
+def test_run_summary_reads_optional_population_training_status(tmp_path: Path) -> None:
+    run = tmp_path / "training-run"
+    run.mkdir()
+    (run / "run.json").write_text(
+        json.dumps({"status": "finished", "recording": {"events": 12}}),
+        encoding="utf-8",
+    )
+    (run / "training_manifest.json").write_text(
+        json.dumps(
+            {
+                "status": "review_ready",
+                "eligibility": {
+                    "eligible_for_promotion": True,
+                    "recommended_winner": "progress",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    summary = load_run_summary(run)
+    assert summary.training_status == "review_ready"
+    assert summary.recommended_winner == "progress"
+
+
 def test_jsonl_readers_skip_bad_records_and_remain_bounded(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     path.write_text(
@@ -188,6 +212,22 @@ def test_autonomy_workbench_summarizes_latest_goal_and_shadow_window() -> None:
                 "active_goal_age": 2,
                 "selected_option_id": "learned:room_next",
                 "active_budget": {"spent": 1, "limit": 4, "remaining": 3},
+                "coherence": {
+                    "version": 1,
+                    "last_replan_reason": "activated learned portal",
+                    "recent_rooms": ["room_old", "room_start"],
+                    "goal_contract": {
+                        "target_cell": [12, 8],
+                        "target_room": "room_next",
+                        "expected_outcome": "cross the observed portal",
+                        "replan_triggers": ["room transition"],
+                        "actions_spent": 2,
+                        "action_budget": 12,
+                        "best_route_distance": 3,
+                        "current_route_distance": 3,
+                        "no_progress_ticks": 0,
+                    },
+                },
                 "ranked_options": [option],
             },
         },
@@ -199,6 +239,8 @@ def test_autonomy_workbench_summarizes_latest_goal_and_shadow_window() -> None:
     assert summary.latest_step == 42
     assert summary.latest_room == "room_start"
     assert summary.active_goal_kind == "learned_warp"
+    assert summary.coherence["version"] == 1
+    assert summary.coherence["goal_contract"]["target_cell"] == [12, 8]
     assert summary.options[0].selected is True
     assert summary.options[0].metadata["target_room"] == "room_next"
     assert summary.shadow["decision_count"] == 1

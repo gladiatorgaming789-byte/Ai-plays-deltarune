@@ -252,3 +252,200 @@ def test_cleanup_failure_without_primary_error_is_reported(tmp_path):
     assert result is None
     assert len(errors) == 1
     assert "release keyboard input" in run19_runner._cleanup_message(errors)
+
+
+def test_population_training_requires_live_input_and_telemetry(tmp_path):
+    args = _args(tmp_path)
+    args.training = True
+    with pytest.raises(ValueError, match="requires --live"):
+        run19_runner.run(args)
+    args.live = True
+    args.no_telemetry = True
+    with pytest.raises(ValueError, match="requires telemetry"):
+        run19_runner.run(args)
+
+
+def test_synthetic_population_run_sends_one_input_and_records_four_shadows(tmp_path):
+    args = _args(tmp_path)
+    args.training = True
+    args.live = True
+    args.speed = "1"
+    observation = Observation(
+        step=0,
+        frame=Image.new("RGB", (2, 2), "black"),
+    )
+    perception = SimpleNamespace(
+        state=run19_runner.GameState.OVERWORLD,
+        confidence=0.99,
+        source="telemetry",
+        features=SimpleNamespace(as_dict=lambda: {}),
+    )
+    telemetry = SimpleNamespace(
+        room_name="room_test",
+        room_id=1,
+        mode="overworld",
+        player_controlled=True,
+        x=16.0,
+        y=24.0,
+        as_dict=lambda: {
+            "room_name": "room_test",
+            "x": 16.0,
+            "y": 24.0,
+            "player_controlled": True,
+        },
+    )
+
+    class Detector(_Detector):
+        def classify(self, _frame):
+            return perception
+
+        def learn_from_telemetry(self, *_args):
+            pass
+
+    class Receiver(_Receiver):
+        latest_speed = None
+
+        def poll(self):
+            return telemetry
+
+        def drain_overworld_trace(self):
+            return []
+
+        def diagnostics(self):
+            return {"received_packets": 1, "valid_packets": 1, "invalid_packets": 0}
+
+    class Cutscene:
+        def update(self, visual, *_args):
+            return visual
+
+        def note_action(self, *_args):
+            pass
+
+    training_snapshot = {
+        "active_candidate": "balanced",
+        "candidates": [
+            {"id": candidate_id, "shadow_ranking": [{"id": "move:right"}]}
+            for candidate_id in ("balanced", "explorer", "progress", "loop_safe")
+        ],
+    }
+
+    class Policy(_Policy):
+        reason = "population choice"
+        last_visual_valid = True
+        strategy_warning = None
+
+        def __init__(self):
+            super().__init__()
+            self.observed = 0
+            self.handoffs = 0
+
+        def observe_room_trace(self, _trace):
+            pass
+
+        def validate_observation(self, value, _telemetry):
+            return value
+
+        def choose(self, *_args):
+            return Action("right", ("right",), duration=0.0, cooldown=0.0)
+
+        def drain_map_updates(self):
+            return []
+
+        def observe_training_step(self, **_kwargs):
+            self.observed += 1
+
+        def commit_training_handoff(self):
+            self.handoffs += 1
+
+        def training_safe_to_stop(self):
+            return True
+
+        def decision_context(self):
+            return {"kind": "population"}
+
+        def prediction_snapshot(self):
+            return {"training": training_snapshot}
+
+    class Controller(_Controller):
+        def __init__(self):
+            super().__init__()
+            self.actions = []
+
+        def set_target_window(self, _hwnd):
+            pass
+
+        def set_background_input(self, _enabled):
+            pass
+
+        def set_speed_multiplier(self, _multiplier):
+            pass
+
+        def execute(self, action):
+            self.actions.append(action.name)
+
+    class Tracker(_Tracker):
+        def __init__(self, directory):
+            super().__init__(directory)
+            self.records = []
+
+        def record(self, *_args, **kwargs):
+            self.records.append(kwargs)
+
+    class Workspace:
+        def __init__(self):
+            self.navigation_path = tmp_path / "stage" / "navigation.json"
+            self.visual_memory_path = tmp_path / "stage" / "visual.json"
+            self.window_memory_path = tmp_path / "stage" / "windows.json"
+            self.navigation_path.parent.mkdir()
+            self.finalized = False
+
+        def coordinator(self):
+            return object()
+
+        def finalize(self, *_args, **_kwargs):
+            self.finalized = True
+
+    detector = Detector()
+    receiver = Receiver()
+    policy = Policy()
+    controller = Controller()
+    tracker = Tracker(tmp_path / "run")
+    tracker.directory.mkdir()
+    workspace = Workspace()
+    window = SimpleNamespace(hwnd=9, title="DELTARUNE", executable="DELTARUNE.exe")
+
+    with patch.object(
+        run19_runner, "EpisodeTracker", return_value=tracker
+    ), patch.object(
+        run19_runner.TrainingWorkspace, "create", return_value=workspace
+    ), patch.object(
+        run19_runner, "ScreenObserver", return_value=SimpleNamespace(observe=lambda _step: observation)
+    ), patch.object(
+        run19_runner, "VisualStateDetector", return_value=detector
+    ), patch.object(
+        run19_runner, "CutsceneTracker", return_value=Cutscene()
+    ), patch.object(
+        run19_runner, "TelemetryReceiver", return_value=receiver
+    ), patch.object(
+        run19_runner, "HierarchicalPolicy", return_value=policy
+    ), patch.object(
+        run19_runner, "KeyboardController", return_value=controller
+    ), patch.object(
+        run19_runner, "focus_window", return_value=window
+    ), patch.object(
+        run19_runner, "remember_window"
+    ), patch.object(
+        run19_runner, "is_window_foreground", return_value=True
+    ), patch.object(
+        run19_runner, "fuse_perception", side_effect=lambda visual, _telemetry: visual
+    ), patch.object(
+        run19_runner.time, "sleep"
+    ):
+        run19_runner.run(args)
+
+    assert controller.actions == ["right"]
+    assert policy.observed == 1
+    assert policy.handoffs == 1
+    assert len(tracker.records) == 1
+    assert len(tracker.records[0]["prediction_snapshot"]["training"]["candidates"]) == 4
+    assert workspace.finalized is True

@@ -102,6 +102,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=argparse.SUPPRESS,
     )
+    run.add_argument(
+        "--training",
+        action="store_true",
+        help=(
+            "run four isolated strategy heads over one live, telemetry-backed game"
+        ),
+    )
 
     listen = sub.add_parser(
         "telemetry",

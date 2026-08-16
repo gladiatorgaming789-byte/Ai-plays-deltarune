@@ -22,6 +22,7 @@ from .progress import EpisodeTracker
 from .run_artifacts import write_json
 from .speed import SpeedSynchronizer
 from .telemetry import TelemetryReceiver, fuse_perception
+from .training_workspace import TrainingWorkspace
 from .window import (
     client_region,
     find_window,
@@ -80,6 +81,11 @@ def run(args: argparse.Namespace) -> Path:
         raise ValueError(
             "steps must be positive; interval and countdown must be non-negative"
         )
+    training_enabled = bool(getattr(args, "training", False))
+    if training_enabled and not args.live:
+        raise ValueError("Population training requires --live input.")
+    if training_enabled and args.no_telemetry:
+        raise ValueError("Population training requires telemetry.")
 
     observer: ScreenObserver | None = None
     detector: VisualStateDetector | None = None
@@ -89,27 +95,52 @@ def run(args: argparse.Namespace) -> Path:
     controller: KeyboardController | None = None
     tracker: EpisodeTracker | None = None
     speed_sync: SpeedSynchronizer | None = None
+    training_workspace: TrainingWorkspace | None = None
+    training_coordinator = None
+    effective_memory = Path(args.memory)
+    effective_visual_memory = Path(args.visual_memory)
+    effective_window_memory = Path(args.window_memory)
     loop_timings: list[float] = []
     primary_error: BaseException | None = None
     stop_reason = "step_limit"
     stop_detail: str | None = None
+    input_cleanup_succeeded = False
 
     try:
+        if training_enabled:
+            effective_config = dict(vars(args))
+            effective_config["training"] = True
+            tracker = EpisodeTracker(config=effective_config)
+            training_workspace = TrainingWorkspace.create(
+                tracker.directory,
+                Path(args.memory).parent,
+            )
+            effective_memory = training_workspace.navigation_path
+            effective_visual_memory = training_workspace.visual_memory_path
+            effective_window_memory = training_workspace.window_memory_path
+            training_coordinator = training_workspace.coordinator()
         observer = ScreenObserver(tuple(args.region) if args.region else None)
-        detector = VisualStateDetector(args.visual_memory)
+        detector = VisualStateDetector(effective_visual_memory)
         cutscene_tracker = CutsceneTracker()
         telemetry_receiver = (
             None if args.no_telemetry else TelemetryReceiver(args.telemetry_port)
         )
-        policy = HierarchicalPolicy(args.seed, args.memory)
+        policy = HierarchicalPolicy(
+            args.seed,
+            effective_memory,
+            training=training_coordinator,
+        )
         controller = KeyboardController(args.live)
         speed_sync = SpeedSynchronizer(getattr(args, "speed", "auto"))
         effective_config = dict(vars(args))
         effective_config["speed"] = speed_sync.requested
-        tracker = EpisodeTracker(config=effective_config)
+        if tracker is None:
+            tracker = EpisodeTracker(config=effective_config)
 
         if policy.memory_warning:
             print(f"Memory warning: {policy.memory_warning}")
+        if getattr(policy, "strategy_warning", None):
+            print(f"Strategy warning: {policy.strategy_warning}")
         if detector.memory_warning:
             print(f"Visual memory warning: {detector.memory_warning}")
         print(
@@ -120,16 +151,16 @@ def run(args: argparse.Namespace) -> Path:
 
         window = None
         if args.live:
-            window = focus_window(args.game_window, args.window_memory)
-            remember_window(args.window_memory, window)
+            window = focus_window(args.game_window, effective_window_memory)
+            remember_window(effective_window_memory, window)
             print(f"Focused game window: {window.title} ({window.executable})")
             for remaining in range(args.countdown, 0, -1):
                 print(f"Starting controls in {remaining}...")
                 time.sleep(1)
         elif not args.region:
-            window = find_window(args.game_window, args.window_memory)
+            window = find_window(args.game_window, effective_window_memory)
             if window is not None:
-                remember_window(args.window_memory, window)
+                remember_window(effective_window_memory, window)
 
         if window and not args.region:
             observer.set_window(window.hwnd, client_region(window.hwnd))
@@ -140,15 +171,24 @@ def run(args: argparse.Namespace) -> Path:
         telemetry_seen = False
         background_input = False
         previous_loop_seconds: float | None = None
+        stop_deferred = False
         for step in range(args.steps):
             loop_started = time.monotonic()
             if args.stop_file is not None and args.stop_file.exists():
-                stop_reason = "gui_stop"
-                print(
-                    "Stop requested by GUI; ending the run safely.",
-                    flush=True,
-                )
-                break
+                if training_enabled and not policy.training_safe_to_stop():
+                    if not stop_deferred:
+                        print(
+                            "Stop requested; finishing the active training consequence before stopping.",
+                            flush=True,
+                        )
+                        stop_deferred = True
+                else:
+                    stop_reason = "gui_stop"
+                    print(
+                        "Stop requested by GUI; ending the run safely.",
+                        flush=True,
+                    )
+                    break
 
             if args.live:
                 use_background_input = not is_window_foreground(window)
@@ -196,6 +236,10 @@ def run(args: argparse.Namespace) -> Path:
             if telemetry is not None:
                 telemetry_seen = True
             elif telemetry_receiver is not None and step == 15 and not telemetry_seen:
+                if training_enabled:
+                    raise RuntimeError(
+                        "Population training requires live telemetry, but no valid packets were received."
+                    )
                 print(
                     "Telemetry warning: no packets received; continuing "
                     "with the learned visual model."
@@ -228,6 +272,13 @@ def run(args: argparse.Namespace) -> Path:
 
             cutscene_tracker.note_action(action.name, policy.reason)
             map_updates = policy.drain_map_updates()
+            if training_enabled:
+                policy.observe_training_step(
+                    step=step,
+                    perception=perception,
+                    telemetry=telemetry,
+                    map_updates=map_updates,
+                )
             decision_context = policy.decision_context()
             prediction_snapshot = policy.prediction_snapshot()
             base_cooldown = (
@@ -295,6 +346,7 @@ def run(args: argparse.Namespace) -> Path:
                             "map_updates": map_updates,
                             "decision_context": recorded_context,
                             "speed": speed_state,
+                            "training": prediction_snapshot.get("training"),
                         },
                         separators=(",", ":"),
                     ),
@@ -302,9 +354,15 @@ def run(args: argparse.Namespace) -> Path:
                 )
 
             controller.execute(action)
+            if training_enabled:
+                policy.commit_training_handoff()
             time.sleep(speed_sync.scale_delay(base_cooldown))
             previous_loop_seconds = max(0.0, time.monotonic() - loop_started)
             loop_timings.append(previous_loop_seconds)
+        else:
+            if training_enabled and not policy.training_safe_to_stop():
+                stop_reason = "step_limit_unsafe"
+                stop_detail = "Step limit was reached before safe overworld control returned."
     except KeyboardInterrupt as exc:
         primary_error = exc
         stop_reason = "keyboard_interrupt"
@@ -324,7 +382,9 @@ def run(args: argparse.Namespace) -> Path:
         )
 
         if controller is not None:
+            cleanup_count = len(cleanup_errors)
             _attempt_cleanup(cleanup_errors, "release keyboard input", controller.release_all)
+            input_cleanup_succeeded = len(cleanup_errors) == cleanup_count
 
         if telemetry_receiver is not None:
             diagnostics = _attempt_cleanup(
@@ -375,8 +435,8 @@ def run(args: argparse.Namespace) -> Path:
             extra_files = {
                 name: path
                 for name, path in {
-                    "visual_states.json": args.visual_memory,
-                    "window_titles.json": args.window_memory,
+                    "visual_states.json": effective_visual_memory,
+                    "window_titles.json": effective_window_memory,
                 }.items()
                 if Path(path).is_file()
             }
@@ -414,11 +474,34 @@ def run(args: argparse.Namespace) -> Path:
                             else getattr(args, "speed", "auto")
                         ),
                     },
-                    navigation_path=args.memory,
-                    room_views_path=args.memory.parent / "room_views",
+                    navigation_path=effective_memory,
+                    room_views_path=effective_memory.parent / "room_views",
                     extra_files=extra_files,
                 ),
             )
+            if training_workspace is not None and training_coordinator is not None:
+                doctor_payload: dict[str, object] | None = None
+                doctor_path = tracker.directory / "run_doctor.json"
+                if doctor_path.is_file():
+                    try:
+                        loaded_doctor = json.loads(doctor_path.read_text(encoding="utf-8"))
+                        if isinstance(loaded_doctor, dict):
+                            doctor_payload = loaded_doctor
+                    except (OSError, UnicodeError, json.JSONDecodeError):
+                        doctor_payload = None
+                speed_diagnostics = speed_sync.as_dict() if speed_sync is not None else {}
+                _attempt_cleanup(
+                    cleanup_errors,
+                    "finalize population training",
+                    lambda: training_workspace.finalize(
+                        training_coordinator,
+                        stop_reason=stop_reason,
+                        telemetry_diagnostics=telemetry_diagnostics,
+                        speed_diagnostics=speed_diagnostics,
+                        input_cleanup_succeeded=input_cleanup_succeeded,
+                        doctor_payload=doctor_payload,
+                    ),
+                )
 
         if args.stop_file is not None:
             _attempt_cleanup(

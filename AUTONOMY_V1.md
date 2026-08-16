@@ -69,7 +69,7 @@ After the frontier grace period expires, a reachable frontier remains a high-sco
 
 ## Goal commitment
 
-An active recovery goal receives a short six-decision commitment window. It remains selected while a challenger is only slightly better. A materially stronger option, invalid target, state change, exhausted budget, new evidence, or room change may break commitment immediately.
+The original Autonomy coordinator supplied a short six-decision commitment window. Production now extends this through [Navigation Coherence v1](NAVIGATION_COHERENCE_V1.md): an evidence-backed option becomes a bounded goal contract and is reused until an observable replan trigger occurs. Geodesic route progress, action budget, material evidence, reachability, story/room transitions, and expected outcomes replace periodic reranking as the main lifecycle signals.
 
 This is intended to reduce `explore → inspect → seek_exit → inspect` thrashing without hiding the objective-change metric. If Autonomy works, objective churn should fall naturally.
 
@@ -110,13 +110,15 @@ Every Autonomy prediction snapshot records:
 - confidence, information value, novelty, distance, loop risk and failure cost;
 - uncertainty budget limit/spent/remaining.
 
+Navigation Coherence snapshots additionally record the goal contract, exact target and saved learned-route preview, current/best route distance, no-progress ticks, replan triggers/reason, recent room trajectory, arrival lease, broad-reset cooldown, clustered frontier count, and portal sample/aperture count.
+
 Run summaries add recovery-level changes, escalations/de-escalations, budget actions/exhaustions/evidence resets, goal switches/commitment holds, selections by kind, long-horizon plans, loop-risk avoids, broad resets, empty-tier escalations, frontier grace escalations, and frontier actions selected after unified ranking.
 
 ## Shadow replay
 
 `deltarune_agent.autonomy_shadow` re-scores saved Autonomy option snapshots after a run. It can test generic alternative ranking weights and identify unexplained selection disagreements without sending any input to the game or mutating learned memory.
 
-The GUI's Runs page includes a read-only **Autonomy** workbench. It shows the latest recovery reason, active goal, commitment state, active uncertainty budget, ranked alternatives, and a shadow consistency summary over the bounded prediction window loaded by the UI. Option metadata is available as a tooltip. Runs created before Autonomy v1 remain readable and show an explicit no-snapshot state.
+The GUI's Runs page includes a read-only **Autonomy** workbench. It shows the latest recovery reason, active contract, expected outcome, route progress, replan evidence, room-cycle state, active uncertainty budget, ranked alternatives, a saved route/target overlay, and a shadow consistency summary over the bounded prediction window loaded by the UI. Option metadata is available as a tooltip. Runs created before Autonomy v1 or Navigation Coherence v1 remain readable and show an explicit no-snapshot or no-contract state.
 
 ## Run Doctor v1.0.4
 
