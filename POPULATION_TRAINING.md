@@ -86,10 +86,15 @@ stores live under `training_workspace/candidates/`. The running policy writes
 only to this workspace; the profile memory stays unchanged.
 
 The GUI run bar exposes the same **AIs** selector whenever Population training
-is selected. The **Training** page shows the segment owner, reason and age, all
-shadow recommendations, exposure, points, normalized score, safety state, and
-the eligibility explanation. Promotion is never automatic. The operator must
-click **Review and promote winner** and confirm it.
+is selected. The **Training** page keeps all 2–16 AIs visible together in a
+compact grid. Every card shows its live rank, top shadow recommendation,
+exposure, points, normalized score, active-segment state, and safety state. A
+green outline marks a safely exposed current leader or the final recommended
+winner, amber marks an underexposed provisional leader, blue marks the active
+segment owner, and red marks a disqualified candidate. The page deliberately
+distinguishes a live leader from a final winner, which is shown only after all
+promotion gates pass. Promotion is never automatic. The operator must click
+**Review and promote winner** and confirm it.
 
 Before promotion, the current profile inventory must exactly match the training
 baseline. The promotion builds and verifies a complete staged memory directory

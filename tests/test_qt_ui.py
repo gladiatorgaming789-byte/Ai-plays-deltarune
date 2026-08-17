@@ -234,9 +234,99 @@ def test_training_page_renders_live_candidate_and_shadow_status(qapp, tmp_path: 
     )
     assert "Explorer" in page.active_label.text()
     assert "Segment 3" in page.segment_label.text()
-    assert page.candidate_table.rowCount() == 1
-    assert page.shadow_table.item(0, 1).text() == "frontier:room:1"
+    assert len(page.candidate_cards) == 1
+    explorer = page.candidate_cards["explorer"]
+    assert explorer.property("top_recommendation") == "frontier:room:1"
+    assert explorer.property("provisional") is True
+    assert "Provisional leader" in page.leader_summary.text()
     assert page.promote_button.isEnabled() is False
+
+
+def test_training_page_shows_all_sixteen_ais_and_highlights_safe_leader(qapp, tmp_path: Path) -> None:
+    page = TrainingPage(
+        tmp_path / "runs",
+        memory_path=lambda: tmp_path / "memory",
+        can_promote=lambda: True,
+    )
+    candidates = [
+        {
+            "id": f"ai-{index:02d}",
+            "label": f"AI {index + 1}",
+            "segments_completed": 2,
+            "active_decisions": 64,
+            "total_points": float(index),
+            "normalized_score": float(index),
+            "story_progress": 0,
+            "safety_penalties": 0,
+            "minimum_exposure_met": True,
+            "disqualified": False,
+        }
+        for index in range(16)
+    ]
+    page.handle_event(
+        {
+            "training": {
+                "active_candidate": "ai-00",
+                "candidates": candidates,
+                "shadow_rankings": {
+                    f"ai-{index:02d}": [
+                        {"id": f"option-{index}", "kind": "goal", "score": index / 10}
+                    ]
+                    for index in range(16)
+                },
+            }
+        }
+    )
+
+    assert len(page.candidate_cards) == 16
+    assert page.candidate_grid.count() == 16
+    assert all(not card.isHidden() for card in page.candidate_cards.values())
+    assert page.candidate_cards["ai-15"].property("leader") is True
+    assert page.candidate_cards["ai-15"].property("winner") is False
+    assert page.candidate_cards["ai-00"].property("active") is True
+    assert "Current leader: AI 16" in page.leader_summary.text()
+    occupied = [
+        page.candidate_grid.getItemPosition(index)[:2]
+        for index in range(page.candidate_grid.count())
+    ]
+    assert max(row for row, _column in occupied) == 3
+    assert max(column for _row, column in occupied) == 3
+
+
+def test_training_page_distinguishes_final_winner_from_disqualified_top_score(qapp, tmp_path: Path) -> None:
+    page = TrainingPage(
+        tmp_path / "runs",
+        memory_path=lambda: tmp_path / "memory",
+        can_promote=lambda: True,
+    )
+    training = {
+        "eligible_for_promotion": True,
+        "recommended_winner": "safe",
+        "winner_explanation": "Safe AI passed every gate.",
+        "candidates": [
+            {
+                "id": "unsafe",
+                "label": "Unsafe AI",
+                "normalized_score": 999,
+                "minimum_exposure_met": True,
+                "disqualified": True,
+                "disqualification_reasons": ["loop limit"],
+            },
+            {
+                "id": "safe",
+                "label": "Safe AI",
+                "normalized_score": 4.5,
+                "minimum_exposure_met": True,
+                "disqualified": False,
+            },
+        ],
+    }
+    page._render(training, historical=True, manifest={"status": "review_ready"})
+
+    assert page.candidate_cards["safe"].property("winner") is True
+    assert page.candidate_cards["unsafe"].property("disqualified") is True
+    assert "Recommended winner: Safe AI" in page.leader_summary.text()
+    assert page.promote_button.isEnabled() is True
 
 
 def test_custom_theme_import_is_immediately_available_to_window(qapp, tmp_path: Path) -> None:

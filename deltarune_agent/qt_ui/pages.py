@@ -1331,48 +1331,21 @@ class TrainingPage(QWidget):
         situation_layout.addWidget(self.segment_label)
         root.addWidget(situation)
 
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        candidate_host = QGroupBox("Candidate scorecard")
+        candidate_host = QGroupBox("All AIs · live rank and recommendation")
         candidate_layout = QVBoxLayout(candidate_host)
-        self.candidate_table = QTableWidget(0, 9)
-        self.candidate_table.setHorizontalHeaderLabels(
-            (
-                "Candidate",
-                "Segments",
-                "Decisions",
-                "Points",
-                "Score",
-                "Story",
-                "Loops",
-                "Bounces",
-                "Safety",
-            )
-        )
-        self.candidate_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.candidate_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.candidate_table.setAlternatingRowColors(True)
-        header = self.candidate_table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(8, QHeaderView.ResizeMode.Stretch)
-        candidate_layout.addWidget(self.candidate_table)
-        splitter.addWidget(candidate_host)
-
-        shadow_host = QGroupBox("Current shadow recommendations")
-        shadow_layout = QVBoxLayout(shadow_host)
-        self.shadow_table = QTableWidget(0, 4)
-        self.shadow_table.setHorizontalHeaderLabels(
-            ("Candidate", "Top recommendation", "Kind", "Score")
-        )
-        self.shadow_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        shadow_header = self.shadow_table.horizontalHeader()
-        shadow_header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        shadow_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        shadow_layout.addWidget(self.shadow_table)
-        splitter.addWidget(shadow_host)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-        root.addWidget(splitter, 1)
+        candidate_layout.setContentsMargins(9, 8, 9, 9)
+        candidate_layout.setSpacing(6)
+        self.leader_summary = QLabel("Waiting for candidate scores")
+        self.leader_summary.setObjectName("muted")
+        self.leader_summary.setWordWrap(True)
+        candidate_layout.addWidget(self.leader_summary)
+        self.candidate_grid = QGridLayout()
+        self.candidate_grid.setContentsMargins(0, 0, 0, 0)
+        self.candidate_grid.setHorizontalSpacing(7)
+        self.candidate_grid.setVerticalSpacing(7)
+        candidate_layout.addLayout(self.candidate_grid, 1)
+        self.candidate_cards: dict[str, QFrame] = {}
+        root.addWidget(candidate_host, 1)
 
         review = Card()
         review_layout = QHBoxLayout(review)
@@ -1433,6 +1406,151 @@ class TrainingPage(QWidget):
         if isinstance(training, Mapping):
             self._render(training, historical=False)
 
+    @staticmethod
+    def _candidate_number(candidate: Mapping[str, object], key: str) -> float:
+        try:
+            return float(candidate.get(key) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    @classmethod
+    def _rank_candidates(
+        cls,
+        candidates: list[Mapping[str, object]],
+    ) -> list[Mapping[str, object]]:
+        """Mirror PopulationCoordinator.ranked_candidates for a truthful display."""
+
+        return sorted(
+            candidates,
+            key=lambda candidate: (
+                bool(candidate.get("disqualified")),
+                not bool(candidate.get("minimum_exposure_met")),
+                -cls._candidate_number(candidate, "normalized_score"),
+                -cls._candidate_number(candidate, "story_progress"),
+                cls._candidate_number(candidate, "safety_penalties"),
+                str(candidate.get("id") or ""),
+            ),
+        )
+
+    def _clear_candidate_grid(self) -> None:
+        while self.candidate_grid.count():
+            item = self.candidate_grid.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self.candidate_cards.clear()
+
+    def _candidate_card(
+        self,
+        candidate: Mapping[str, object],
+        *,
+        rank: int,
+        active_id: str,
+        leader_id: str,
+        winner_id: str,
+        shadow: Mapping[str, object],
+    ) -> QFrame:
+        candidate_id = str(candidate.get("id") or f"candidate-{rank}")
+        label = str(candidate.get("label") or candidate_id)
+        disqualified = bool(candidate.get("disqualified"))
+        exposed = bool(candidate.get("minimum_exposure_met"))
+        is_winner = candidate_id == winner_id
+        is_leader = candidate_id == leader_id and exposed and not disqualified and not is_winner
+        is_provisional = candidate_id == leader_id and not exposed and not disqualified
+        is_active = candidate_id == active_id
+
+        card = QFrame()
+        card.setObjectName("candidateCard")
+        card.setProperty("candidate_id", candidate_id)
+        card.setProperty("winner", is_winner)
+        card.setProperty("leader", is_leader)
+        card.setProperty("provisional", is_provisional)
+        card.setProperty("disqualified", disqualified)
+        card.setProperty("active", is_active)
+        card.setMinimumHeight(92)
+        card.setMaximumHeight(118)
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(1)
+        header = QHBoxLayout()
+        header.setSpacing(4)
+        name = QLabel(f"#{rank}  {label}")
+        name.setObjectName("sectionTitle")
+        name.setToolTip(candidate_id)
+        header.addWidget(name, 1)
+        badges: list[str] = []
+        if is_winner:
+            badges.append("WINNER")
+        elif is_leader:
+            badges.append("LEADER")
+        elif is_provisional:
+            badges.append("PROVISIONAL")
+        if is_active:
+            badges.append("ACTIVE")
+        if disqualified:
+            badges.append("DQ")
+        badge = QLabel(" · ".join(badges))
+        badge.setObjectName(
+            "danger" if disqualified else "warning" if is_provisional else "success" if (is_winner or is_leader) else "meta"
+        )
+        header.addWidget(badge)
+        layout.addLayout(header)
+
+        score = self._candidate_number(candidate, "normalized_score")
+        score_label = QLabel(f"Score {score:+.3f}")
+        score_label.setObjectName("candidateScore")
+        layout.addWidget(score_label)
+
+        segments = int(self._candidate_number(candidate, "segments_completed"))
+        decisions = int(self._candidate_number(candidate, "active_decisions"))
+        points = self._candidate_number(candidate, "total_points")
+        story = int(self._candidate_number(candidate, "story_progress"))
+        stats = QLabel(
+            f"{segments} seg · {decisions} decisions · {points:+.2f} pts · story {story}"
+        )
+        stats.setObjectName("meta")
+        layout.addWidget(stats)
+
+        reasons_value = candidate.get("disqualification_reasons")
+        reasons = [str(value) for value in reasons_value] if isinstance(reasons_value, list) else []
+        if disqualified:
+            safety_text = "Disqualified" + (f": {'; '.join(reasons)}" if reasons else "")
+            safety_name = "danger"
+        elif exposed:
+            safety_text = "Eligible exposure · safety clear"
+            safety_name = "success"
+        else:
+            safety_text = f"Gathering exposure · {segments}/2 seg · {decisions}/64 decisions"
+            safety_name = "warning"
+        safety = QLabel(safety_text)
+        safety.setObjectName(safety_name)
+        safety.setToolTip(safety_text)
+        layout.addWidget(safety)
+
+        option_id = str(shadow.get("id") or "No legal recommendation")
+        option_kind = str(shadow.get("kind") or "shared")
+        option_score = shadow.get("score")
+        option_score_text = ""
+        if option_score is not None:
+            try:
+                option_score_text = f" · {float(option_score):.3f}"
+            except (TypeError, ValueError):
+                option_score_text = ""
+        concise_id = option_id if len(option_id) <= 42 else option_id[:39] + "…"
+        recommendation_text = f"Next: {concise_id} · {option_kind}{option_score_text}"
+        recommendation = QLabel(recommendation_text)
+        recommendation.setObjectName("meta")
+        recommendation.setToolTip(f"Next: {option_id} · {option_kind}{option_score_text}")
+        layout.addWidget(recommendation)
+        card.setProperty("top_recommendation", option_id)
+        card.setToolTip(
+            f"{label} ({candidate_id})\nRank {rank}\nNormalized score {score:+.3f}\n"
+            f"{segments} completed segments, {decisions} active decisions\n{safety_text}\n"
+            f"Next recommendation: {option_id} ({option_kind}){option_score_text}"
+        )
+        return card
+
     def _render(
         self,
         training: Mapping[str, object],
@@ -1460,10 +1578,14 @@ class TrainingPage(QWidget):
             None,
         )
         active_name = str(active_candidate.get("label") or active) if active_candidate else active
-        self.active_label.setText(
-            f"{'Recommended winner' if historical else 'Active candidate'}: {active_name or 'not available'}"
-            + (f" · {len(candidates)} AIs" if candidates else "")
-        )
+        eligible = bool(training.get("eligible_for_promotion"))
+        if historical and eligible and active:
+            active_text = f"Recommended winner: {active_name or active}"
+        elif historical:
+            active_text = "Training completed"
+        else:
+            active_text = f"Active candidate: {active_name or 'not available'}"
+        self.active_label.setText(active_text + (f" · {len(candidates)} AIs" if candidates else ""))
         if segment:
             self.segment_label.setText(
                 f"Segment {segment.get('index', '?')} · {segment.get('start_reason', 'unknown reason')} · "
@@ -1478,59 +1600,83 @@ class TrainingPage(QWidget):
         else:
             self.segment_label.setText("No live population event has been received.")
 
-        self.candidate_table.setRowCount(len(candidates))
-        for row, candidate in enumerate(candidates):
-            safety = "Disqualified: " + "; ".join(
-                str(value) for value in candidate.get("disqualification_reasons", [])
-            ) if candidate.get("disqualified") else (
-                "Eligible" if candidate.get("minimum_exposure_met") else "Gathering exposure"
-            )
-            values = (
-                str(candidate.get("label") or candidate.get("id") or "candidate"),
-                str(candidate.get("segments_completed", 0)),
-                str(candidate.get("active_decisions", 0)),
-                f"{float(candidate.get('total_points') or 0):+.2f}",
-                f"{float(candidate.get('normalized_score') or 0):+.3f}",
-                str(candidate.get("story_progress", 0)),
-                str(candidate.get("loop_escapes", 0)),
-                f"{candidate.get('room_bounces', 0)} ({float(candidate.get('bounce_rate') or 0):.0%})",
-                safety,
-            )
-            for column, value in enumerate(values):
-                item = QTableWidgetItem(value)
-                if str(candidate.get("id")) == active:
-                    item.setToolTip("This candidate owns the current segment." if not historical else "Recommended winner.")
-                self.candidate_table.setItem(row, column, item)
-
         shadow_value = training.get("shadow_rankings")
         shadows = shadow_value if isinstance(shadow_value, Mapping) else {
             str(candidate.get("id") or ""): candidate.get("shadow_ranking", [])
             for candidate in candidates
         }
-        labels = {str(candidate.get("id")): str(candidate.get("label") or candidate.get("id")) for candidate in candidates}
-        self.shadow_table.setRowCount(len(shadows))
-        for row, (candidate_id, ranking_value) in enumerate(sorted(shadows.items())):
+        ranked = self._rank_candidates(candidates)
+        safe_ranked = [candidate for candidate in ranked if not bool(candidate.get("disqualified"))]
+        winner_id = str(training.get("recommended_winner") or "") if eligible else ""
+        leader_id = winner_id or (
+            str(safe_ranked[0].get("id") or "") if safe_ranked else ""
+        )
+        leader = next(
+            (candidate for candidate in ranked if str(candidate.get("id") or "") == leader_id),
+            None,
+        )
+        contenders = [
+            candidate
+            for candidate in safe_ranked
+            if bool(candidate.get("minimum_exposure_met"))
+        ]
+        margin_text = ""
+        if leader is not None and len(contenders) > 1 and leader in contenders:
+            runner_up = next((candidate for candidate in contenders if candidate is not leader), None)
+            if runner_up is not None:
+                margin = self._candidate_number(leader, "normalized_score") - self._candidate_number(
+                    runner_up, "normalized_score"
+                )
+                margin_text = f" · lead {margin:+.3f} over #{ranked.index(runner_up) + 1}"
+        if leader is None:
+            self.leader_summary.setText("Waiting for candidate scores")
+            self.leader_summary.setObjectName("muted")
+        else:
+            leader_name = str(leader.get("label") or leader_id)
+            score = self._candidate_number(leader, "normalized_score")
+            if winner_id:
+                prefix = "Recommended winner"
+                object_name = "success"
+            elif historical:
+                prefix = "Top score only — no promotable winner"
+                object_name = "warning"
+            elif bool(leader.get("minimum_exposure_met")):
+                prefix = "Current leader"
+                object_name = "success"
+            else:
+                prefix = "Provisional leader — minimum exposure not met"
+                object_name = "warning"
+            self.leader_summary.setText(f"{prefix}: {leader_name} · score {score:+.3f}{margin_text}")
+            self.leader_summary.setObjectName(object_name)
+
+        self._clear_candidate_grid()
+        column_count = min(4, max(2, len(ranked)))
+        for index, candidate in enumerate(ranked):
+            candidate_id = str(candidate.get("id") or "")
+            ranking_value = shadows.get(candidate_id, [])
             ranking = ranking_value if isinstance(ranking_value, list) else []
             top = ranking[0] if ranking and isinstance(ranking[0], Mapping) else {}
-            values = (
-                labels.get(str(candidate_id), str(candidate_id)),
-                str(top.get("id") or "No ranked option"),
-                str(top.get("kind") or "shared"),
-                (
-                    f"{float(top.get('score')):.3f}"
-                    if top and top.get("score") is not None
-                    else "—"
-                ),
+            card = self._candidate_card(
+                candidate,
+                rank=index + 1,
+                active_id=active,
+                leader_id=leader_id,
+                winner_id=winner_id,
+                shadow=top,
             )
-            for column, value in enumerate(values):
-                self.shadow_table.setItem(row, column, QTableWidgetItem(value))
+            self.candidate_cards[candidate_id] = card
+            self.candidate_grid.addWidget(card, index // column_count, index % column_count)
+        for column in range(4):
+            self.candidate_grid.setColumnStretch(column, 1 if column < column_count else 0)
+        row_count = (len(ranked) + column_count - 1) // column_count if ranked else 0
+        for row in range(4):
+            self.candidate_grid.setRowStretch(row, 1 if row < row_count else 0)
 
         explanation = str(training.get("winner_explanation") or "")
         self.winner_explanation.setText(
             explanation
             or "A winner is recommended only after every exposure, telemetry, speed, cleanup, and Run Doctor gate passes."
         )
-        eligible = bool(training.get("eligible_for_promotion"))
         already_promoted = bool(manifest and manifest.get("status") == "promoted")
         self.promote_button.setEnabled(historical and eligible and not already_promoted and self.can_promote())
 

@@ -273,9 +273,11 @@ out.
 The **Live input** checkbox remains off by default. Enable it before pressing
 **Start AI** to send controls to Deltarune; leave it off for a safe dry run. The
 mode selector starts a normal run by default. Choosing **Population training**
-requires live input and telemetry, opens the live candidate scorecard, and
-enables an **AIs** selector for 2–16 candidates. It never promotes a winner
-without a separate confirmation. The speed selector defaults to **Auto**.
+requires live input and telemetry, opens a compact grid showing all 2–16 AI
+scorecards at once, and enables an **AIs** selector for 2–16 candidates. The
+grid highlights the active owner, provisional or qualified live leader, final
+recommended winner, and disqualified AIs differently. It never promotes a
+winner without a separate confirmation. The speed selector defaults to **Auto**.
 Choosing a manual multiplier and starting a live run applies that target to
 Deltarune before control begins; **Apply to game** performs the same action
 without starting a run. Its status must confirm matching game and AI speeds.

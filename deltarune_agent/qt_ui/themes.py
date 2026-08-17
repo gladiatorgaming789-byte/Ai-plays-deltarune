@@ -333,6 +333,16 @@ def stylesheet(theme: Theme) -> str:
     QFrame#card, QFrame#inspectorCard, QFrame#pageHeader {{
         background: {c['panel_alt']}; border: 1px solid {c['border']}; border-radius: 10px;
     }}
+    QFrame#candidateCard {{
+        background: {c['panel_alt']}; border: 1px solid {c['border']}; border-radius: 8px;
+    }}
+    QFrame#candidateCard[active="true"] {{ border-color: {c['accent']}; }}
+    QFrame#candidateCard[leader="true"], QFrame#candidateCard[winner="true"] {{
+        background: {c['field']}; border: 2px solid {c['success']};
+    }}
+    QFrame#candidateCard[provisional="true"] {{ border: 2px solid {c['warning']}; }}
+    QFrame#candidateCard[disqualified="true"] {{ border: 1px solid {c['danger']}; }}
+    QLabel#candidateScore {{ font-size: 14pt; font-weight: 700; }}
     QLabel#title {{ font-size: 16pt; font-weight: 700; }}
     QLabel#pageTitle {{ font-size: 20pt; font-weight: 700; }}
     QLabel#sectionTitle {{ font-size: 12pt; font-weight: 650; }}
