@@ -275,10 +275,12 @@ The **Live input** checkbox remains off by default. Enable it before pressing
 mode selector starts a normal run by default. Choosing **Population training**
 requires live input and telemetry, opens the live candidate scorecard, and
 enables an **AIs** selector for 2–16 candidates. It never promotes a winner
-without a separate confirmation. The
-speed selector defaults to **Auto**. Its status shows game speed, effective AI
-speed, and synchronization source, while F8, F9, and F10 target only the
-Deltarune window and mirror the mod's toggle/decrease/increase controls.
+without a separate confirmation. The speed selector defaults to **Auto**.
+Choosing a manual multiplier and starting a live run applies that target to
+Deltarune before control begins; **Apply to game** performs the same action
+without starting a run. Its status must confirm matching game and AI speeds.
+F8, F9, and F10 target only the Deltarune window and mirror the mod's
+toggle/decrease/increase controls.
 
 **Runs** reads small summaries first and loads bounded tails of large event and
 prediction files in a worker thread. **Profiles** keeps learned memory and run

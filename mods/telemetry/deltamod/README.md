@@ -40,7 +40,9 @@ canonical UTF-8/LF and byte-stable across supported Python platforms.
 3. Pull the latest `development` branch.
 4. Import Telemetry 9.2.1.
 5. Test Telemetry alone across Chapters 1-5 with the controller observing.
-6. Then import/enable Speed 1.3.1 and test both together.
+6. Do **not** enable standalone Speed beside standalone Telemetry. Current
+   DeltaMod CSX handling reloads both from the same `.bak`, so the later result
+   replaces the earlier one. Use AI Support 1.0.0 for Speed + Telemetry.
 
 This remains a **runtime-test candidate** until those live DeltaMod/game checks
 pass. The source installer is `../AiTelemetry.csx`; the reproducible builder is

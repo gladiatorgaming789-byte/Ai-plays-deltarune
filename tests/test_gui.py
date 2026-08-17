@@ -150,10 +150,17 @@ def test_speed_status_distinguishes_sync_manual_and_fallback():
             "synchronized": True,
         }
     ) == "Game: 2x | AI: 2x | synchronized"
-    assert "manual override" in format_speed_status(
+    assert "speed mismatch" in format_speed_status(
         {
             "game_multiplier": 2,
             "effective_multiplier": 3,
+            "source": "manual",
+            "synchronized": False,
+        }
+    )
+    assert "game speed unverified" in format_speed_status(
+        {
+            "effective_multiplier": 10,
             "source": "manual",
             "synchronized": False,
         }

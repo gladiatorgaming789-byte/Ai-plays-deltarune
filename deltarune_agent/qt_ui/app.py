@@ -304,11 +304,17 @@ class OperatorWindow(QMainWindow):
         self.run_status = QLabel("STOPPED")
         self.run_status.setObjectName("warning")
         primary.addWidget(self.run_status)
-        secondary.addWidget(QLabel("Game / AI speed"))
+        secondary.addWidget(QLabel("Target game / AI speed"))
         self.speed = QComboBox()
         self.speed.addItems(["Auto", *(f"{value}x" for value in range(1, 11))])
         self.speed.setCurrentText(str(self.settings.value("run/speed", "Auto")))
         secondary.addWidget(self.speed)
+        self.apply_speed_button = QPushButton("Apply to game")
+        self.apply_speed_button.setToolTip(
+            "Set Deltarune to the selected manual multiplier. Auto follows the mod's current speed."
+        )
+        self.apply_speed_button.clicked.connect(self.apply_selected_game_speed)
+        secondary.addWidget(self.apply_speed_button)
         for key, label in (("f8", "F8 toggle"), ("f9", "F9 −"), ("f10", "F10 +")):
             button = QPushButton(label)
             button.clicked.connect(lambda checked=False, key=key: self.send_speed_key(key))
@@ -393,6 +399,15 @@ class OperatorWindow(QMainWindow):
         self.settings.setValue("run/speed", self.speed.currentText())
         self.settings.setValue("run/mode", self.run_mode.currentText())
         self.settings.setValue("run/population_size", self.population_size.value())
+        if self.live_input.isChecked() and self.speed.currentText() != "Auto":
+            try:
+                self.controller.apply_game_speed(
+                    self.speed.currentText(),
+                    self.game_window.text(),
+                )
+            except (OSError, RuntimeError, ValueError) as exc:
+                QMessageBox.critical(self, "Could not apply game speed", str(exc))
+                return
         self.controller.start_run(
             steps=self.steps.value(),
             game_window=self.game_window.text(),
@@ -410,6 +425,15 @@ class OperatorWindow(QMainWindow):
         except (OSError, RuntimeError, ValueError) as exc:
             QMessageBox.critical(self, "Could not change game speed", str(exc))
 
+    def apply_selected_game_speed(self) -> None:
+        try:
+            self.controller.apply_game_speed(
+                self.speed.currentText(),
+                self.game_window.text(),
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            QMessageBox.critical(self, "Could not apply game speed", str(exc))
+
     def _controller_event(self, payload: object) -> None:
         self.live_page.handle_event(payload)
         self.training_page.handle_event(payload)
@@ -424,6 +448,8 @@ class OperatorWindow(QMainWindow):
         running = state in {"starting", "running", "stopping"}
         self.start_button.setEnabled(not running)
         self.run_mode.setEnabled(not running)
+        self.speed.setEnabled(not running)
+        self.apply_speed_button.setEnabled(not running)
         self.population_size.setEnabled(
             not running and self.run_mode.currentText() == "Population training"
         )

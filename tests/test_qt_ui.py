@@ -70,6 +70,39 @@ def test_qt_controller_adds_training_flag_and_keeps_stop_file_out_of_memory(
     controller.stop_file.unlink(missing_ok=True)
 
 
+def test_qt_controller_applies_selected_multiplier_to_game(qapp, tmp_path: Path) -> None:
+    controller = RunController(tmp_path)
+    window = type("Window", (), {"hwnd": 42, "title": "DELTARUNE"})()
+    output: list[str] = []
+    controller.outputReceived.connect(output.append)
+
+    with patch(
+        "deltarune_agent.qt_ui.controller.find_window",
+        return_value=window,
+    ), patch(
+        "deltarune_agent.qt_ui.controller.remember_window",
+    ), patch(
+        "deltarune_agent.qt_ui.controller.post_window_key",
+    ) as post_key, patch(
+        "deltarune_agent.qt_ui.controller.QTimer.singleShot",
+        side_effect=lambda _delay, callback: callback(),
+    ):
+        assert controller.apply_game_speed("3x", "deltarune") is True
+
+    calls = [call.args for call in post_key.call_args_list]
+    assert [args[1] for args in calls[::2]] == ["f9"] * 9 + ["f10"] * 2
+    assert all(args[2] is True for args in calls[::2])
+    assert all(args[2] is False for args in calls[1::2])
+    assert any("Requested 3x game speed" in message for message in output)
+
+
+def test_qt_controller_auto_speed_does_not_change_game(qapp, tmp_path: Path) -> None:
+    controller = RunController(tmp_path)
+    with patch("deltarune_agent.qt_ui.controller.find_window") as find_window:
+        assert controller.apply_game_speed("Auto", "deltarune") is False
+    find_window.assert_not_called()
+
+
 def test_map_scene_uses_same_scale_for_tile_guess_and_player(qapp, tmp_path: Path) -> None:
     tile_path = tmp_path / "tile.png"
     pixmap = QPixmap(160, 160)

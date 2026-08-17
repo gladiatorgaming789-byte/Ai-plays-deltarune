@@ -91,7 +91,7 @@ def format_speed_status(speed: object) -> str:
     if bool(speed.get("synchronized")):
         state = "synchronized"
     elif speed.get("source") == "manual":
-        state = "manual override"
+        state = "game speed unverified" if game is None else "speed mismatch"
     else:
         state = "safe 1x fallback"
     return (

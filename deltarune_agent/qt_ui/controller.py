@@ -15,7 +15,12 @@ from ..strategy import (
     DEFAULT_POPULATION_SIZE,
     validate_population_size,
 )
+from ..speed import MAX_MULTIPLIER, parse_requested_speed
 from ..window import find_window, post_window_key, remember_window
+
+
+SPEED_KEY_HOLD_MS = 55
+SPEED_KEY_GAP_MS = 70
 
 
 class RunController(QObject):
@@ -30,6 +35,7 @@ class RunController(QObject):
         self.window_memory = self.project_root / "memory" / "window_titles.json"
         self.stop_file: Path | None = None
         self._buffer = ""
+        self._speed_sequence_id = 0
         self.process = QProcess(self)
         self.process.setWorkingDirectory(str(self.project_root))
         self.process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
@@ -103,6 +109,7 @@ class RunController(QObject):
             self.process.kill()
 
     def send_speed_key(self, key: str, game_window: str) -> None:
+        self._speed_sequence_id += 1
         window = find_window(game_window.strip() or "deltarune", self.window_memory)
         if window is None:
             raise RuntimeError("No Deltarune window is running. Launch a chapter first.")
@@ -117,6 +124,59 @@ class RunController(QObject):
 
         QTimer.singleShot(80, release)
         self.outputReceived.emit(f"Sent {key.upper()} to {window.title}.")
+
+    def apply_game_speed(self, speed: str, game_window: str) -> bool:
+        """Drive the speed mod's hotkeys to a known manual multiplier."""
+
+        requested = parse_requested_speed(speed)
+        if requested == "auto":
+            self.outputReceived.emit(
+                "Auto speed leaves the game multiplier unchanged and follows "
+                "DRSPEED telemetry."
+            )
+            return False
+        window = find_window(game_window.strip() or "deltarune", self.window_memory)
+        if window is None:
+            raise RuntimeError("No Deltarune window is running. Launch a chapter first.")
+        remember_window(self.window_memory, window)
+        target = int(requested)
+        keys = ["f9"] * (MAX_MULTIPLIER - 1) + ["f10"] * (target - 1)
+        self._speed_sequence_id += 1
+        sequence_id = self._speed_sequence_id
+        self.outputReceived.emit(
+            f"Applying {target}x to {window.title}; waiting for DRSPEED verification."
+        )
+
+        def press(index: int) -> None:
+            if sequence_id != self._speed_sequence_id:
+                return
+            if index >= len(keys):
+                self.outputReceived.emit(
+                    f"Requested {target}x game speed. The status must confirm "
+                    f"Game: {target}x."
+                )
+                return
+            key = keys[index]
+            try:
+                post_window_key(window.hwnd, key, True)
+            except (OSError, ValueError) as exc:
+                self.outputReceived.emit(f"Game speed key warning: {exc}")
+                return
+
+            def release() -> None:
+                if sequence_id != self._speed_sequence_id:
+                    return
+                try:
+                    post_window_key(window.hwnd, key, False)
+                except (OSError, ValueError) as exc:
+                    self.outputReceived.emit(f"Game speed key release warning: {exc}")
+                    return
+                QTimer.singleShot(SPEED_KEY_GAP_MS, lambda: press(index + 1))
+
+            QTimer.singleShot(SPEED_KEY_HOLD_MS, release)
+
+        press(0)
+        return True
 
     def _read_output(self) -> None:
         self._buffer += bytes(self.process.readAllStandardOutput()).decode(
