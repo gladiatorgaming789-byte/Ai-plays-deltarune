@@ -33,7 +33,7 @@
     "telemetry_then_speed": "pass Chapters 1-5",
     "speed_then_telemetry": "pass Chapters 1-5",
     "obj_time_bbox_leak": false,
-    "note": "Semantic checks decompiled the patched code in memory and verified speed ownership of obj_time plus telemetry ownership of its seven intended events."
+    "note": "Semantic checks decompiled the patched code in memory and verified speed ownership of obj_time plus telemetry ownership of its seven runtime events and six isolated-save wrapper scripts."
   },
   "sidecar_note": "Chapter 2-5 data.win.hash files in the supplied archive are stale; the chapter SHA-256 values above were calculated from the actual data.win bytes."
 }

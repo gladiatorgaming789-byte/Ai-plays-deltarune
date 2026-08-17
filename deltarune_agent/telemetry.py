@@ -40,6 +40,7 @@ class SpeedSample:
     target_fps: float
     received_at: float
     version: int = SPEED_PROTOCOL_VERSION
+    agent_id: str | None = None
 
     def is_fresh(self, now: float | None = None, max_age: float = 2.0) -> bool:
         return (time.monotonic() if now is None else now) - self.received_at <= max_age
@@ -50,6 +51,7 @@ class SpeedSample:
             "multiplier": self.multiplier,
             "base_fps": self.base_fps,
             "target_fps": self.target_fps,
+            "agent_id": self.agent_id,
             "packet_age_seconds": max(
                 0.0,
                 (time.monotonic() if now is None else now) - self.received_at,
@@ -158,6 +160,7 @@ class TelemetrySample:
     transition_sequence: int | None = None
     coordinate_space: str = "room_pixels"
     position_kind: str = "instance_origin"
+    agent_id: str | None = None
 
     def is_fresh(self, now: float | None = None, max_age: float = 1.0) -> bool:
         return (time.monotonic() if now is None else now) - self.received_at <= max_age
@@ -402,6 +405,7 @@ def _parse_v9_fields(fields_: list[str]) -> dict[str, Any]:
         "player_controlled": (
             None if interaction_state is None else interaction_state == 0
         ),
+        "agent_id": values.get("agent") or None,
     }
     _valid_bbox(extra)
     return extra
@@ -548,6 +552,7 @@ def parse_speed_packet(
         target_fps=target_fps,
         received_at=time.monotonic() if received_at is None else received_at,
         version=version,
+        agent_id=values.get("agent") or None,
     )
 
 

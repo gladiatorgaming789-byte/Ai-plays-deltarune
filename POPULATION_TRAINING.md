@@ -1,51 +1,53 @@
-# One-Game Population Training v1
+# Independent-Game Population Training v2
 
-Population Training compares a configurable population of 2–16 strategy
-genomes against one real Deltarune run. It does not launch multiple games and
-it does not let multiple controllers send competing keys. One authoritative
-policy owns perception, world evidence,
-navigation state, dialogue, choices, and battle control. Isolated strategy
-heads rescore the same legal Autonomy options; one candidate owns each complete
-causal segment and is the only candidate whose recommendation can control input
-or receive reinforcement credit.
+Population Training runs 2–16 separate Deltarune games at the same time. Every
+AI owns a complete lane:
 
-## Candidates
+- one visible Deltarune process and window;
+- one isolated Deltarune save directory;
+- one localhost telemetry port;
+- one controller process;
+- one private navigation, visual, strategy, and reinforcement memory; and
+- one private set of detailed run artifacts.
 
-The baseline genome is loaded from `memory/strategy.json`. If that optional file
-does not exist, its coefficients exactly reproduce the former hard-coded
-Autonomy formula. Every coefficient is clamped to 0–10.
+The supervisor tiles all game windows so every AI is visible. Inputs are sent
+to a specific process window, including while the controller GUI is focused.
+There is no active candidate, shared player, segment handoff, or shadow-only AI.
+All candidates play continuously and independently until the step limit or a
+safe GUI stop.
 
-- **Balanced** keeps the baseline unchanged.
-- **Explorer** increases information and novelty while reducing distance,
-  loop, failure, budget, and reinforcement influence.
-- **Progress** emphasizes confidence and learned reward while accepting more
-  distance and budget cost.
-- **Loop-safe** strongly penalizes loops and failures.
+## Starting a run
 
-Four AIs is the compatibility-preserving default. With two or three AIs, the
-stable prefix of that list is used. Above four, the controller adds
-deterministic Explorer, Progress, and Loop-safe family members at 1.25x, 1.50x,
-1.75x, and 2.00x mutation intensity. Coefficients remain clamped to 0–10, IDs
-remain stable, and the chosen population can be reconstructed from the run
-manifest without random mutation noise.
+Install the current combined **AI Support** DeltaMod package in the selected
+chapter. It supplies both speed synchronization and the multi-instance
+telemetry/save support that this mode needs. Then select **Population training**
+in the GUI, choose Chapter 1–5 and 2–16 AIs, enable **Live input**, and start.
 
-After a reviewed promotion, the winning `strategy.json` becomes the baseline
-for the next population. Each candidate also starts with a private copy of the
-baseline `reinforcement.json`. Shadow scoring only reads these copies; it cannot
-advance a trace, consume a budget, change a goal, update the map, or send input.
+The equivalent command is:
 
-## Segments and scoring
+```powershell
+python -m deltarune_agent run --training --population-size 4 --chapter 1 --live --steps 4000
+```
 
-A candidate keeps ownership through its Navigation Coherence goal contract and
-all dialogue, choice, cutscene, transition, or battle consequences caused by
-that contract. A segment requests an end after contract completion/failure,
-observed story progress, or 64 active overworld decisions. The handoff occurs
-only after safe overworld control returns and after the owning action has been
-recorded and sent. The old candidate's eligibility trace is cleared.
+Four AIs is the default. Balanced begins with the current strategy unchanged;
+Explorer, Progress, and Loop-safe use deterministic bounded variants. Larger
+populations add stable variants around those families. All coefficients remain
+between 0 and 10, and a promoted winner becomes the baseline for the next run.
 
-The first `2 × population size` completed segments are two deterministic
-round-robin passes. Later segments use UCB1 with coefficient 0.75. Candidate
-points come only from observed outcomes:
+Each game starts from a copy of the user's current Deltarune save files under
+`%LOCALAPPDATA%\DELTARUNE\ai_training\<instance-id>`. GameMaker file operations
+are redirected into that instance folder by the support mod. The original save
+files are never written by a training instance.
+
+## Comparison and scoring
+
+The Training page displays every process at once with its PID, UDP port, room,
+latest action, decision count, points, normalized score, and safety state. A
+green card identifies the best safely exposed candidate; amber means the lead
+is still provisional; red means that lane was disqualified. A final winner is
+shown only after every required gate passes.
+
+Points come from each AI's own observed outcomes:
 
 | Outcome | Points |
 | --- | ---: |
@@ -53,75 +55,51 @@ points come only from observed outcomes:
 | First entry into a new room | +15 |
 | Successful choice response | +10 |
 | First confirmed interactable | +3 |
-| New open edge | +0.25, capped at +10 per segment |
+| New open edge | +0.25, capped at +10 |
 | Failed choice | -8 |
 | Ordinary/no-response interaction | -5 |
 | Observed A-B-A room bounce | -15 |
 | Forced loop escape | -10 |
 | Failed goal contract | -4 |
 | Broad reset | -2 |
-| Active overworld decision | -0.05 |
+| Active decision | -0.05 |
 
-The displayed score is `100 * total_points / (active_decisions + 64)`. A
-candidate needs two completed segments and 64 active decisions. Ties use more
-story progress, fewer safety penalties, then the stable candidate ID.
+The displayed score is `100 * total_points / (active_decisions + 64)`. Every AI
+must complete at least 64 decisions. Ties prefer more story progress, fewer
+safety penalties, then the stable candidate ID.
 
-## Memory isolation and promotion
+## Safety and promotion
 
-Training requires live input and telemetry:
+The active profile's memory is fingerprinted before any game starts and copied
+into every candidate workspace. Training never writes the profile directly.
+A candidate is disqualified for a controller/scorer failure, uncertainty-budget
+overrun, eight loop escapes, or four room bounces at a bounce rate of at least
+two-thirds.
 
-```powershell
-python -m deltarune_agent run --training --population-size 8 --live --steps 4000
-```
+A winner is recommended only when every AI has enough exposure and each lane
+has:
 
-`--population-size` accepts 2–16 and defaults to 4. More candidates require a
-longer run because every candidate must complete at least two segments and 64
-active decisions before a winner can pass the exposure gate.
+- a clean step-limit completion or safe GUI stop;
+- telemetry covering at least 90% of decisions and under 5% invalid packets;
+- verified matching game/AI speed (or manual 1x where verification is not
+  required);
+- successful keyboard-input cleanup; and
+- no critical Automatic Run Doctor finding.
 
-The run folder is created before policy initialization. The active profile's
-SHA-256 inventory is captured, then navigation, visual state, remembered room
-views, settings, and window-title memory are copied under
-`training_workspace/shared_memory/`. Candidate strategies and reinforcement
-stores live under `training_workspace/candidates/`. The running policy writes
-only to this workspace; the profile memory stays unchanged.
+Promotion is always explicit. Before applying the winner, the GUI verifies that
+the profile still matches its baseline fingerprint, copies the winner's entire
+learned memory into same-volume staging, creates a backup, atomically replaces
+the profile, and verifies the result. Failure rolls back. Cancelling, crashing,
+rejecting, or failing eligibility leaves profile memory unchanged.
 
-The GUI run bar exposes the same **AIs** selector whenever Population training
-is selected. The **Training** page keeps all 2–16 AIs visible together in a
-compact grid. Every card shows its live rank, top shadow recommendation,
-exposure, points, normalized score, active-segment state, and safety state. A
-green outline marks a safely exposed current leader or the final recommended
-winner, amber marks an underexposed provisional leader, blue marks the active
-segment owner, and red marks a disqualified candidate. The page deliberately
-distinguishes a live leader from a final winner, which is shown only after all
-promotion gates pass. Promotion is never automatic. The operator must click
-**Review and promote winner** and confirm it.
+## Artifacts
 
-Before promotion, the current profile inventory must exactly match the training
-baseline. The promotion builds and verifies a complete staged memory directory
-on the same volume, overlays shared verified world/visual evidence plus only the
-winner's strategy and reinforcement memory, keeps a backup, and uses atomic
-directory replacement. Replacement or verification failure rolls back. The
-profile and run folder receive audit history in `training_history.json` and
-`promotion.json`.
+The top-level training folder contains `training_manifest.json`,
+`baseline_fingerprints.json`, and `training_scores.json`. Each
+`instances/<candidate-id>/` directory contains that AI's genome, complete memory,
+controller runs, predictions, navigation maps, telemetry/speed diagnostics, and
+Run Doctor report. The workspace is preserved after completion for review.
 
-## Eligibility and artifacts
-
-A candidate is disqualified after a scorer failure, a real uncertainty-budget
-overrun, eight loop escapes, or four room bounces with a bounce rate of at least
-two-thirds. A winner is recommended only after all candidates meet minimum
-exposure and the run has:
-
-- a clean step-limit completion or safely deferred GUI stop;
-- telemetry on at least 90% of decisions and fewer than 5% invalid packets;
-- matched speed telemetry, or manual 1x where verification is not required;
-- successful input cleanup; and
-- no critical finding from Automatic Run Doctor.
-
-Every population run records its exact `population_size` and `candidate_ids`
-and preserves `training_manifest.json`,
-`baseline_fingerprints.json`, `population_events.jsonl`,
-`training_scores.json`, all candidate genome/reinforcement snapshots, the
-shared staged memory, and the ordinary detailed run artifacts. Crashes,
-cancellation, rejection, ineligibility, and conflicts leave profile memory
-untouched and preserve the workspace for review. Older runs and profiles remain
-valid because all training files and `strategy.json` are optional.
+This mode requires substantially more CPU and memory than a normal run because
+every selected AI is a real game and controller process. Start with two AIs when
+validating a new mod build or a slower computer.

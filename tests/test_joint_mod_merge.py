@@ -73,6 +73,8 @@ def _speed_code() -> dict[str, bytes]:
 def _telemetry_code() -> dict[str, bytes]:
     result = {name: TELEMETRY_MARKER for name in TELEMETRY_DRAW_CODE}
     result["gml_Object_obj_mainchara_Step_0"] = AUTOSAVE_MARKER
+    for name in TELEMETRY_CODE - set(result):
+        result[name] = b"AI_MULTI_INSTANCE|1| __ai_save_prefix"
     return result
 
 

@@ -57,6 +57,9 @@ class RunController(QObject):
         live: bool,
         training: bool = False,
         population_size: int = DEFAULT_POPULATION_SIZE,
+        chapter: int = 1,
+        memory_directory: Path | None = None,
+        runs_root: Path | None = None,
     ) -> None:
         if self.running:
             return
@@ -84,6 +87,20 @@ class RunController(QObject):
             "--speed",
             speed.casefold().removesuffix("x"),
         ]
+        if memory_directory is not None:
+            memory_directory = Path(memory_directory)
+            arguments.extend(
+                (
+                    "--memory",
+                    str(memory_directory / "navigation.json"),
+                    "--visual-memory",
+                    str(memory_directory / "visual_states.json"),
+                    "--window-memory",
+                    str(memory_directory / "window_titles.json"),
+                )
+            )
+        if runs_root is not None:
+            arguments.extend(("--runs-root", str(Path(runs_root))))
         if live:
             arguments.append("--live")
         if training:
@@ -92,6 +109,8 @@ class RunController(QObject):
                     "--training",
                     "--population-size",
                     str(validate_population_size(population_size)),
+                    "--chapter",
+                    str(int(chapter)),
                 )
             )
         self.stateChanged.emit("starting")

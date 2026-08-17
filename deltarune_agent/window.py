@@ -32,9 +32,27 @@ user32.PostMessageW.argtypes = (
     wintypes.LPARAM,
 )
 user32.PostMessageW.restype = wintypes.BOOL
+user32.SetWindowPos.argtypes = (
+    wintypes.HWND,
+    wintypes.HWND,
+    ctypes.c_int,
+    ctypes.c_int,
+    ctypes.c_int,
+    ctypes.c_int,
+    wintypes.UINT,
+)
+user32.SetWindowPos.restype = wintypes.BOOL
+user32.SystemParametersInfoW.argtypes = (
+    wintypes.UINT,
+    wintypes.UINT,
+    wintypes.LPVOID,
+    wintypes.UINT,
+)
+user32.SystemParametersInfoW.restype = wintypes.BOOL
 
 WM_KEYDOWN = 0x0100
 WM_KEYUP = 0x0101
+WM_CLOSE = 0x0010
 MAPVK_VK_TO_VSC = 0
 VIRTUAL_KEYS = {
     "left": 0x25,
@@ -56,6 +74,7 @@ class WindowInfo:
     hwnd: int
     title: str
     executable: str
+    process_id: int = 0
 
 
 class Point(ctypes.Structure):
@@ -114,7 +133,7 @@ def visible_windows() -> list[WindowInfo]:
         # executable can identify the process; discard only truly anonymous
         # handles that cannot be selected safely.
         if title or executable:
-            windows.append(WindowInfo(hwnd, title, executable))
+            windows.append(WindowInfo(hwnd, title, executable, _process_id(hwnd)))
         return True
 
     user32.EnumWindows(callback, 0)
@@ -266,6 +285,41 @@ def find_window(identifier: str, known_path: Path | None = None) -> WindowInfo |
     return _find_known_window(windows, known_path, identifier=needle)
 
 
+def find_window_by_process_id(process_id: int) -> WindowInfo | None:
+    """Select the visible top-level window owned by exactly one game process."""
+
+    process_id = int(process_id)
+    if process_id <= 0:
+        raise ValueError("process_id must be positive")
+    matches = [
+        window
+        for window in _candidate_windows()
+        if window.process_id == process_id
+    ]
+    if not matches:
+        return None
+    return max(matches, key=lambda window: (bool(window.title), bool(window.executable)))
+
+
+def wait_for_process_window(
+    process_id: int,
+    *,
+    timeout: float = 15.0,
+    poll_interval: float = 0.05,
+) -> WindowInfo:
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    while True:
+        window = find_window_by_process_id(process_id)
+        if window is not None:
+            return window
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                f"Process {process_id} did not create a visible Deltarune window "
+                f"within {max(0.0, float(timeout)):.1f} seconds."
+            )
+        time.sleep(max(0.01, float(poll_interval)))
+
+
 def _window_label(window: WindowInfo) -> str:
     return f'{window.executable or "unknown"}: {window.title or "<untitled>"}'
 
@@ -330,6 +384,64 @@ def post_window_key(hwnd: int, key: str, pressed: bool) -> None:
         lparam,
     ):
         raise ctypes.WinError(ctypes.get_last_error())
+
+
+def close_window(hwnd: int) -> None:
+    if not user32.PostMessageW(hwnd, WM_CLOSE, 0, 0):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+
+def set_window_bounds(
+    hwnd: int,
+    left: int,
+    top: int,
+    width: int,
+    height: int,
+) -> None:
+    """Move and size one game window without activating another AI's window."""
+
+    SWP_NOACTIVATE = 0x0010
+    SWP_SHOWWINDOW = 0x0040
+    if width < 1 or height < 1:
+        raise ValueError("window width and height must be positive")
+    if not user32.SetWindowPos(
+        hwnd,
+        0,
+        int(left),
+        int(top),
+        int(width),
+        int(height),
+        SWP_NOACTIVATE | SWP_SHOWWINDOW,
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+
+def tile_windows(windows: list[WindowInfo]) -> None:
+    """Tile independent game windows across the usable primary desktop."""
+
+    if not windows:
+        return
+    import math
+
+    work = Rect()
+    SPI_GETWORKAREA = 0x0030
+    if not user32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(work), 0):
+        raise ctypes.WinError(ctypes.get_last_error())
+    count = len(windows)
+    columns = max(1, math.ceil(math.sqrt(count)))
+    rows = max(1, math.ceil(count / columns))
+    width = max(240, (work.right - work.left) // columns)
+    height = max(180, (work.bottom - work.top) // rows)
+    for index, window in enumerate(windows):
+        column = index % columns
+        row = index // columns
+        set_window_bounds(
+            window.hwnd,
+            work.left + column * width,
+            work.top + row * height,
+            width,
+            height,
+        )
 
 
 def client_region(hwnd: int) -> tuple[int, int, int, int]:

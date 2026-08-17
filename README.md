@@ -16,8 +16,9 @@ to protected copies.
 - Sends controls only when `--live` is supplied.
 - Records buffered events, ranked AI predictions, navigation updates, periodic
   screenshots, diagnostics, memory snapshots, and exported maps under `runs/`.
-- Can compare a configurable population of isolated strategy heads in a one-game, review-then-promote
-  Population Training mode without changing active profile memory during a run.
+- Can launch a configurable population of fully independent AIs. Each gets its
+  own visible Deltarune window, save sandbox, telemetry port, controller,
+  learned memory, and run artifacts; the reviewed winner can later be promoted.
 - Includes an emergency stop: move the mouse to the upper-left corner, or press
   `Ctrl+C` in the controller terminal.
 
@@ -176,19 +177,19 @@ Review the new folder under `runs/`. When capture looks correct, enable input:
 python -m deltarune_agent run --live --steps 200
 ```
 
-To train navigation/interaction strategy heads over one live game, use:
+To train several independent AIs in separate visible game windows, use:
 
 ```powershell
 python -m deltarune_agent run --training --population-size 8 --live --steps 4000
 ```
 
-Population Training requires telemetry. Choose 2–16 AIs with
-`--population-size`; the default of 4 preserves the original Balanced,
-Explorer, Progress, and Loop-safe population. One candidate owns each complete
-goal and consequence segment while every non-mutating head ranks the same legal
-options. Profile memory is staged inside the run folder and is changed only if
-you explicitly review and promote an eligible winner in the GUI. See
-`POPULATION_TRAINING.md` for scoring, safety gates, artifacts, and rollback.
+Population Training requires live input and the current combined AI Support
+mod. Choose 2–16 AIs with `--population-size`; the default four are Balanced,
+Explorer, Progress, and Loop-safe. The supervisor launches and tiles one game
+window per AI and targets each process directly, so no AI can control or learn
+from another AI's game. Profile memory remains unchanged unless you explicitly
+review and promote an eligible winner in the GUI. See `POPULATION_TRAINING.md`
+for isolation, scoring, safety gates, artifacts, and rollback.
 
 Movement keys remain held across consecutive decisions and successful paths get
 a short directional commitment, producing continuous motion without sacrificing
@@ -274,10 +275,11 @@ The **Live input** checkbox remains off by default. Enable it before pressing
 **Start AI** to send controls to Deltarune; leave it off for a safe dry run. The
 mode selector starts a normal run by default. Choosing **Population training**
 requires live input and telemetry, opens a compact grid showing all 2–16 AI
-scorecards at once, and enables an **AIs** selector for 2–16 candidates. The
-grid highlights the active owner, provisional or qualified live leader, final
-recommended winner, and disqualified AIs differently. It never promotes a
-winner without a separate confirmation. The speed selector defaults to **Auto**.
+scorecards at once, launches and tiles one visible game per AI, and enables an
+**AIs** selector for 2–16 candidates. The grid highlights the provisional or
+qualified live leader, final recommended winner, and disqualified AIs
+differently. It never promotes a winner without a separate confirmation. The
+speed selector defaults to **Auto**.
 Choosing a manual multiplier and starting a live run applies that target to
 Deltarune before control begins; **Apply to game** performs the same action
 without starting a run. Its status must confirm matching game and AI speeds.
@@ -354,8 +356,8 @@ The controller listens automatically; use `--no-telemetry` to run vision-only.
 
 The separate mod in `mods/speed/` starts at 2x, supports 1x through 10x, and
 controls the whole GameMaker simulation without changing audio pitch. Enable
-**AI Support 1.0.0** for normal combined telemetry-and-speed use. It atomically
-composes Speed 1.3.1 and Telemetry 9.2.1 because current DeltaMod CSX execution
+**AI Support 2.0.0** for normal combined telemetry-and-speed use. It atomically
+composes Speed 1.4.0 and Telemetry 9.3.0 because current DeltaMod CSX execution
 does not reliably accumulate two separate CSX patches targeting the same
 `data.win`. The standalone component packages remain available for isolated
 diagnosis, but must not be enabled together. These runtime-test candidates

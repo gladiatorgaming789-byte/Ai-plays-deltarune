@@ -25,20 +25,20 @@ PACKAGE_SPECS = (
     (
         "Speed",
         MODS_ROOT / "speed" / "tools" / "build_packages.py",
-        MODS_ROOT / "speed" / "deltamod" / "AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.1.zip",
-        MODS_ROOT / "speed" / "release_1.3.1.json",
+        MODS_ROOT / "speed" / "deltamod" / "AI-Speed-All-Chapters-DeltaMod-CSX-v1.4.0.zip",
+        MODS_ROOT / "speed" / "release_1.4.0.json",
     ),
     (
         "Telemetry",
         MODS_ROOT / "telemetry" / "tools" / "build_packages.py",
-        MODS_ROOT / "telemetry" / "deltamod" / "Telemetry-All-Chapters-DeltaMod-CSX-v9.2.1.zip",
-        MODS_ROOT / "telemetry" / "release_9.2.1.json",
+        MODS_ROOT / "telemetry" / "deltamod" / "Telemetry-All-Chapters-DeltaMod-CSX-v9.3.0.zip",
+        MODS_ROOT / "telemetry" / "release_9.3.0.json",
     ),
     (
         "Support",
         MODS_ROOT / "support" / "tools" / "build_packages.py",
-        MODS_ROOT / "support" / "deltamod" / "AI-Support-All-Chapters-DeltaMod-CSX-v1.0.0.zip",
-        MODS_ROOT / "support" / "release_1.0.0.json",
+        MODS_ROOT / "support" / "deltamod" / "AI-Support-All-Chapters-DeltaMod-CSX-v2.0.0.zip",
+        MODS_ROOT / "support" / "release_2.0.0.json",
     ),
 )
 

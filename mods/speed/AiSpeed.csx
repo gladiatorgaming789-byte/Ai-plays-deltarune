@@ -31,6 +31,29 @@ if (beginStep == null || identityEvents.Any(item => item == null))
 
 string speedHook = @"
 // AI_SPEED_MOD|1| - simulation speed and localhost synchronization
+if (!variable_global_exists(""__ai_speed_port_configured""))
+{
+    global.__ai_speed_port_configured = 1;
+    global.__ai_speed_port = 42069;
+    global.__ai_speed_agent = """";
+    var _ai_speed_parameter_count = parameter_count();
+    for (var _ai_speed_parameter_index = 1; _ai_speed_parameter_index <= _ai_speed_parameter_count; _ai_speed_parameter_index++)
+    {
+        var _ai_speed_parameter = parameter_string(_ai_speed_parameter_index);
+        if (string_pos(""ai_instance_"", _ai_speed_parameter) == 1)
+        {
+            global.__ai_speed_agent = string_delete(_ai_speed_parameter, 1, 12);
+        }
+        else if (string_pos(""ai_port_"", _ai_speed_parameter) == 1)
+        {
+            var _ai_speed_requested_port = real(string_delete(_ai_speed_parameter, 1, 8));
+            if (_ai_speed_requested_port >= 1024 && _ai_speed_requested_port <= 65535)
+            {
+                global.__ai_speed_port = floor(_ai_speed_requested_port);
+            }
+        }
+    }
+}
 if (!variable_global_exists(""__ai_speed_initialized""))
 {
     global.__ai_speed_initialized = 1;
@@ -113,12 +136,13 @@ if (
     var _ai_speed_message = ""DRSPEED|1|multiplier="" +
         string(global.__ai_speed_multiplier) + ""|base_fps="" +
         string(global.__ai_speed_base_fps) + ""|target_fps="" +
-        string(global.__ai_speed_target_fps) + ""|end"";
+        string(global.__ai_speed_target_fps) + ""|agent="" +
+        global.__ai_speed_agent + ""|end"";
     buffer_write(_ai_speed_buffer, buffer_string, _ai_speed_message);
     network_send_udp(
         global.__ai_speed_socket,
         ""127.0.0.1"",
-        42069,
+        global.__ai_speed_port,
         _ai_speed_buffer,
         buffer_tell(_ai_speed_buffer)
     );
@@ -131,7 +155,7 @@ imports.QueueAppend(beginStep, speedHook);
 imports.Import();
 
 ScriptMessage(
-    "AI speed mod v1.3.0 was installed at 2x. " +
+    "AI speed mod v1.4.0 was installed at 2x. " +
     "F8 toggles 1x/previous, " +
     "F9 decreases, and F10 increases up to 10x. Use Save As only after " +
     "preserving the original data.win."

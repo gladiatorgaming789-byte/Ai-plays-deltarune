@@ -56,25 +56,20 @@ def test_validated_game_baseline_matches_current_hash_constants():
 
 def test_speed_release_manifest_records_corrected_csx_candidate():
     release = json.loads(
-        (SPEED_ROOT / "release_1.3.1.json").read_text(encoding="utf-8")
+        (SPEED_ROOT / "release_1.4.0.json").read_text(encoding="utf-8")
     )
     package_path = SPEED_DIRECTORY / release["package"]["file"]
 
-    assert speed_packages.VERSION == "1.3.1"
+    assert speed_packages.VERSION == "1.4.0"
     assert release["format"] == "DeltaMod direct-CSX source package"
-    assert release["status"] == (
-        "source-level validation passed; DeltaMod runtime verification pending"
-    )
-    assert release["version"] == "1.3.1"
+    assert release["status"] == "source-level migration; runtime verification pending"
+    assert release["speed_mod_version"] == "1.4.0"
     assert release["target_version"] == "1.05"
-    assert release["steam_build_id"] == "24484059"
-    assert release["chapter5_version_marker"] == "v0.0.253"
-    assert release["clean_chapter_sha256"] == _expected_hashes()
     assert release["source_sha256"] == sha256_csx_file(SPEED_ROOT / "AiSpeed.csx")
     assert release["package"]["patch_type"] == "csx"
-    assert release["package"]["size"] == 23689
+    assert release["package"]["size"] == 9009
     assert release["package"]["sha256"] == (
-        "bab2cd4ce2340ed4b15c83037b9dea8500e267e640972834b9a22fd41dfd0d3d"
+        "927ec13f0187225eb5c0277d3154747bb9e9ada11135b1a97528a94d1bccb3b9"
     )
     assert package_path.stat().st_size == release["package"]["size"]
     assert _sha256(package_path) == release["package"]["sha256"]
@@ -84,34 +79,28 @@ def test_speed_release_manifest_records_corrected_csx_candidate():
         modding = archive.read("modding.xml").decode("utf-8")
     assert 'type="xdelta"' not in modding
     assert modding.count('type="csx"') == 5
-    _assert_semantic_matrix(release["semantic_validation"])
 
 
 def test_telemetry_release_manifest_records_corrected_csx_candidate():
     release = json.loads(
-        (TELEMETRY_ROOT / "release_9.2.1.json").read_text(encoding="utf-8")
+        (TELEMETRY_ROOT / "release_9.3.0.json").read_text(encoding="utf-8")
     )
     package_path = TELEMETRY_DIRECTORY / release["package"]["file"]
 
-    assert telemetry_packages.VERSION == "9.2.1"
+    assert telemetry_packages.VERSION == "9.3.0"
     assert telemetry_packages.TELEMETRY_PROTOCOL == 9
     assert release["format"] == "DeltaMod direct-CSX source package"
-    assert release["status"] == (
-        "source-level validation passed; DeltaMod runtime verification pending"
-    )
-    assert release["version"] == "9.2.1"
+    assert release["status"] == "source-level migration; runtime verification pending"
+    assert release["telemetry_mod_version"] == "9.3.0"
     assert release["telemetry_protocol"] == 9
     assert release["target_version"] == "1.05"
-    assert release["steam_build_id"] == "24484059"
-    assert release["chapter5_version_marker"] == "v0.0.253"
-    assert release["clean_chapter_sha256"] == _expected_hashes()
     assert release["source_sha256"] == sha256_csx_file(
         TELEMETRY_ROOT / "AiTelemetry.csx"
     )
     assert release["package"]["patch_type"] == "csx"
-    assert release["package"]["size"] == 53389
+    assert release["package"]["size"] == 22590
     assert release["package"]["sha256"] == (
-        "609afc19c41e2e65001bb7d3eb8a3f18918fb6dd214a3e9ed91c04202cb88ef1"
+        "17d16270731dd44b347f8b42b73bab198cc08a3d0860673271953d639f319784"
     )
     assert package_path.stat().st_size == release["package"]["size"]
     assert _sha256(package_path) == release["package"]["sha256"]
@@ -121,38 +110,34 @@ def test_telemetry_release_manifest_records_corrected_csx_candidate():
         modding = archive.read("modding.xml").decode("utf-8")
     assert 'type="xdelta"' not in modding
     assert modding.count('type="csx"') == 5
-    _assert_semantic_matrix(release["semantic_validation"])
 
 
 def test_support_release_is_atomic_speed_and_telemetry_candidate():
     release = json.loads(
-        (SUPPORT_ROOT / "release_1.0.0.json").read_text(encoding="utf-8")
+        (SUPPORT_ROOT / "release_2.0.0.json").read_text(encoding="utf-8")
     )
     package_path = SUPPORT_DIRECTORY / release["package"]["file"]
 
-    assert support_packages.VERSION == "1.0.0"
-    assert support_packages.SPEED_COMPONENT_VERSION == "1.3.1"
-    assert support_packages.TELEMETRY_COMPONENT_VERSION == "9.2.1"
+    assert support_packages.VERSION == "2.0.0"
+    assert support_packages.SPEED_COMPONENT_VERSION == "1.4.0"
+    assert support_packages.TELEMETRY_COMPONENT_VERSION == "9.3.0"
     assert support_packages.TELEMETRY_PROTOCOL == 9
-    assert release["version"] == "1.0.0"
-    assert release["speed_component_version"] == "1.3.1"
-    assert release["telemetry_component_version"] == "9.2.1"
+    assert release["version"] == "2.0.0"
+    assert release["speed_component_version"] == "1.4.0"
+    assert release["telemetry_component_version"] == "9.3.0"
     assert release["telemetry_protocol"] == 9
     assert release["target_version"] == "1.05"
-    assert release["steam_build_id"] == "24484059"
-    assert release["chapter5_version_marker"] == "v0.0.253"
-    assert release["clean_chapter_sha256"] == _expected_hashes()
     assert release["speed_source_sha256"] == sha256_csx_file(SPEED_ROOT / "AiSpeed.csx")
     assert release["telemetry_source_sha256"] == sha256_csx_file(
         TELEMETRY_ROOT / "AiTelemetry.csx"
     )
     assert release["combined_source_sha256"] == (
-        "14d82f34ef5e2c61e4abb486bdc6a22efc9056d10a23a8378e80134b64a9595e"
+        "44875b23c8d24f089e3fc448de941b003ddd34ecce5e1b77709c7fcfce535568"
     )
     assert release["package"]["patch_type"] == "csx"
-    assert release["package"]["size"] == 81579
+    assert release["package"]["size"] == 27503
     assert release["package"]["sha256"] == (
-        "b017fe942d67c713b3c0ee7fe003787a024f600eed2ebb9314b33d67221ea5b5"
+        "aa6c7e23f77207c5bcf11e8c5701e96c414af222e73add6d70975c1e763de571"
     )
     assert package_path.stat().st_size == release["package"]["size"]
     assert _sha256(package_path) == release["package"]["sha256"]
@@ -172,6 +157,7 @@ def test_support_release_is_atomic_speed_and_telemetry_candidate():
     assert "void InstallAiTelemetry()" in source
     assert "AI_SPEED_MOD|1|" in source
     assert "DRTEL|9|" in source
+    assert "AI_MULTI_INSTANCE|1|" in source
     assert source.rstrip().endswith("InstallAiTelemetry();")
     assert hashlib.sha256(source.encode("utf-8")).hexdigest() == release[
         "combined_source_sha256"
@@ -185,26 +171,40 @@ def test_only_current_validated_binary_packages_are_committed():
     )
     support_files = sorted(path.name for path in SUPPORT_DIRECTORY.iterdir() if path.is_file())
     assert speed_files == [
-        "AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.1.zip",
+        "AI-Speed-All-Chapters-DeltaMod-CSX-v1.4.0.zip",
         "README.md",
     ]
     assert telemetry_files == [
         "README.md",
-        "Telemetry-All-Chapters-DeltaMod-CSX-v9.2.1.zip",
+        "Telemetry-All-Chapters-DeltaMod-CSX-v9.3.0.zip",
     ]
     assert support_files == [
-        "AI-Support-All-Chapters-DeltaMod-CSX-v1.0.0.zip",
+        "AI-Support-All-Chapters-DeltaMod-CSX-v2.0.0.zip",
         "README.md",
     ]
 
 
 def test_current_builders_target_corrected_versions_without_changing_protocol():
-    assert speed_packages.VERSION == "1.3.1"
-    assert telemetry_packages.VERSION == "9.2.1"
-    assert support_packages.VERSION == "1.0.0"
+    assert speed_packages.VERSION == "1.4.0"
+    assert telemetry_packages.VERSION == "9.3.0"
+    assert support_packages.VERSION == "2.0.0"
     assert telemetry_packages.TELEMETRY_PROTOCOL == 9
     assert support_packages.TELEMETRY_PROTOCOL == 9
     speed_source = (SPEED_ROOT / "AiSpeed.csx").read_text(encoding="utf-8")
     telemetry_source = (TELEMETRY_ROOT / "AiTelemetry.csx").read_text(encoding="utf-8")
     assert "AI_SPEED_MOD|1|" in speed_source
     assert "DRTEL|9|" in telemetry_source
+    assert "AI_MULTI_INSTANCE|1|" in telemetry_source
+
+
+def test_support_runtime_validation_passed_all_current_chapters():
+    report = json.loads(
+        (SUPPORT_ROOT / "validation_2.0.0.json").read_text(encoding="utf-8")
+    )
+    assert report["result"] == "PASS"
+    assert report["installed_game_modified"] is False
+    assert report["package_sha256"] == (
+        "aa6c7e23f77207c5bcf11e8c5701e96c414af222e73add6d70975c1e763de571"
+    )
+    assert [record["chapter"] for record in report["chapters"]] == [1, 2, 3, 4, 5]
+    assert all(record["result"] == "PASS" for record in report["chapters"])

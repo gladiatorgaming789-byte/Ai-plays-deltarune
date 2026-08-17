@@ -4,13 +4,14 @@ A fresh `development` clone includes three current DeltaMod runtime-test
 packages:
 
 - **Normal combined AI package:**
-  `mods/support/deltamod/AI-Support-All-Chapters-DeltaMod-CSX-v1.0.0.zip`
+  `mods/support/deltamod/AI-Support-All-Chapters-DeltaMod-CSX-v2.0.0.zip`
 - Standalone Speed diagnostic:
-  `mods/speed/deltamod/AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.1.zip`
+  `mods/speed/deltamod/AI-Speed-All-Chapters-DeltaMod-CSX-v1.4.0.zip`
 - Standalone Telemetry diagnostic:
-  `mods/telemetry/deltamod/Telemetry-All-Chapters-DeltaMod-CSX-v9.2.1.zip`
+  `mods/telemetry/deltamod/Telemetry-All-Chapters-DeltaMod-CSX-v9.3.0.zip`
 
-For normal AI use, install **AI Support 1.0.0 only**. Do not enable the
+For normal AI use, install **AI Support 2.0.0 only**. It adds per-process
+identity, telemetry ports, and save isolation for independent training. Do not enable the
 standalone Speed and Telemetry packages together. Current DeltaMod executes each
 separate `type="csx"` patch from the same `data.win.bak`, so later independent
 CSX patches can replace earlier results. AI Support generates one atomic CSX
@@ -25,9 +26,9 @@ bytes before startup continues.
 
 Current candidates:
 
-- AI Support 1.0.0 — 81,579 bytes — SHA-256 `b017fe942d67c713b3c0ee7fe003787a024f600eed2ebb9314b33d67221ea5b5`
-- Speed 1.3.1 — 23,689 bytes — SHA-256 `bab2cd4ce2340ed4b15c83037b9dea8500e267e640972834b9a22fd41dfd0d3d`
-- Telemetry 9.2.1 — 53,389 bytes — SHA-256 `609afc19c41e2e65001bb7d3eb8a3f18918fb6dd214a3e9ed91c04202cb88ef1`
+- AI Support 2.0.0 — 27,503 bytes — SHA-256 `aa6c7e23f77207c5bcf11e8c5701e96c414af222e73add6d70975c1e763de571`
+- Speed 1.4.0 — 9,009 bytes — SHA-256 `927ec13f0187225eb5c0277d3154747bb9e9ada11135b1a97528a94d1bccb3b9`
+- Telemetry 9.3.0 — 22,590 bytes — SHA-256 `17d16270731dd44b347f8b42b73bab198cc08a3d0860673271953d639f319784`
 
 All three packages declare raw UndertaleModTool scripts with DeltaMod's
 dedicated `type="csx"` patch type. Speed 1.3.0 and Telemetry 9.2.0 incorrectly
@@ -48,9 +49,9 @@ The packages can be regenerated/verified manually from the repository root:
 ```
 
 Before live testing, remove the withdrawn 1.3.0/9.2.0 imports and let DeltaMod
-restore/reconstruct clean protected copies. The standalone 1.3.1/9.2.1 packages
+restore/reconstruct clean protected copies. The standalone 1.4.0/9.3.0 packages
 may be tested one at a time. For the combined test, remove/disable both
-standalone packages and import AI Support 1.0.0 only.
+standalone packages and import AI Support 2.0.0 only.
 
 These remain **runtime-test candidates** until the real DeltaMod/game checks
 pass.

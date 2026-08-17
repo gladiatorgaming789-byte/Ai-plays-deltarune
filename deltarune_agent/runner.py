@@ -65,6 +65,9 @@ def build_parser() -> argparse.ArgumentParser:
         default="deltarune",
         help="part of the game window title or executable name",
     )
+    run.add_argument("--game-pid", type=int, help=argparse.SUPPRESS)
+    run.add_argument("--background-input", action="store_true", help=argparse.SUPPRESS)
+    run.add_argument("--runs-root", type=Path, default=Path("runs"), help=argparse.SUPPRESS)
     run.add_argument(
         "--countdown",
         type=int,
@@ -111,7 +114,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--training",
         action="store_true",
         help=(
-            "run isolated strategy heads over one live, telemetry-backed game"
+            "run fully independent AIs, each with its own Deltarune process"
         ),
     )
     run.add_argument(
@@ -121,9 +124,27 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_POPULATION_SIZE,
         metavar=f"{MIN_POPULATION_SIZE}-{MAX_POPULATION_SIZE}",
         help=(
-            "number of strategy heads in population training "
+            "number of independent game-and-AI pairs in population training "
             f"(default: {DEFAULT_POPULATION_SIZE})"
         ),
+    )
+    run.add_argument(
+        "--chapter",
+        type=int,
+        choices=range(1, 6),
+        default=1,
+        help="chapter launched for independent population training",
+    )
+    run.add_argument(
+        "--game-root",
+        type=Path,
+        help="Deltarune installation directory used by population training",
+    )
+    run.add_argument(
+        "--training-port-base",
+        type=int,
+        default=42100,
+        help=argparse.SUPPRESS,
     )
 
     listen = sub.add_parser(

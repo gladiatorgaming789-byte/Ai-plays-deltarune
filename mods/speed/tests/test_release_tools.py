@@ -35,5 +35,5 @@ def test_target_version_is_required() -> None:
 
 
 def test_speed_release_uses_corrected_direct_csx_version() -> None:
-    assert build_packages.VERSION == "1.3.1"
+    assert build_packages.VERSION == "1.4.0"
     assert "Direct-CSX" in build_packages.DESCRIPTION

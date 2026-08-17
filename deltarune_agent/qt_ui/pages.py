@@ -1298,9 +1298,8 @@ class TrainingPage(QWidget):
         heading.addWidget(
             PageHeader(
                 "Population Training",
-                "A configurable population of isolated strategy heads shares "
-                "observed world evidence; one candidate owns each complete "
-                "causal segment.",
+                "Every AI runs its own Deltarune process, controller, save, "
+                "telemetry stream, and learned memory.",
             ),
             1,
         )
@@ -1325,13 +1324,13 @@ class TrainingPage(QWidget):
         self.active_label.setObjectName("pageTitle")
         situation_layout.addWidget(self.active_label)
         self.segment_label = QLabel(
-            "Start Population training with live input and telemetry to compare candidates."
+            "Start Population training to launch and compare separate Deltarune instances."
         )
         self.segment_label.setWordWrap(True)
         situation_layout.addWidget(self.segment_label)
         root.addWidget(situation)
 
-        candidate_host = QGroupBox("All AIs · live rank and recommendation")
+        candidate_host = QGroupBox("All independent AIs · process, progress, and live rank")
         candidate_layout = QVBoxLayout(candidate_host)
         candidate_layout.setContentsMargins(9, 8, 9, 9)
         candidate_layout.setSpacing(6)
@@ -1457,7 +1456,11 @@ class TrainingPage(QWidget):
         is_winner = candidate_id == winner_id
         is_leader = candidate_id == leader_id and exposed and not disqualified and not is_winner
         is_provisional = candidate_id == leader_id and not exposed and not disqualified
-        is_active = candidate_id == active_id
+        is_independent = candidate.get("process_id") is not None
+        is_active = candidate_id == active_id or (
+            is_independent
+            and str(candidate.get("status") or "") in {"launching game", "game ready", "running"}
+        )
 
         card = QFrame()
         card.setObjectName("candidateCard")
@@ -1506,9 +1509,16 @@ class TrainingPage(QWidget):
         decisions = int(self._candidate_number(candidate, "active_decisions"))
         points = self._candidate_number(candidate, "total_points")
         story = int(self._candidate_number(candidate, "story_progress"))
-        stats = QLabel(
-            f"{segments} seg · {decisions} decisions · {points:+.2f} pts · story {story}"
-        )
+        if is_independent:
+            stats_text = (
+                f"PID {candidate.get('process_id', '—')} · UDP {candidate.get('telemetry_port', '—')} "
+                f"· {decisions} decisions · {points:+.2f} pts"
+            )
+        else:
+            stats_text = (
+                f"{segments} seg · {decisions} decisions · {points:+.2f} pts · story {story}"
+            )
+        stats = QLabel(stats_text)
         stats.setObjectName("meta")
         layout.addWidget(stats)
 
@@ -1521,7 +1531,11 @@ class TrainingPage(QWidget):
             safety_text = "Eligible exposure · safety clear"
             safety_name = "success"
         else:
-            safety_text = f"Gathering exposure · {segments}/2 seg · {decisions}/64 decisions"
+            safety_text = (
+                f"Gathering exposure · {decisions}/64 decisions"
+                if is_independent
+                else f"Gathering exposure · {segments}/2 seg · {decisions}/64 decisions"
+            )
             safety_name = "warning"
         safety = QLabel(safety_text)
         safety.setObjectName(safety_name)
@@ -1529,7 +1543,7 @@ class TrainingPage(QWidget):
         layout.addWidget(safety)
 
         option_id = str(shadow.get("id") or "No legal recommendation")
-        option_kind = str(shadow.get("kind") or "shared")
+        option_kind = str(shadow.get("kind") or "independent action")
         option_score = shadow.get("score")
         option_score_text = ""
         if option_score is not None:
@@ -1558,6 +1572,7 @@ class TrainingPage(QWidget):
         historical: bool,
         manifest: Mapping[str, object] | None = None,
     ) -> None:
+        independent = training.get("architecture") == "independent_game_processes_v1"
         candidates_value = training.get("candidates")
         candidates = [
             candidate
@@ -1579,14 +1594,33 @@ class TrainingPage(QWidget):
         )
         active_name = str(active_candidate.get("label") or active) if active_candidate else active
         eligible = bool(training.get("eligible_for_promotion"))
-        if historical and eligible and active:
+        if independent and not historical:
+            running_count = sum(
+                str(candidate.get("status") or "") in {"launching game", "game ready", "running"}
+                for candidate in candidates
+            )
+            active_text = f"Independent game processes: {running_count}/{len(candidates)} running"
+        elif historical and eligible and active:
             active_text = f"Recommended winner: {active_name or active}"
         elif historical:
             active_text = "Training completed"
         else:
             active_text = f"Active candidate: {active_name or 'not available'}"
         self.active_label.setText(active_text + (f" · {len(candidates)} AIs" if candidates else ""))
-        if segment:
+        if independent and not historical:
+            rooms = sorted(
+                {
+                    str(candidate.get("current_room"))
+                    for candidate in candidates
+                    if candidate.get("current_room")
+                }
+            )
+            self.segment_label.setText(
+                "Every AI owns a separate Deltarune window, process, save, telemetry port, "
+                "controller, and learned memory."
+                + (f" Current rooms: {', '.join(rooms)}" if rooms else "")
+            )
+        elif segment:
             self.segment_label.setText(
                 f"Segment {segment.get('index', '?')} · {segment.get('start_reason', 'unknown reason')} · "
                 f"age {segment.get('age_steps', 0)} steps · {segment.get('active_decisions', 0)} active decisions"
@@ -1600,7 +1634,7 @@ class TrainingPage(QWidget):
         else:
             self.segment_label.setText("No live population event has been received.")
 
-        shadow_value = training.get("shadow_rankings")
+        shadow_value = training.get("recommendations") or training.get("shadow_rankings")
         shadows = shadow_value if isinstance(shadow_value, Mapping) else {
             str(candidate.get("id") or ""): candidate.get("shadow_ranking", [])
             for candidate in candidates
@@ -1694,7 +1728,8 @@ class TrainingPage(QWidget):
                 self,
                 "Promote training winner?",
                 f"Promote {winner} into the active profile?\n\n{explanation}\n\n"
-                "Verified shared map/visual evidence and only this candidate's strategy and reinforcement memory will be applied. A backup is retained.",
+                "This winner's complete isolated learned memory will be applied. "
+                "The current profile is verified first and a backup is retained.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )

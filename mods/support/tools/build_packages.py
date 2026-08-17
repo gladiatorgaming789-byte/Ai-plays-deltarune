@@ -23,15 +23,14 @@ from mods.tools.deltamod_csx_package_impl import (
 )
 
 
-VERSION = "1.0.0"
-SPEED_COMPONENT_VERSION = "1.3.1"
-TELEMETRY_COMPONENT_VERSION = "9.2.1"
+VERSION = "2.0.0"
+SPEED_COMPONENT_VERSION = "1.4.0"
+TELEMETRY_COMPONENT_VERSION = "9.3.0"
 TELEMETRY_PROTOCOL = 9
 NAME = "AI Plays Deltarune Support"
 DESCRIPTION = (
-    "Atomic direct-CSX installer for AI speed controls and localhost telemetry. "
-    "Both components are compiled in one UndertaleModTool invocation so DeltaMod "
-    "cannot overwrite one component with the other from the same data.win backup."
+    "Atomic AI support installer with 1x-10x speed, per-process telemetry ports, "
+    "visible AI identities, and isolated saves for independent population training."
 )
 AUTHOR = "gladiatorgaming789-byte"
 URL = "https://github.com/gladiatorgaming789-byte/Ai-plays-deltarune"
@@ -98,6 +97,8 @@ def combined_source_bytes(speed_source: Path, telemetry_source: Path) -> bytes:
         raise RuntimeError("Generated support source lost the speed marker")
     if source.count("DRTEL|9|") < 2:
         raise RuntimeError("Generated support source lost telemetry protocol v9")
+    if source.count("AI_MULTI_INSTANCE|1|") < 2:
+        raise RuntimeError("Generated support source lost multi-instance support")
     return payload
 
 

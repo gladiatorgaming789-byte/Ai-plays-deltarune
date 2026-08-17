@@ -95,3 +95,17 @@ def test_speed_hotkeys_are_available_for_targeted_window_input():
     assert window_module.VIRTUAL_KEYS["f8"] == 0x77
     assert window_module.VIRTUAL_KEYS["f9"] == 0x78
     assert window_module.VIRTUAL_KEYS["f10"] == 0x79
+
+
+def test_process_id_selects_only_its_independent_game_window():
+    first = WindowInfo(100, "DELTARUNE - AI balanced", "DELTARUNE.exe", 5001)
+    second = WindowInfo(200, "DELTARUNE - AI explorer", "DELTARUNE.exe", 5002)
+
+    with patch.object(
+        window_module,
+        "visible_windows",
+        return_value=[first, second],
+    ):
+        match = window_module.find_window_by_process_id(5002)
+
+    assert match == second

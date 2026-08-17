@@ -1,0 +1,46 @@
+{
+  "format": "DeltaMod direct-CSX source package",
+  "status": "source-level migration; runtime verification pending",
+  "reason": "Compiled speed and telemetry packages could corrupt shared GameMaker variable indexes when enabled together.",
+  "telemetry_mod_version": "9.3.0",
+  "telemetry_protocol": 9,
+  "target_version": "1.05",
+  "chapters": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "merge_support": true,
+  "source": "AiTelemetry.csx",
+  "source_sha256": "b734f49b028b779002677c49ee67b095bd98323c80ab409a838dfe0946c9196f",
+  "clean_hashes_included": true,
+  "package": {
+    "file": "Telemetry-All-Chapters-DeltaMod-CSX-v9.3.0.zip",
+    "size": 22590,
+    "sha256": "17d16270731dd44b347f8b42b73bab198cc08a3d0860673271953d639f319784",
+    "root_entries": [
+      "meta.json",
+      "modding.xml",
+      "Chapter1Telemetry.csx",
+      "Chapter2Telemetry.csx",
+      "Chapter3Telemetry.csx",
+      "Chapter4Telemetry.csx",
+      "Chapter5Telemetry.csx"
+    ],
+    "chapters": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "payload_sha256": "b734f49b028b779002677c49ee67b095bd98323c80ab409a838dfe0946c9196f",
+    "package_id": "github.ai-telemetry.gladiatorgaming789-byte",
+    "merge_support": true,
+    "target_version": "1.05",
+    "has_needed_files": true,
+    "patch_type": "csx"
+  }
+}

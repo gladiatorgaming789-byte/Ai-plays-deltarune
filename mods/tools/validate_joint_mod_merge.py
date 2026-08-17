@@ -41,9 +41,20 @@ TELEMETRY_CODE = {
     "gml_Object_obj_choicer_neo_Draw_0",
     "gml_Object_obj_choicer_old_Draw_0",
     "gml_Object_obj_savemenu_Draw_0",
+    "gml_GlobalScript_ossafe_init",
+    "gml_GlobalScript_ossafe_file_delete",
+    "gml_GlobalScript_ossafe_file_exists",
+    "gml_GlobalScript_ossafe_file_text_open_read",
+    "gml_GlobalScript_ossafe_file_text_open_write",
+    "gml_GlobalScript_ossafe_ini_open",
 }
-TELEMETRY_DRAW_CODE = TELEMETRY_CODE - {
-    "gml_Object_obj_mainchara_Step_0"
+TELEMETRY_DRAW_CODE = {
+    "gml_Object_obj_mainchara_Draw_0",
+    "gml_Object_obj_heart_Draw_0",
+    "gml_Object_obj_writer_Draw_0",
+    "gml_Object_obj_choicer_neo_Draw_0",
+    "gml_Object_obj_choicer_old_Draw_0",
+    "gml_Object_obj_savemenu_Draw_0",
 }
 SPEED_MARKERS = (b"AI_SPEED_MOD|1|", b"DRSPEED|1|multiplier=")
 TELEMETRY_MARKER = b"DRTEL|9|"
@@ -569,7 +580,8 @@ def validate_chapter(
         raise RuntimeError(f"Chapter {chapter} clean source was modified")
 
     print(
-        f"Chapter {chapter}: PASS in {elapsed:.1f}s; all 8 mod code entries "
+        f"Chapter {chapter}: PASS in {elapsed:.1f}s; all "
+        f"{len(SPEED_CODE | TELEMETRY_CODE)} mod code entries "
         "remain in their intended events "
         f"({len(merged_code['additional_recompiled_code_entries'])} "
         "additional compiler-normalized entries)",

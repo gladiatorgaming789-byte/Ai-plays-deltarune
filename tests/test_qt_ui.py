@@ -60,10 +60,20 @@ def test_qt_controller_adds_training_flag_and_keeps_stop_file_out_of_memory(
             live=True,
             training=True,
             population_size=9,
+            chapter=4,
+            memory_directory=tmp_path / "profile-memory",
+            runs_root=tmp_path / "profile-runs",
         )
     arguments = start.call_args.args[1]
     assert "--training" in arguments
     assert arguments[arguments.index("--population-size") + 1] == "9"
+    assert arguments[arguments.index("--chapter") + 1] == "4"
+    assert arguments[arguments.index("--memory") + 1] == str(
+        tmp_path / "profile-memory" / "navigation.json"
+    )
+    assert arguments[arguments.index("--runs-root") + 1] == str(
+        tmp_path / "profile-runs"
+    )
     assert "--live" in arguments
     assert controller.stop_file is not None
     assert tmp_path / "memory" not in controller.stop_file.parents

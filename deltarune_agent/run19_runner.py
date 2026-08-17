@@ -30,6 +30,7 @@ from .window import (
     focus_window,
     is_window_foreground,
     remember_window,
+    wait_for_process_window,
 )
 
 
@@ -115,7 +116,10 @@ def run(args: argparse.Namespace) -> Path:
             effective_config = dict(vars(args))
             effective_config["training"] = True
             effective_config["population_size"] = population_size
-            tracker = EpisodeTracker(config=effective_config)
+            tracker = EpisodeTracker(
+                root=Path(getattr(args, "runs_root", Path("runs"))),
+                config=effective_config,
+            )
             training_workspace = TrainingWorkspace.create(
                 tracker.directory,
                 Path(args.memory).parent,
@@ -141,7 +145,10 @@ def run(args: argparse.Namespace) -> Path:
         effective_config = dict(vars(args))
         effective_config["speed"] = speed_sync.requested
         if tracker is None:
-            tracker = EpisodeTracker(config=effective_config)
+            tracker = EpisodeTracker(
+                root=Path(getattr(args, "runs_root", Path("runs"))),
+                config=effective_config,
+            )
 
         if policy.memory_warning:
             print(f"Memory warning: {policy.memory_warning}")
@@ -157,9 +164,17 @@ def run(args: argparse.Namespace) -> Path:
 
         window = None
         if args.live:
-            window = focus_window(args.game_window, effective_window_memory)
+            game_pid = getattr(args, "game_pid", None)
+            window = (
+                wait_for_process_window(game_pid)
+                if game_pid is not None
+                else focus_window(args.game_window, effective_window_memory)
+            )
             remember_window(effective_window_memory, window)
-            print(f"Focused game window: {window.title} ({window.executable})")
+            print(
+                f"Selected game window: {window.title} ({window.executable}, "
+                f"PID {getattr(window, 'process_id', 0) or game_pid or 'unknown'})"
+            )
             for remaining in range(args.countdown, 0, -1):
                 print(f"Starting controls in {remaining}...")
                 time.sleep(1)
@@ -173,6 +188,8 @@ def run(args: argparse.Namespace) -> Path:
             print(f"Capturing game area: {observer.region}")
         if window is not None:
             controller.set_target_window(window.hwnd)
+            if getattr(args, "background_input", False) or getattr(args, "game_pid", None):
+                controller.set_background_input(True)
 
         telemetry_seen = False
         background_input = False
@@ -197,7 +214,11 @@ def run(args: argparse.Namespace) -> Path:
                     break
 
             if args.live:
-                use_background_input = not is_window_foreground(window)
+                use_background_input = bool(
+                    getattr(args, "background_input", False)
+                    or getattr(args, "game_pid", None)
+                    or not is_window_foreground(window)
+                )
                 if use_background_input != background_input:
                     controller.set_background_input(use_background_input)
                     background_input = use_background_input
@@ -421,6 +442,7 @@ def run(args: argparse.Namespace) -> Path:
             if isinstance(summary, dict):
                 policy_summary = summary
         policy_summary["telemetry_diagnostics"] = telemetry_diagnostics
+        policy_summary["input_cleanup_succeeded"] = input_cleanup_succeeded
         if speed_sync is not None:
             policy_summary["speed_synchronization"] = speed_sync.as_dict()
             if loop_timings:

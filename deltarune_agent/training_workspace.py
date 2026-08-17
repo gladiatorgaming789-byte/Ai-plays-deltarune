@@ -356,6 +356,10 @@ def promote_training_run(run_directory: Path, profile_memory: Path) -> dict[str,
     run_directory = Path(run_directory).resolve()
     profile_memory = Path(profile_memory).resolve()
     manifest = _load_training_manifest(run_directory)
+    if manifest.get("architecture") == "independent_game_processes_v1":
+        from .multi_instance_training import promote_multi_instance_training_run
+
+        return promote_multi_instance_training_run(run_directory, profile_memory)
     eligibility = manifest.get("eligibility")
     if not isinstance(eligibility, Mapping) or not eligibility.get("eligible_for_promotion"):
         raise ValueError("This training run has no eligible recommended winner.")

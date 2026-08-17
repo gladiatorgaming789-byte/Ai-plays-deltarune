@@ -20,13 +20,12 @@ from mods.tools.deltamod_csx_loader import (
 )
 
 
-VERSION = "9.2.1"
+VERSION = "9.3.0"
 TELEMETRY_PROTOCOL = 9
 NAME = "AI Plays Deltarune Telemetry"
 DESCRIPTION = (
-    "Direct-CSX localhost-only telemetry protocol v9 for the external AI "
-    "controller. DeltaMod executes the source installer separately for each "
-    "chapter, avoiding compiled GameMaker variable-table merges."
+    "Direct-CSX telemetry v9 with independent-process UDP ports, visible AI "
+    "identities, and isolated training saves for the external controller."
 )
 AUTHOR = "gladiatorgaming789-byte"
 URL = "https://github.com/gladiatorgaming789-byte/Ai-plays-deltarune"

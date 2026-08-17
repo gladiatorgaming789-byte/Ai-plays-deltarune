@@ -32,8 +32,18 @@ EXPECTED_CODE = {
     "gml_Object_obj_choicer_neo_Draw_0": b"DRTEL|9|",
     "gml_Object_obj_choicer_old_Draw_0": b"DRTEL|9|",
     "gml_Object_obj_savemenu_Draw_0": b"DRTEL|9|",
+    "gml_GlobalScript_ossafe_init": b"AI_MULTI_INSTANCE|1|",
+    "gml_GlobalScript_ossafe_file_delete": b"__ai_save_prefix",
+    "gml_GlobalScript_ossafe_file_exists": b"__ai_save_prefix",
+    "gml_GlobalScript_ossafe_file_text_open_read": b"__ai_save_prefix",
+    "gml_GlobalScript_ossafe_file_text_open_write": b"__ai_save_prefix",
+    "gml_GlobalScript_ossafe_ini_open": b"__ai_save_prefix",
 }
-TELEMETRY_MARKERS = (b"DRTEL|9|", b"__ai_start_autosave_done")
+TELEMETRY_MARKERS = (
+    b"DRTEL|9|",
+    b"__ai_start_autosave_done",
+    b"AI_MULTI_INSTANCE|1|",
+)
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 MINIMUM_G3MTOOL_VERSION = (1, 2, 5)
 

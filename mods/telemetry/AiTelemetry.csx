@@ -5,9 +5,21 @@ using UndertaleModLib.Compiler;
 EnsureDataLoaded();
 
 const string marker = "DRTEL|9|";
-if (Data.Strings.Any(item => item.Content.Contains(marker)))
+const string instanceMarker = "AI_MULTI_INSTANCE|1|";
+bool hasTelemetry = Data.Strings.Any(item => item.Content.Contains(marker));
+bool hasInstanceSupport = Data.Strings.Any(item => item.Content.Contains(instanceMarker));
+if (hasTelemetry && hasInstanceSupport)
 {
-    ScriptMessage("AI telemetry v9 is already present in this data.win. No changes were made.");
+    ScriptMessage("AI telemetry v9 with multi-instance support is already present. No changes were made.");
+    return;
+}
+if (hasTelemetry || hasInstanceSupport)
+{
+    ScriptMessage(
+        "A partial or older AI telemetry installation is already present. Restore the clean " +
+        "data.win backup before installing multi-instance telemetry so save and network hooks " +
+        "cannot be layered twice."
+    );
     return;
 }
 
@@ -32,6 +44,12 @@ var dialogue = Data.Code.ByName("gml_Object_obj_writer_Draw_0");
 var choiceNeo = Data.Code.ByName("gml_Object_obj_choicer_neo_Draw_0");
 var choiceOld = Data.Code.ByName("gml_Object_obj_choicer_old_Draw_0");
 var saveMenu = Data.Code.ByName("gml_Object_obj_savemenu_Draw_0");
+var ossafeInit = Data.Code.ByName("gml_GlobalScript_ossafe_init");
+var fileDelete = Data.Code.ByName("gml_GlobalScript_ossafe_file_delete");
+var fileExists = Data.Code.ByName("gml_GlobalScript_ossafe_file_exists");
+var fileOpenRead = Data.Code.ByName("gml_GlobalScript_ossafe_file_text_open_read");
+var fileOpenWrite = Data.Code.ByName("gml_GlobalScript_ossafe_file_text_open_write");
+var iniOpen = Data.Code.ByName("gml_GlobalScript_ossafe_ini_open");
 
 var requiredEvents = new[]
 {
@@ -42,6 +60,12 @@ var requiredEvents = new[]
     (Name: "obj_choicer_neo Draw", Code: choiceNeo),
     (Name: "obj_choicer_old Draw", Code: choiceOld),
     (Name: "obj_savemenu Draw", Code: saveMenu),
+    (Name: "ossafe_init", Code: ossafeInit),
+    (Name: "ossafe_file_delete", Code: fileDelete),
+    (Name: "ossafe_file_exists", Code: fileExists),
+    (Name: "ossafe_file_text_open_read", Code: fileOpenRead),
+    (Name: "ossafe_file_text_open_write", Code: fileOpenWrite),
+    (Name: "ossafe_ini_open", Code: iniOpen),
 };
 var missingEvents = requiredEvents
     .Where(item => item.Code == null)
@@ -55,8 +79,56 @@ if (missingEvents.Length > 0)
     );
 }
 
+string RuntimeConfiguration() => @"
+// AI_MULTI_INSTANCE|1| - process identity, dedicated UDP port, and isolated saves
+if (!variable_global_exists(""__ai_runtime_configured""))
+{
+    global.__ai_runtime_configured = 1;
+    global.__ai_multi_instance_marker = ""AI_MULTI_INSTANCE|1|"";
+    global.__ai_instance_id = """";
+    global.__ai_telemetry_port = 42069;
+    global.__ai_save_prefix = """";
+    var _ai_parameter_count = parameter_count();
+    for (var _ai_parameter_index = 1; _ai_parameter_index <= _ai_parameter_count; _ai_parameter_index++)
+    {
+        var _ai_parameter = parameter_string(_ai_parameter_index);
+        if (string_pos(""ai_instance_"", _ai_parameter) == 1)
+        {
+            var _ai_raw_instance_id = string_delete(_ai_parameter, 1, 12);
+            var _ai_safe_instance_id = """";
+            var _ai_allowed_instance_chars = ""abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"";
+            for (var _ai_char_index = 1; _ai_char_index <= min(64, string_length(_ai_raw_instance_id)); _ai_char_index++)
+            {
+                var _ai_char = string_char_at(_ai_raw_instance_id, _ai_char_index);
+                if (string_pos(_ai_char, _ai_allowed_instance_chars) > 0)
+                {
+                    _ai_safe_instance_id += _ai_char;
+                }
+            }
+            global.__ai_instance_id = _ai_safe_instance_id;
+        }
+        else if (string_pos(""ai_port_"", _ai_parameter) == 1)
+        {
+            var _ai_requested_port = real(string_delete(_ai_parameter, 1, 8));
+            if (_ai_requested_port >= 1024 && _ai_requested_port <= 65535)
+            {
+                global.__ai_telemetry_port = floor(_ai_requested_port);
+            }
+        }
+    }
+    if (string_length(global.__ai_instance_id) > 0)
+    {
+        directory_create(""ai_training"");
+        directory_create(""ai_training/"" + global.__ai_instance_id);
+        global.__ai_save_prefix = ""ai_training/"" + global.__ai_instance_id + ""/"";
+        window_set_caption(""DELTARUNE - AI "" + global.__ai_instance_id);
+    }
+}
+";
+
 string Sender(string mode, string tickName, string sequenceName) => @"
 // AI_TELEMETRY_V9 - independently mergeable, visible-player telemetry packets
+" + RuntimeConfiguration() + @"
 if (!variable_global_exists(""__ai_tel_socket""))
 {
     global.__ai_tel_socket = network_create_socket(network_socket_udp);
@@ -74,7 +146,8 @@ global." + sequenceName + @" += 1;
 var _ai_sequence = global." + sequenceName + @";
 var _ai_prefix = ""DRTEL|9|" + mode + @"|"" + string(room) + ""|"" +
     room_get_name(room) + ""|"" + string(self.x) + ""|"" +
-    string(self.y) + ""|"" + object_get_name(self.object_index) + ""|"";
+    string(self.y) + ""|"" + object_get_name(self.object_index) + ""|agent="" +
+    global.__ai_instance_id + ""|"";
 
 // Send room/position every drawn frame so an observed room transition retains
 // the source position immediately before the warp. Camera, control, collision,
@@ -87,7 +160,7 @@ buffer_write(_ai_core_buffer, buffer_string, _ai_core_message);
 network_send_udp(
     global.__ai_tel_socket,
     ""127.0.0.1"",
-    42069,
+    global.__ai_telemetry_port,
     _ai_core_buffer,
     buffer_tell(_ai_core_buffer)
 );
@@ -132,7 +205,7 @@ buffer_delete(_ai_core_buffer);
     network_send_udp(
         global.__ai_tel_socket,
         ""127.0.0.1"",
-        42069,
+        global.__ai_telemetry_port,
         _ai_motion_buffer,
         buffer_tell(_ai_motion_buffer)
     );
@@ -152,7 +225,7 @@ buffer_delete(_ai_core_buffer);
     network_send_udp(
         global.__ai_tel_socket,
         ""127.0.0.1"",
-        42069,
+        global.__ai_telemetry_port,
         _ai_collision_buffer,
         buffer_tell(_ai_collision_buffer)
     );
@@ -184,7 +257,7 @@ buffer_delete(_ai_core_buffer);
     network_send_udp(
         global.__ai_tel_socket,
         ""127.0.0.1"",
-        42069,
+        global.__ai_telemetry_port,
         _ai_render_buffer,
         buffer_tell(_ai_render_buffer)
     );
@@ -204,7 +277,7 @@ buffer_delete(_ai_core_buffer);
     network_send_udp(
         global.__ai_tel_socket,
         ""127.0.0.1"",
-        42069,
+        global.__ai_telemetry_port,
         _ai_timing_buffer,
         buffer_tell(_ai_timing_buffer)
     );
@@ -214,6 +287,7 @@ buffer_delete(_ai_core_buffer);
 
 string Autosave() => @"
 // AI_BACKGROUND_AUTOSAVE_V1 - one invisible checkpoint per game session
+" + RuntimeConfiguration() + @"
 if (!variable_global_exists(""__ai_start_autosave_done""))
 {
     global.__ai_start_autosave_done = 0;
@@ -225,9 +299,130 @@ if (room == room_krisroom && global.__ai_start_autosave_done == 0)
 }
 ";
 
+string InstanceInit() => @"
+function ossafe_init()
+{
+" + RuntimeConfiguration() + @"
+}
+";
+
+string InstanceFileDelete() => @"
+function ossafe_file_delete(arg0)
+{
+" + RuntimeConfiguration() + @"
+    if (!global.is_console)
+    {
+        return file_delete(global.__ai_save_prefix + arg0);
+    }
+    else if (!is_undefined(ds_map_find_value(global.savedata, arg0)))
+    {
+        ds_map_delete(global.savedata, arg0);
+    }
+}
+";
+
+string InstanceFileExists() => @"
+function ossafe_file_exists(arg0)
+{
+" + RuntimeConfiguration() + @"
+    if (!global.is_console)
+    {
+        return file_exists(global.__ai_save_prefix + arg0);
+    }
+    return variable_global_exists(""savedata"") &&
+        !is_undefined(ds_map_find_value(global.savedata, arg0));
+}
+";
+
+string InstanceFileOpenRead() => @"
+function ossafe_file_text_open_read(arg0)
+{
+" + RuntimeConfiguration() + @"
+    if (!global.is_console)
+    {
+        return file_text_open_read(global.__ai_save_prefix + arg0);
+    }
+    var name = string_lower(arg0);
+    var file = ds_map_find_value(global.savedata, name);
+    if (is_undefined(file))
+    {
+        return undefined;
+    }
+    var data = file;
+    var num_lines = 0;
+    var lines;
+    while (string_byte_length(data) > 0)
+    {
+        var newline_pos = string_pos(""\n"", data);
+        var line;
+        if (newline_pos > 0)
+        {
+            var nextline_pos = newline_pos + 1;
+            if (newline_pos > 1 && string_char_at(data, newline_pos - 1) == ""\r"")
+            {
+                newline_pos--;
+            }
+            line = newline_pos > 1 ? substr(data, 1, newline_pos - 1) : """";
+            data = nextline_pos <= strlen(data) ? substr(data, nextline_pos) : """";
+        }
+        else
+        {
+            line = data;
+            data = """";
+        }
+        lines[num_lines++] = line;
+    }
+    handle = ds_map_create();
+    ds_map_set(handle, ""is_write"", false);
+    ds_map_set(handle, ""text"", lines);
+    ds_map_set(handle, ""num_lines"", num_lines);
+    ds_map_set(handle, ""line"", 0);
+    ds_map_set(handle, ""line_read"", false);
+    return handle;
+}
+";
+
+string InstanceFileOpenWrite() => @"
+function ossafe_file_text_open_write(arg0)
+{
+" + RuntimeConfiguration() + @"
+    if (!global.is_console)
+    {
+        return file_text_open_write(global.__ai_save_prefix + arg0);
+    }
+    var handle = ds_map_create();
+    ds_map_set(handle, ""is_write"", true);
+    ds_map_set(handle, ""filename"", string_lower(arg0));
+    ds_map_set(handle, ""data"", """");
+    return handle;
+}
+";
+
+string InstanceIniOpen() => @"
+function ossafe_ini_open(arg0)
+{
+" + RuntimeConfiguration() + @"
+    if (!global.is_console)
+    {
+        ini_open(global.__ai_save_prefix + arg0);
+        return;
+    }
+    var name = string_lower(arg0);
+    global.current_ini = name;
+    var file = ds_map_find_value(global.savedata, name);
+    ini_open_from_string(is_undefined(file) ? """" : file);
+}
+";
+
 // CodeImportGroup is the supported batched compiler API in the installed
 // UndertaleModTool 0.9.1.2 and remains compatible with 0.8.4.1.
 var imports = new CodeImportGroup(Data);
+imports.QueueReplace(ossafeInit, InstanceInit());
+imports.QueueReplace(fileDelete, InstanceFileDelete());
+imports.QueueReplace(fileExists, InstanceFileExists());
+imports.QueueReplace(fileOpenRead, InstanceFileOpenRead());
+imports.QueueReplace(fileOpenWrite, InstanceFileOpenWrite());
+imports.QueueReplace(iniOpen, InstanceIniOpen());
 imports.QueueAppend(
     overworld,
     Sender("overworld", "__ai_tel_overworld_tick_v9", "__ai_tel_overworld_sequence_v9")
@@ -257,6 +452,7 @@ imports.Import();
 
 ScriptMessage(
     "AI telemetry v9 packet merging, camera/player detail, collision bounds, " +
-    "and the invisible room_krisroom test autosave were installed. " +
+    "per-process telemetry, isolated saves, and the invisible room_krisroom " +
+    "test autosave were installed. " +
     "Use Save As to write the patched data.win only after preserving the original."
 );

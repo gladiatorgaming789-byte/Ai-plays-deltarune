@@ -277,10 +277,20 @@ class OperatorWindow(QMainWindow):
         )
         self.population_size.setPrefix("AIs  ")
         self.population_size.setToolTip(
-            "Strategy heads used by Population training. More heads require longer runs."
+            "Independent Deltarune games and AI controllers to run at once. "
+            "More AIs use more CPU and memory."
         )
         self.population_size.setMinimumWidth(90)
         primary.addWidget(self.population_size)
+        self.training_chapter = QComboBox()
+        self.training_chapter.addItems([f"Chapter {chapter}" for chapter in range(1, 6)])
+        self.training_chapter.setCurrentText(
+            str(self.settings.value("run/training_chapter", "Chapter 1"))
+        )
+        self.training_chapter.setToolTip(
+            "Every independent AI launches this chapter with its own save and telemetry port."
+        )
+        primary.addWidget(self.training_chapter)
         self.run_mode.currentTextChanged.connect(self._run_mode_changed)
         self.steps = QSpinBox()
         self.steps.setRange(1, 10_000_000)
@@ -333,6 +343,9 @@ class OperatorWindow(QMainWindow):
         self.population_size.setEnabled(
             mode == "Population training" and not self.controller.running
         )
+        self.training_chapter.setEnabled(
+            mode == "Population training" and not self.controller.running
+        )
 
     def _connect(self) -> None:
         self.controller.eventReceived.connect(self._controller_event)
@@ -380,7 +393,8 @@ class OperatorWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 "Population training needs live input",
-                "Enable Live input before starting Population training. Telemetry must also be running in Deltarune.",
+                "Enable Live input first. The controller will launch one visible "
+                "Deltarune window per AI; the current AI Support mod must be installed.",
             )
             return
         if not self.build_status.safe_for_testing:
@@ -399,7 +413,12 @@ class OperatorWindow(QMainWindow):
         self.settings.setValue("run/speed", self.speed.currentText())
         self.settings.setValue("run/mode", self.run_mode.currentText())
         self.settings.setValue("run/population_size", self.population_size.value())
-        if self.live_input.isChecked() and self.speed.currentText() != "Auto":
+        self.settings.setValue("run/training_chapter", self.training_chapter.currentText())
+        if (
+            not training
+            and self.live_input.isChecked()
+            and self.speed.currentText() != "Auto"
+        ):
             try:
                 self.controller.apply_game_speed(
                     self.speed.currentText(),
@@ -415,6 +434,9 @@ class OperatorWindow(QMainWindow):
             live=self.live_input.isChecked(),
             training=training,
             population_size=self.population_size.value(),
+            chapter=self.training_chapter.currentIndex() + 1,
+            memory_directory=self.store.memory_directory(self.active_profile.id),
+            runs_root=self.store.runs_directory(self.active_profile.id),
         )
         if training:
             self.select_page("training")
@@ -451,6 +473,9 @@ class OperatorWindow(QMainWindow):
         self.speed.setEnabled(not running)
         self.apply_speed_button.setEnabled(not running)
         self.population_size.setEnabled(
+            not running and self.run_mode.currentText() == "Population training"
+        )
+        self.training_chapter.setEnabled(
             not running and self.run_mode.currentText() == "Population training"
         )
         self.stop_button.setEnabled(state in {"starting", "running"})

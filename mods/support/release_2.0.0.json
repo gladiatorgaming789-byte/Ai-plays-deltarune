@@ -1,0 +1,50 @@
+{
+  "format": "DeltaMod atomic combined direct-CSX source package",
+  "status": "source-composition validation passed; DeltaMod runtime verification pending",
+  "version": "2.0.0",
+  "speed_component_version": "1.4.0",
+  "telemetry_component_version": "9.3.0",
+  "telemetry_protocol": 9,
+  "target_version": "1.05",
+  "chapters": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "merge_support": true,
+  "speed_source": "AiSpeed.csx",
+  "speed_source_sha256": "c0786056ff20175deb136ddd0ab9ec18edffc147c6ed899552d4203918b83333",
+  "telemetry_source": "AiTelemetry.csx",
+  "telemetry_source_sha256": "b734f49b028b779002677c49ee67b095bd98323c80ab409a838dfe0946c9196f",
+  "combined_source_sha256": "44875b23c8d24f089e3fc448de941b003ddd34ecce5e1b77709c7fcfce535568",
+  "clean_hashes_included": true,
+  "package": {
+    "file": "AI-Support-All-Chapters-DeltaMod-CSX-v2.0.0.zip",
+    "size": 27503,
+    "sha256": "aa6c7e23f77207c5bcf11e8c5701e96c414af222e73add6d70975c1e763de571",
+    "root_entries": [
+      "meta.json",
+      "modding.xml",
+      "Chapter1Support.csx",
+      "Chapter2Support.csx",
+      "Chapter3Support.csx",
+      "Chapter4Support.csx",
+      "Chapter5Support.csx"
+    ],
+    "chapters": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "payload_sha256": "44875b23c8d24f089e3fc448de941b003ddd34ecce5e1b77709c7fcfce535568",
+    "package_id": "github.ai-support.gladiatorgaming789-byte",
+    "merge_support": true,
+    "target_version": "1.05",
+    "has_needed_files": true,
+    "patch_type": "csx"
+  }
+}

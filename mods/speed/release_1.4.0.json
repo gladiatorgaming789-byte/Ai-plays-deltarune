@@ -1,0 +1,45 @@
+{
+  "format": "DeltaMod direct-CSX source package",
+  "status": "source-level migration; runtime verification pending",
+  "reason": "Compiled speed and telemetry packages could corrupt shared GameMaker variable indexes when enabled together.",
+  "speed_mod_version": "1.4.0",
+  "target_version": "1.05",
+  "chapters": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "merge_support": true,
+  "source": "AiSpeed.csx",
+  "source_sha256": "c0786056ff20175deb136ddd0ab9ec18edffc147c6ed899552d4203918b83333",
+  "clean_hashes_included": true,
+  "package": {
+    "file": "AI-Speed-All-Chapters-DeltaMod-CSX-v1.4.0.zip",
+    "size": 9009,
+    "sha256": "927ec13f0187225eb5c0277d3154747bb9e9ada11135b1a97528a94d1bccb3b9",
+    "root_entries": [
+      "meta.json",
+      "modding.xml",
+      "Chapter1Speed.csx",
+      "Chapter2Speed.csx",
+      "Chapter3Speed.csx",
+      "Chapter4Speed.csx",
+      "Chapter5Speed.csx"
+    ],
+    "chapters": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "payload_sha256": "c0786056ff20175deb136ddd0ab9ec18edffc147c6ed899552d4203918b83333",
+    "package_id": "github.ai-speed.gladiatorgaming789-byte",
+    "merge_support": true,
+    "target_version": "1.05",
+    "has_needed_files": true,
+    "patch_type": "csx"
+  }
+}

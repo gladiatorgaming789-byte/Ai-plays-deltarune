@@ -41,6 +41,24 @@ def test_parses_speed_announcement_with_gamemaker_header():
     assert sample.received_at == 10.0
 
 
+def test_parses_multi_instance_agent_identity_from_both_packet_types():
+    telemetry = parse_packet(
+        b"DRTEL|9|overworld|7|room_home|120|42|obj_mainchara|"
+        b"agent=session-balanced|part=core|seq=1|control=0|end",
+        received_at=10.0,
+    )
+    speed = parse_speed_packet(
+        b"DRSPEED|1|multiplier=2|base_fps=30|target_fps=60|"
+        b"agent=session-balanced|end",
+        received_at=10.0,
+    )
+
+    assert telemetry is not None
+    assert telemetry.agent_id == "session-balanced"
+    assert speed is not None
+    assert speed.agent_id == "session-balanced"
+
+
 def test_parses_ten_x_speed_announcement():
     sample = parse_speed_packet(
         b"DRSPEED|1|multiplier=10|base_fps=30|target_fps=300|end",
