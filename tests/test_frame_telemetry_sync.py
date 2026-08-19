@@ -10,15 +10,31 @@ from deltarune_agent.frame_telemetry_sync import (
 )
 
 
-def _sample(room: str, *, agent: str = "ai-1"):
-    return SimpleNamespace(room_name=room, room_id=1, agent_id=agent)
+def _sample(room: str, *, agent: str = "ai-1", mode: str = "overworld"):
+    return SimpleNamespace(
+        room_name=room,
+        room_id=1,
+        agent_id=agent,
+        mode=mode,
+    )
 
 
 def test_agent_identity_mismatch_can_never_reuse_previous_sample() -> None:
     assert _same_identity(_sample("room_a", agent="a"), _sample("room_a", agent="b")) is False
 
 
-def test_same_agent_can_be_temporally_compared() -> None:
+def test_mode_boundary_can_never_reuse_previous_sample() -> None:
+    assert _same_identity(
+        _sample("room_a", mode="overworld"),
+        _sample("room_a", mode="battle"),
+    ) is False
+
+
+def test_room_boundary_can_never_reuse_previous_sample() -> None:
+    assert _same_identity(_sample("room_a"), _sample("room_b")) is False
+
+
+def test_same_agent_mode_and_room_can_be_temporally_compared() -> None:
     assert _same_identity(_sample("room_a", agent="a"), _sample("room_a", agent="a")) is True
 
 
