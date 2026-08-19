@@ -11,6 +11,13 @@ def run(args) -> None:
 
         run_multi_instance_training(args)
         return
+    # Install capture/telemetry alignment before the concrete runner creates its
+    # observer, receiver, and hierarchical policy. Independent-training workers
+    # reach this same non-training path, so every game process gets identical
+    # visual-evidence protection.
+    from .frame_telemetry_sync import install_frame_telemetry_sync
+
+    install_frame_telemetry_sync()
     # Install before the runner creates EpisodeTracker. The hook runs only after
     # EpisodeTracker.finish has successfully completed its normal artifacts.
     install_post_run_hook()
