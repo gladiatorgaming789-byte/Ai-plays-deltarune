@@ -1,0 +1,19 @@
+{
+  "format": "DeltaMod atomic combined direct-CSX source package",
+  "status": "current source candidate; exact ZIP bytes materialize locally; live runtime verification pending",
+  "reason": "AI Support 2.0.1 combines unchanged Speed 1.4.0 with Telemetry 9.3.1, including training-only AI_BACKGROUND_AUTOSAVE_V2 identity gating.",
+  "version": "2.0.1",
+  "speed_component_version": "1.4.0",
+  "telemetry_component_version": "9.3.1",
+  "telemetry_protocol": 9,
+  "target_version": "1.05",
+  "chapters": [1, 2, 3, 4, 5],
+  "merge_support": true,
+  "required_safety_marker": "AI_BACKGROUND_AUTOSAVE_V2",
+  "package": {
+    "file": "AI-Support-All-Chapters-DeltaMod-CSX-v2.0.1.zip",
+    "patch_type": "csx",
+    "materialization": "mods/build_validated_packages.py",
+    "committed": false
+  }
+}
