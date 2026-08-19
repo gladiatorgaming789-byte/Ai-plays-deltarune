@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QGridLayout, QGroupBox, QMessageBox, QPushButton, QScrollArea, QWidget
+from PySide6.QtWidgets import (
+    QFrame,
+    QGridLayout,
+    QGroupBox,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QWidget,
+)
 
 
 _SPEED_BUTTON_TEXTS = {"F8 toggle", "F9 −", "F10 +"}
@@ -49,7 +57,7 @@ def install_population_safety(operator_window_cls, training_page_cls) -> None:
         scroll.setObjectName("trainingCandidateScroll")
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
         grid_host = QWidget(scroll)
         grid = QGridLayout(grid_host)
         grid.setContentsMargins(0, 0, 0, 0)
@@ -61,14 +69,10 @@ def install_population_safety(operator_window_cls, training_page_cls) -> None:
         page.candidate_scroll = scroll
 
     def controller_event(window, payload: object) -> None:
-        # Independent candidate events describe different game processes. Never
-        # merge them into the single-profile Live Map model. Population status
-        # still feeds the Training page, and runtime status remains visible.
-        if (
-            isinstance(payload, dict)
-            and payload.get("instance")
-            and window.run_mode.currentText() == "Population training"
-        ):
+        # An instance identity proves that this event came from one independent
+        # game process. Never merge it into the single-profile Live Map, even if
+        # the mode selector changes or a late event arrives during shutdown.
+        if isinstance(payload, dict) and payload.get("instance"):
             window.training_page.handle_event(payload)
             decision = payload.get("action")
             instance = payload.get("instance")
