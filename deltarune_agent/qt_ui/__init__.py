@@ -30,12 +30,17 @@ def launch_qt_gui() -> int:
 
     from .app import OperatorWindow, launch_qt_gui as _launch
     from .controller import RunController
+    from .pages import TrainingPage
+    from .population_safety import install_population_safety
     from .shutdown_safety import install_shutdown_safety
 
     # Normal close requests remain cooperative until the runtime has released
     # input, finalized artifacts/memory, and shut down training children.  A
     # destructive kill is offered only as an explicit emergency choice.
     install_shutdown_safety(OperatorWindow, RunController)
+    # Independent game events must never be merged into one live-map model, and
+    # per-process speed controls stay locked while a population comparison runs.
+    install_population_safety(OperatorWindow, TrainingPage)
 
     return _launch()
 
