@@ -28,6 +28,9 @@ def launch_qt_gui() -> int:
 
     install_runs_page_extension()
 
+    from .. import training_workspace
+    from ..multi_instance_training_promotion_v21 import install_population_promotion
+    from . import pages
     from .app import OperatorWindow, launch_qt_gui as _launch
     from .controller import RunController
     from .pages import TrainingPage
@@ -41,6 +44,10 @@ def launch_qt_gui() -> int:
     # Independent game events must never be merged into one live-map model, and
     # per-process speed controls stay locked while a population comparison runs.
     install_population_safety(OperatorWindow, TrainingPage)
+    # Independent winner promotion uses the proven transactional replacement but
+    # restores pre-training window metadata so AI instance captions never leak
+    # into the normal profile.
+    install_population_promotion(training_workspace, pages)
 
     return _launch()
 
