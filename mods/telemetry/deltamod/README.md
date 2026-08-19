@@ -4,48 +4,41 @@
 
 Use:
 
-`Telemetry-All-Chapters-DeltaMod-CSX-v9.3.0.zip`
+`Telemetry-All-Chapters-DeltaMod-CSX-v9.3.1.zip`
 
-Telemetry 9.3.0 retains the `DRTEL|9|` wire protocol and adds per-process IDs,
-dedicated UDP ports, titled windows, and isolated save paths for independent
-training.
-Every raw UndertaleModTool script is declared with DeltaMod `type="csx"`.
+Telemetry 9.3.1 retains the `DRTEL|9|` wire protocol, per-process IDs, dedicated
+UDP ports, titled windows, and isolated save paths for independent training. It
+also fixes the training startup checkpoint: `scr_save()` is now reachable only
+when a valid `ai_instance_*` identity is present, so an ordinary single-instance
+DELTARUNE session does not trigger the training autosave.
 
-Telemetry 9.2.0 is withdrawn. It incorrectly declared raw `.csx` scripts as
-`type="xdelta"`, which caused DeltaMod to pass them to G3MTool's ZIP-backed
-merge engine. G3MTool then failed with `End of Central Directory record could
-not be found` because the inputs were source text rather than G3MPatch ZIP
-archives. The older compiled Telemetry 9.1.0 package also remains withdrawn due
-to the separate shared-variable-index merge-corruption issue.
+Telemetry 9.3.0 is **withdrawn** because its background autosave did not require
+a training instance ID and could therefore invoke the normal save path. The
+unsafe 9.3.0 ZIP was removed from `development`.
 
-A fresh `development` clone includes the 9.3.0 ZIP. `Start AI GUI.bat` runs the
-validated package materializer before GUI startup and accepts the package only
-when it reproduces the release record exactly.
+Every raw UndertaleModTool script is declared with DeltaMod `type="csx"`. The
+five clean chapter SHA-256 values remain pinned through `neededFiles` against the
+validated DELTARUNE 1.05 / Steam build 24484059 baseline.
 
-Validated candidate:
-
-- size: `22590` bytes
-- SHA-256: `17d16270731dd44b347f8b42b73bab198cc08a3d0860673271953d639f319784`
-- telemetry protocol: `9`
-- DeltaMod target: `1.05`
-- Steam baseline: `24484059`
-- patch type: `csx`
-
-The five clean chapter hashes are pinned through `neededFiles`. The package is
-canonical UTF-8/LF and byte-stable across supported Python platforms.
+Because GitHub Actions runner provisioning is currently blocked for this
+repository account, the new binary ZIP is materialized locally from the committed
+safe source. `Start AI GUI.bat` runs `mods/build_validated_packages.py` before
+GUI startup; it builds 9.3.1 when missing and verifies package version, five CSX
+declarations, clean chapter hashes, and the `AI_BACKGROUND_AUTOSAVE_V2` safety
+marker before accepting it.
 
 ## Before testing
 
-1. Remove Speed 1.3.0 and Telemetry 9.2.0 from DeltaMod.
+1. Remove/disable Telemetry 9.3.0 and AI Support 2.0.0 in DeltaMod.
 2. Let DeltaMod restore/reconstruct clean protected chapter copies.
-3. Pull the latest `development` branch.
-4. Import Telemetry 9.3.0.
-5. Test Telemetry alone across Chapters 1-5 with the controller observing.
-6. Do **not** enable standalone Speed beside standalone Telemetry. Current
-   DeltaMod CSX handling reloads both from the same `.bak`, so the later result
-   replaces the earlier one. Use AI Support 2.0.0 for Speed + Telemetry and
-   independent training.
+3. Pull the latest `development` branch and run `Start AI GUI.bat` once so the
+   safe current packages are materialized.
+4. For telemetry-only diagnostics, import Telemetry 9.3.1.
+5. For normal combined operation and Population Training, use AI Support 2.0.1
+   instead of enabling standalone Speed and Telemetry together.
+6. Validate startup, telemetry identity/sequence health, saves, and disable /
+   re-enable restoration across Chapters 1-5.
 
-This remains a **runtime-test candidate** until those live DeltaMod/game checks
-pass. The source installer is `../AiTelemetry.csx`; the reproducible builder is
+This remains a **runtime-test candidate** until live DeltaMod/game checks pass.
+The source installer is `../AiTelemetry.csx`; the builder is
 `../tools/build_packages.py`.
