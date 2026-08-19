@@ -1,8 +1,9 @@
 """Compile the combined AI Support CSX against clean Chapters 1-5.
 
-This never writes inside the game installation.  G3MTool works in a temporary
+This never writes inside the game installation. G3MTool works in a temporary
 directory, then the validator decompiles the resulting patch to prove that all
-speed, telemetry, and isolated-save hooks stayed in their intended resources.
+speed, telemetry, isolated-save, and training-only autosave hooks stayed in
+their intended resources.
 """
 
 from __future__ import annotations
@@ -34,17 +35,18 @@ from mods.tools.validate_joint_mod_merge import (
     validate_merged_code,
 )
 
+
 def _parser() -> argparse.ArgumentParser:
     local = Path.home() / "AppData" / "Local"
     game = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
     game /= "Steam/steamapps/common/DELTARUNE"
     parser = argparse.ArgumentParser(
-        description="Validate the combined AI Support CSX on clean Chapters 1-5."
+        description="Validate the combined AI Support 2.0.1 CSX on clean Chapters 1-5."
     )
     parser.add_argument(
         "--package",
         type=Path,
-        default=ROOT / "mods/support/deltamod/AI-Support-All-Chapters-DeltaMod-CSX-v2.0.0.zip",
+        default=ROOT / "mods/support/deltamod/AI-Support-All-Chapters-DeltaMod-CSX-v2.0.1.zip",
     )
     parser.add_argument("--game-directory", type=Path, default=game)
     parser.add_argument(
@@ -55,7 +57,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--report",
         type=Path,
-        default=ROOT / "mods/support/validation_2.0.0.json",
+        default=ROOT / "mods/support/validation_2.0.1.json",
     )
     parser.add_argument(
         "--chapter",
@@ -97,9 +99,14 @@ def main() -> int:
                 script = work / f"Chapter{chapter}Support.csx"
                 with archive.open(script.name) as source, script.open("wb") as target:
                     shutil.copyfileobj(source, target)
+                source_bytes = script.read_bytes()
+                if AUTOSAVE_MARKER not in source_bytes:
+                    raise RuntimeError(
+                        f"Chapter {chapter} support source lacks training-only autosave v2 marker"
+                    )
                 patch = work / f"chapter{chapter}.g3mpatch"
                 applied = work / f"chapter{chapter}.applied.win"
-                print(f"Chapter {chapter}: compiling combined AI Support", flush=True)
+                print(f"Chapter {chapter}: compiling combined AI Support 2.0.1", flush=True)
                 run_command(str(g3mtool), "patch", "create", str(clean), str(script), str(patch))
                 run_command(str(g3mtool), "patch", "validate", str(patch), "--data", str(clean))
                 run_command(str(g3mtool), "patch", "apply", str(clean), str(patch), str(applied))
@@ -120,13 +127,14 @@ def main() -> int:
                         "chapter": chapter,
                         "clean_sha256": clean_hash,
                         "changed_mod_code_entries": code["mod_code_entries"],
+                        "training_only_autosave_v2": True,
                         "result": "PASS",
                     }
                 )
                 print(f"Chapter {chapter}: PASS", flush=True)
 
     report = {
-        "format": "AI Support combined CSX runtime validation v1",
+        "format": "AI Support 2.0.1 combined CSX runtime validation v1",
         "validated_at_utc": datetime.now(timezone.utc).isoformat(),
         "result": "PASS",
         "package": package.name,
