@@ -7,6 +7,10 @@ from deltarune_agent.special_gameplay import (
     MISSING_TELEMETRY_GRACE,
     SpecialGameplayCoordinator,
 )
+from deltarune_agent.special_gameplay_guard import install_special_gameplay_guard
+
+
+install_special_gameplay_guard()
 
 
 def _dynamic_frame(offset: int) -> Image.Image:
@@ -17,8 +21,35 @@ def _dynamic_frame(offset: int) -> Image.Image:
     return image
 
 
+def _prime_telemetry(coordinator: SpecialGameplayCoordinator) -> None:
+    coordinator.choose(
+        _dynamic_frame(0),
+        telemetry_present=True,
+        visual_valid=True,
+        state=GameState.OVERWORLD,
+    )
+
+
+def test_never_had_telemetry_dynamic_scene_stays_with_visual_only_policy() -> None:
+    coordinator = SpecialGameplayCoordinator()
+    actions = [
+        coordinator.choose(
+            _dynamic_frame(step * 4),
+            telemetry_present=False,
+            visual_valid=True,
+            state=GameState.OVERWORLD,
+        )
+        for step in range(MISSING_TELEMETRY_GRACE + 8)
+    ]
+    assert all(action is None for action in actions)
+    assert coordinator.active is False
+    assert coordinator.actions_selected == 0
+    assert coordinator.missing_telemetry_steps == 0
+
+
 def test_static_telemetry_gap_does_not_activate_control_discovery() -> None:
     coordinator = SpecialGameplayCoordinator()
+    _prime_telemetry(coordinator)
     frame = Image.new("RGB", (320, 240), "black")
     actions = [
         coordinator.choose(
@@ -35,10 +66,11 @@ def test_static_telemetry_gap_does_not_activate_control_discovery() -> None:
 
 def test_dynamic_gap_eventually_runs_bounded_control_experiment() -> None:
     coordinator = SpecialGameplayCoordinator()
+    _prime_telemetry(coordinator)
     selected = []
     for step in range(MISSING_TELEMETRY_GRACE + 6):
         action = coordinator.choose(
-            _dynamic_frame(step * 4),
+            _dynamic_frame((step + 1) * 4),
             telemetry_present=False,
             visual_valid=True,
             state=GameState.OVERWORLD,
@@ -53,9 +85,10 @@ def test_dynamic_gap_eventually_runs_bounded_control_experiment() -> None:
 
 def test_returning_telemetry_immediately_deactivates_special_fallback() -> None:
     coordinator = SpecialGameplayCoordinator()
+    _prime_telemetry(coordinator)
     for step in range(MISSING_TELEMETRY_GRACE + 2):
         coordinator.choose(
-            _dynamic_frame(step * 5),
+            _dynamic_frame((step + 1) * 5),
             telemetry_present=False,
             visual_valid=True,
             state=GameState.UNKNOWN,
@@ -75,6 +108,7 @@ def test_returning_telemetry_immediately_deactivates_special_fallback() -> None:
 
 def test_dialogue_or_menu_never_uses_special_control_discovery() -> None:
     coordinator = SpecialGameplayCoordinator()
+    _prime_telemetry(coordinator)
     for state in (GameState.DIALOGUE, GameState.MENU, GameState.BATTLE):
         action = coordinator.choose(
             _dynamic_frame(20),
