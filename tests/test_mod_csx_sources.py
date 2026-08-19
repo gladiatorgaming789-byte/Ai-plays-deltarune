@@ -21,13 +21,13 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
             "mods/speed/AiSpeed.csx",
             "Speed",
             "github.ai-speed.gladiatorgaming789-byte",
-            "1.3.0",
+            "1.4.0",
         ),
         (
             "mods/telemetry/AiTelemetry.csx",
             "Telemetry",
             "github.ai-telemetry.gladiatorgaming789-byte",
-            "9.2.0",
+            "9.3.1",
         ),
     ),
 )
@@ -57,3 +57,13 @@ def test_real_mod_source_builds_a_direct_csx_package(
     assert result["chapters"] == [1, 3, 5]
     assert result["has_needed_files"] is False
     assert result["merge_support"] is True
+
+
+def test_current_telemetry_source_contains_training_only_autosave_guard() -> None:
+    source = (
+        REPOSITORY_ROOT / "mods" / "telemetry" / "AiTelemetry.csx"
+    ).read_text(encoding="utf-8")
+    guard = 'if (string_length(global.__ai_instance_id) > 0)'
+    assert "AI_BACKGROUND_AUTOSAVE_V2" in source
+    assert guard in source
+    assert source.index(guard) < source.index("scr_save();")
