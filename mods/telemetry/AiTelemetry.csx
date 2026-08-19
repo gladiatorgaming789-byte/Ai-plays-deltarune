@@ -286,16 +286,19 @@ buffer_delete(_ai_core_buffer);
 ";
 
 string Autosave() => @"
-// AI_BACKGROUND_AUTOSAVE_V1 - one invisible checkpoint per game session
+// AI_BACKGROUND_AUTOSAVE_V2 - training-only invisible checkpoint
 " + RuntimeConfiguration() + @"
-if (!variable_global_exists(""__ai_start_autosave_done""))
+if (string_length(global.__ai_instance_id) > 0)
 {
-    global.__ai_start_autosave_done = 0;
-}
-if (room == room_krisroom && global.__ai_start_autosave_done == 0)
-{
-    global.__ai_start_autosave_done = 1;
-    scr_save();
+    if (!variable_global_exists(""__ai_start_autosave_done""))
+    {
+        global.__ai_start_autosave_done = 0;
+    }
+    if (room == room_krisroom && global.__ai_start_autosave_done == 0)
+    {
+        global.__ai_start_autosave_done = 1;
+        scr_save();
+    }
 }
 ";
 
@@ -452,7 +455,7 @@ imports.Import();
 
 ScriptMessage(
     "AI telemetry v9 packet merging, camera/player detail, collision bounds, " +
-    "per-process telemetry, isolated saves, and the invisible room_krisroom " +
-    "test autosave were installed. " +
+    "per-process telemetry, isolated saves, and the training-only invisible " +
+    "room_krisroom test autosave were installed. " +
     "Use Save As to write the patched data.win only after preserving the original."
 );
