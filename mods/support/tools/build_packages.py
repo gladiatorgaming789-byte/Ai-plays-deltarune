@@ -23,14 +23,14 @@ from mods.tools.deltamod_csx_package_impl import (
 )
 
 
-VERSION = "2.0.0"
+VERSION = "2.0.1"
 SPEED_COMPONENT_VERSION = "1.4.0"
-TELEMETRY_COMPONENT_VERSION = "9.3.0"
+TELEMETRY_COMPONENT_VERSION = "9.3.1"
 TELEMETRY_PROTOCOL = 9
 NAME = "AI Plays Deltarune Support"
 DESCRIPTION = (
     "Atomic AI support installer with 1x-10x speed, per-process telemetry ports, "
-    "visible AI identities, and isolated saves for independent population training."
+    "visible AI identities, isolated training saves, and training-only startup autosave."
 )
 AUTHOR = "gladiatorgaming789-byte"
 URL = "https://github.com/gladiatorgaming789-byte/Ai-plays-deltarune"
@@ -99,6 +99,8 @@ def combined_source_bytes(speed_source: Path, telemetry_source: Path) -> bytes:
         raise RuntimeError("Generated support source lost telemetry protocol v9")
     if source.count("AI_MULTI_INSTANCE|1|") < 2:
         raise RuntimeError("Generated support source lost multi-instance support")
+    if "AI_BACKGROUND_AUTOSAVE_V2" not in source:
+        raise RuntimeError("Generated support source lost training-only autosave safety")
     return payload
 
 
@@ -166,6 +168,13 @@ def main() -> int:
     validation = validate_csx_package(package, expected_chapters=chapters)
     with zipfile.ZipFile(package) as archive:
         root_entries = archive.namelist()
+        payloads = [
+            archive.read(name)
+            for name in root_entries
+            if name.startswith("Chapter") and name.endswith("Support.csx")
+        ]
+        if not payloads or not all(b"AI_BACKGROUND_AUTOSAVE_V2" in payload for payload in payloads):
+            raise RuntimeError("AI Support package lost training-only autosave safety")
 
     release = {
         "format": "DeltaMod atomic combined direct-CSX source package",
