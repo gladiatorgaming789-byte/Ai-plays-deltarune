@@ -28,7 +28,14 @@ def launch_qt_gui() -> int:
 
     install_runs_page_extension()
 
-    from .app import launch_qt_gui as _launch
+    from .app import OperatorWindow, launch_qt_gui as _launch
+    from .controller import RunController
+    from .shutdown_safety import install_shutdown_safety
+
+    # Normal close requests remain cooperative until the runtime has released
+    # input, finalized artifacts/memory, and shut down training children.  A
+    # destructive kill is offered only as an explicit emergency choice.
+    install_shutdown_safety(OperatorWindow, RunController)
 
     return _launch()
 
