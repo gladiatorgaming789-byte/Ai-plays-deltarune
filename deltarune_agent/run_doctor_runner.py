@@ -7,7 +7,7 @@ from .run_doctor_auto import install_post_run_hook
 
 def run(args) -> None:
     if bool(getattr(args, "training", False)):
-        from .multi_instance_training import run_multi_instance_training
+        from .multi_instance_training_v21 import run_multi_instance_training
 
         run_multi_instance_training(args)
         return
