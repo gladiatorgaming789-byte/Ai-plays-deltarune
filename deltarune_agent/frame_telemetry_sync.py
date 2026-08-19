@@ -28,12 +28,36 @@ def current_sync_status() -> dict[str, object]:
     return dict(_LAST_SYNC)
 
 
+def _room_identity(sample) -> str:
+    return str(
+        getattr(sample, "room_name", "")
+        or getattr(sample, "room_id", "")
+        or ""
+    )
+
+
 def _same_identity(left, right) -> bool:
+    """Return whether a preceding sample is safe to reuse for one frame."""
+
     if left is None or right is None:
         return False
     left_agent = getattr(left, "agent_id", None)
     right_agent = getattr(right, "agent_id", None)
     if left_agent and right_agent and left_agent != right_agent:
+        return False
+    if str(getattr(left, "mode", "") or "") != str(
+        getattr(right, "mode", "") or ""
+    ):
+        return False
+    left_room = _room_identity(left)
+    right_room = _room_identity(right)
+    if (
+        left_room
+        and right_room
+        and left_room.casefold() != "unknown"
+        and right_room.casefold() != "unknown"
+        and left_room != right_room
+    ):
         return False
     return True
 
@@ -50,12 +74,8 @@ def _transition_trace_requires_current(receiver, previous, current) -> bool:
         return True
     if previous is None or current is None:
         return False
-    previous_room = str(
-        getattr(previous, "room_name", "") or getattr(previous, "room_id", "")
-    )
-    current_room = str(
-        getattr(current, "room_name", "") or getattr(current, "room_id", "")
-    )
+    previous_room = _room_identity(previous)
+    current_room = _room_identity(current)
     return bool(previous_room and current_room and previous_room != current_room)
 
 
@@ -191,6 +211,7 @@ def install_frame_telemetry_sync() -> None:
                     "capture_duration_seconds": status.get("capture_duration_seconds"),
                     "packet_sequence": status.get("packet_sequence"),
                     "room": status.get("room"),
+                    "mode": status.get("mode"),
                 }
             )
         return original_validate(policy, observation, telemetry)
