@@ -4,9 +4,11 @@ from PIL import Image, ImageDraw
 
 from deltarune_agent.battle_v2 import BattleV2Controller
 from deltarune_agent.battle_v2_components import install_battle_v2_components
+from deltarune_agent.battle_v2_menu_guard import install_battle_v2_menu_guard
 
 
 install_battle_v2_components()
+install_battle_v2_menu_guard()
 
 
 def _frame_with_soul(color: tuple[int, int, int], *, x: int = 160, y: int = 125) -> Image.Image:
@@ -15,6 +17,12 @@ def _frame_with_soul(color: tuple[int, int, int], *, x: int = 160, y: int = 125)
     draw.rectangle((x - 3, y - 3, x + 3, y + 3), fill=color)
     # A compact bright threat far enough from the SOUL to be detected.
     draw.rectangle((220, 120, 224, 124), fill="white")
+    return image
+
+
+def _menu(label: str, x: int = 40) -> Image.Image:
+    image = Image.new("RGB", (320, 240), "black")
+    ImageDraw.Draw(image).text((x, 170), label, fill="white")
     return image
 
 
@@ -64,10 +72,27 @@ def test_green_mode_returns_shield_direction_from_visible_threat() -> None:
     assert controller.green_blocks == 1
 
 
+def test_cursor_only_visual_change_does_not_mark_menu_pattern_successful() -> None:
+    controller = BattleV2Controller()
+    first = _menu("COMMAND", 40)
+    moved_cursor_like_view = _menu("COMMAND", 55)
+
+    controller.choose(first, None, visual_valid=True)
+    signature = controller.pending_signature
+    assert signature is not None
+    assert controller.action_queue
+
+    # The image changed while reset/navigation inputs are still queued. This is
+    # not evidence that the selected battle command advanced the turn.
+    controller.choose(moved_cursor_like_view, None, visual_valid=True)
+    memory = controller.menu_memory[signature]
+    assert memory.successful_pattern is None
+    assert controller.turns_advanced == 0
+
+
 def test_menu_state_learns_pattern_when_visible_state_advances() -> None:
     controller = BattleV2Controller()
-    menu = Image.new("RGB", (320, 240), "black")
-    ImageDraw.Draw(menu).text((40, 170), "COMMAND", fill="white")
+    menu = _menu("COMMAND")
 
     # Run the bounded reset + first pattern + confirm sequence.
     for _ in range(7):
