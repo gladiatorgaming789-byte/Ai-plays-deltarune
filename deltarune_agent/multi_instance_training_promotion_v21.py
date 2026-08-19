@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+from typing import Mapping
 
 from . import multi_instance_training as legacy
 from .training_workspace import memory_inventory
@@ -56,4 +57,36 @@ def promote_multi_instance_training_run(
     return audit
 
 
-__all__ = ["promote_multi_instance_training_run"]
+def install_population_promotion(training_workspace_module, pages_module=None) -> None:
+    """Route the public training promotion dispatcher through this safe path."""
+
+    original_dispatch = training_workspace_module.promote_training_run
+    if getattr(original_dispatch, "_population_v21_dispatch", False):
+        if pages_module is not None:
+            pages_module.promote_training_run = original_dispatch
+        return
+
+    def dispatch(run_directory: Path, profile_memory: Path) -> dict[str, object]:
+        run_directory = Path(run_directory).resolve()
+        manifest_path = run_directory / "training_manifest.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            manifest = {}
+        if (
+            isinstance(manifest, Mapping)
+            and manifest.get("architecture") == legacy.MULTI_INSTANCE_ARCHITECTURE
+        ):
+            return promote_multi_instance_training_run(run_directory, profile_memory)
+        return original_dispatch(run_directory, profile_memory)
+
+    dispatch._population_v21_dispatch = True  # type: ignore[attr-defined]
+    training_workspace_module.promote_training_run = dispatch
+    if pages_module is not None:
+        pages_module.promote_training_run = dispatch
+
+
+__all__ = [
+    "install_population_promotion",
+    "promote_multi_instance_training_run",
+]
