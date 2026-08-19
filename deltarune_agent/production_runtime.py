@@ -19,7 +19,8 @@ def install_production_runtime() -> None:
 
     # HierarchicalPolicy is imported by frame synchronization. Install temporal
     # evidence protection first, then the battle controller factory plus its
-    # visual-localization precision layer, then telemetry-gap control learning.
+    # visual-localization/menu-consequence precision layers, then telemetry-gap
+    # control learning.
     from .frame_telemetry_sync import install_frame_telemetry_sync
 
     install_frame_telemetry_sync()
@@ -31,6 +32,10 @@ def install_production_runtime() -> None:
     from .battle_v2_components import install_battle_v2_components
 
     install_battle_v2_components()
+
+    from .battle_v2_menu_guard import install_battle_v2_menu_guard
+
+    install_battle_v2_menu_guard()
 
     from .special_gameplay import install_special_gameplay
 
