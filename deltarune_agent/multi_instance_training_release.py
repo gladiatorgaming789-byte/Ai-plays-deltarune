@@ -14,6 +14,10 @@ from . import multi_instance_training_v21 as v21
 
 
 _ORIGINAL_UPDATE = v21._update_candidate_event
+# Capture the v2 worker-argument builder before the v2.1 supervisor temporarily
+# redirects the legacy module's symbol. Calling legacy._worker_arguments from
+# inside the redirected function would recurse forever.
+_BASE_WORKER_ARGUMENTS = v21.legacy._worker_arguments
 
 
 def _counter(candidate, name: str) -> int:
@@ -22,6 +26,17 @@ def _counter(candidate, name: str) -> int:
 
 def _set(candidate, name: str, value: object) -> None:
     setattr(candidate, name, value)
+
+
+def _safe_worker_arguments(candidate, args: Any) -> list[str]:
+    arguments = _BASE_WORKER_ARGUMENTS(candidate, args)
+    steps_index = arguments.index("--steps") + 1
+    arguments[steps_index] = str(int(args.steps) + v21.SAFE_STOP_RESERVE_STEPS)
+    # Common-random-number experiment design: candidate strategy changes while
+    # the base RNG seed stays identical across the population.
+    seed_index = arguments.index("--seed") + 1
+    arguments[seed_index] = str(int(getattr(args, "seed", 0)))
+    return arguments
 
 
 def _observed_score(candidate) -> tuple[float, float]:
@@ -239,13 +254,16 @@ def run_multi_instance_training(args: Any):
 
     original_update = v21._update_candidate_event
     original_finalize = v21._finalize_candidates
+    original_worker_arguments = v21._worker_arguments
     v21._update_candidate_event = _update_candidate_event
     v21._finalize_candidates = _finalize_candidates
+    v21._worker_arguments = _safe_worker_arguments
     try:
         return v21.run_multi_instance_training(args)
     finally:
         v21._update_candidate_event = original_update
         v21._finalize_candidates = original_finalize
+        v21._worker_arguments = original_worker_arguments
 
 
 __all__ = ["run_multi_instance_training"]
