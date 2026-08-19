@@ -20,12 +20,12 @@ from mods.tools.deltamod_csx_loader import (
 )
 
 
-VERSION = "9.3.0"
+VERSION = "9.3.1"
 TELEMETRY_PROTOCOL = 9
 NAME = "AI Plays Deltarune Telemetry"
 DESCRIPTION = (
     "Direct-CSX telemetry v9 with independent-process UDP ports, visible AI "
-    "identities, and isolated training saves for the external controller."
+    "identities, isolated training saves, and training-only background autosave."
 )
 AUTHOR = "gladiatorgaming789-byte"
 URL = "https://github.com/gladiatorgaming789-byte/Ai-plays-deltarune"
@@ -123,13 +123,21 @@ def main() -> int:
     validation = validate_csx_package(package, expected_chapters=chapters)
     with zipfile.ZipFile(package) as archive:
         root_entries = archive.namelist()
+        if not all(
+            b"AI_BACKGROUND_AUTOSAVE_V2" in archive.read(name)
+            for name in root_entries
+            if name.startswith("Chapter") and name.endswith("Telemetry.csx")
+        ):
+            raise RuntimeError(
+                "Telemetry package lost the training-only autosave v2 safety marker"
+            )
 
     release = {
         "format": "DeltaMod direct-CSX source package",
-        "status": "source-level migration; runtime verification pending",
+        "status": "source-level validation passed; runtime verification pending",
         "reason": (
-            "Compiled speed and telemetry packages could corrupt shared "
-            "GameMaker variable indexes when enabled together."
+            "v9.3.1 restricts the invisible startup checkpoint to named "
+            "multi-instance training processes so ordinary saves are untouched."
         ),
         "telemetry_mod_version": VERSION,
         "telemetry_protocol": TELEMETRY_PROTOCOL,
