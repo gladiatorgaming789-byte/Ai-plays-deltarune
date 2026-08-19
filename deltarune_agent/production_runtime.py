@@ -35,6 +35,10 @@ def install_production_runtime() -> None:
     from .special_gameplay import install_special_gameplay
 
     install_special_gameplay()
+
+    from .special_gameplay_guard import install_special_gameplay_guard
+
+    install_special_gameplay_guard()
     _INSTALLED = True
 
 
