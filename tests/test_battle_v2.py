@@ -3,6 +3,10 @@ from __future__ import annotations
 from PIL import Image, ImageDraw
 
 from deltarune_agent.battle_v2 import BattleV2Controller
+from deltarune_agent.battle_v2_components import install_battle_v2_components
+
+
+install_battle_v2_components()
 
 
 def _frame_with_soul(color: tuple[int, int, int], *, x: int = 160, y: int = 125) -> Image.Image:
@@ -21,6 +25,19 @@ def test_detects_visible_red_soul_without_telemetry_position() -> None:
     assert soul.mode == "red"
     assert abs(soul.x - 160) < 2
     assert abs(soul.y - 125) < 2
+
+
+def test_same_colored_hud_pixels_do_not_merge_with_real_soul() -> None:
+    image = _frame_with_soul((255, 0, 0))
+    draw = ImageDraw.Draw(image)
+    # Separate red HUD-like strip inside the broad scan area. The old global
+    # color aggregation made the combined red extent too wide and rejected the
+    # real compact SOUL; connected components must keep them independent.
+    draw.rectangle((25, 190, 95, 194), fill=(255, 0, 0))
+    soul = BattleV2Controller.observe_soul(image)
+    assert soul is not None
+    assert soul.mode == "red"
+    assert abs(soul.x - 160) < 2
 
 
 def test_yellow_mode_fires_while_using_visible_defense() -> None:
