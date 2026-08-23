@@ -12,7 +12,7 @@ if errorlevel 1 goto setup_failed
 
 :dependencies
 rem Run the stdlib-only bootstrap by file path. Using -m here would import
-deltarune_agent\__init__.py before Pillow/PySide6 are installed.
+rem deltarune_agent\__init__.py before Pillow/PySide6 are installed.
 "%VENV_PY%" "deltarune_agent\bootstrap_dependencies.py"
 if errorlevel 1 goto setup_failed
 
@@ -23,8 +23,8 @@ rem and fail before the GUI's normal startup updater ever gets a chance to run.
 if errorlevel 1 goto setup_failed
 
 rem The update may have changed requirements.txt or the bootstrap itself. Run
-the bootstrap again from the updated checkout so the environment marker and
-required packages match the code that is about to launch.
+rem the bootstrap again from the updated checkout so the environment marker and
+rem required packages match the code that is about to launch.
 "%VENV_PY%" "deltarune_agent\bootstrap_dependencies.py"
 if errorlevel 1 goto setup_failed
 
