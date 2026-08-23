@@ -12,7 +12,7 @@ if errorlevel 1 goto setup_failed
 
 :dependencies
 rem Run the stdlib-only bootstrap by file path. Using -m here would import
-rem deltarune_agent\__init__.py before Pillow/PySide6 are installed.
+deltarune_agent\__init__.py before Pillow/PySide6 are installed.
 "%VENV_PY%" "deltarune_agent\bootstrap_dependencies.py"
 if errorlevel 1 goto setup_failed
 
@@ -23,8 +23,8 @@ rem and fail before the GUI's normal startup updater ever gets a chance to run.
 if errorlevel 1 goto setup_failed
 
 rem The update may have changed requirements.txt or the bootstrap itself. Run
-rem the bootstrap again from the updated checkout so the environment marker and
-rem required packages match the code that is about to launch.
+the bootstrap again from the updated checkout so the environment marker and
+required packages match the code that is about to launch.
 "%VENV_PY%" "deltarune_agent\bootstrap_dependencies.py"
 if errorlevel 1 goto setup_failed
 
@@ -33,6 +33,19 @@ rem Existing packages are accepted only when their size and SHA-256 match the
 rem checked-in release records; missing or invalid packages are rebuilt.
 "%VENV_PY%" "mods\build_validated_packages.py"
 if errorlevel 1 goto setup_failed
+
+rem Check the actual installed Chapter 1-5 data.win files after the current
+rem support package has been prepared. This is advisory during normal GUI
+rem startup: an older installation must not prevent the operator console from
+rem opening, but the exact repair instructions are printed before the GUI starts.
+echo.
+echo [Setup] Checking installed Deltarune AI Support...
+"%VENV_PY%" "deltarune_agent\support_installation.py"
+if errorlevel 2 (
+    echo.
+    echo [Setup] WARNING: Deltarune's installed data.win files need the current AI Support package.
+    echo [Setup] Population Training will remain blocked until the package is re-imported.
+)
 
 "%VENV_PY%" -m deltarune_agent gui
 set "EXIT_CODE=%errorlevel%"
