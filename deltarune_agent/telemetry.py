@@ -522,7 +522,10 @@ def parse_speed_packet(
         version = int(fields_[1])
     except ValueError:
         return None
-    if version != SPEED_PROTOCOL_VERSION:
+    # Accept any version in the supported range. A strict != check would
+    # silently drop all speed packets if the mod ever bumps its protocol
+    # version, causing the AI to fall back to 1x timing without warning.
+    if not 1 <= version <= SPEED_PROTOCOL_VERSION:
         return None
 
     values: dict[str, str] = {}
@@ -727,8 +730,15 @@ def _with_transition_source(
 
 class TelemetryReceiver:
     def __init__(self, port: int = 42069):
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.socket.bind(("127.0.0.1", port))
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.bind(("127.0.0.1", port))
+        except OSError:
+            # Close the socket before propagating so we never leak a file
+            # descriptor when the port is already in use.
+            sock.close()
+            raise
+        self.socket = sock
         self.socket.setblocking(False)
         self.latest: TelemetrySample | None = None
         self.latest_speed: SpeedSample | None = None

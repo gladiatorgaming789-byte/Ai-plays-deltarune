@@ -370,7 +370,10 @@ class PopulationCoordinator:
             self.segment.pending_end_reason = f"observed story progress: {event or 'unknown'}"
         elif kind == "choice_outcome":
             successful = bool(update.get("successful"))
-            self._award("choice_success" if successful else "choice_failure", 10.0 if successful else -8.0)
+            if successful:
+                self._award("choice_success", 10.0)
+            else:
+                self._award("choice_failure", -8.0)
         elif kind == "interactable" and _integer(update.get("confirmations")) == 1:
             self._award("first_interactable", 3.0, room=update.get("room"), cell=update.get("cell"))
         elif kind == "interaction_outcome" and str(update.get("last_outcome") or "") in {

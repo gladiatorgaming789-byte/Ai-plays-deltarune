@@ -346,7 +346,7 @@ class WorldModel:
             # Dropping those is safer than teaching the planner a route it never took.
             return
         current = source
-        for _ in range(forward):
+        for _ in range(int(forward)):
             following = (current[0] + vector[0], current[1] + vector[1])
             self.open_edges.add((room, *current, direction, *following))
             self.open_edges.add((room, *following, opposites[direction], *current))
@@ -799,10 +799,10 @@ class WorldModel:
         return record
 
     def _merge_cluster(self, record: dict[str, object], cluster: PortalCluster) -> None:
-        record["crossings"] = max(
-            int(record.get("crossings", 0)),
-            cluster.crossings,
-        )
+        # Sum rather than max: the rich portal record may have been updated
+        # incrementally (record_warp_transition uses +=1), so taking the
+        # maximum would silently drop crossings already counted there.
+        record["crossings"] = int(record.get("crossings", 0)) + cluster.crossings
         for warp, count in cluster.variants:
             self._merge_portal_sample(
                 record,
@@ -819,6 +819,17 @@ class WorldModel:
                 count,
             )
             self._merge_portal_variant(record, warp, count)
+        # Migrate novel-destination history that _portal_record_from_cluster
+        # initialises to 0. Without this, reconcile_warp_portals would silently
+        # drop "discovered a new area" evidence that the legacy counter holds.
+        if cluster.crossings > 0 and not record.get("first_novel_destination"):
+            if cluster.target_room:
+                record["novel_destination_crossings"] = int(
+                    record.get("novel_destination_crossings", 0)
+                ) + cluster.crossings
+                record["discovery_only_outcomes"] = int(
+                    record.get("discovery_only_outcomes", 0)
+                ) + cluster.crossings
         self._refresh_portal(record)
 
     @staticmethod

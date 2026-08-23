@@ -41,7 +41,10 @@ def _raw_record(observation: Any) -> dict[str, object]:
 
 
 def analyze_screen_regions(frame, telemetry):
-    assert _ORIGINAL_ANALYZE is not None
+    if _ORIGINAL_ANALYZE is None:
+        raise RuntimeError(
+            "_ORIGINAL_ANALYZE is not set — the module was not installed before use."
+        )
     observations = _ORIGINAL_ANALYZE(frame, telemetry)
     _LATEST_RAW.clear()
     for observation in observations:

@@ -364,7 +364,10 @@ def _belief_scores_v2(
     consistency: float,
     sample_count: int,
 ) -> dict[str, float]:
-    assert _ORIGINAL_BELIEF_SCORES is not None
+    if _ORIGINAL_BELIEF_SCORES is None:
+        raise RuntimeError(
+            "_ORIGINAL_BELIEF_SCORES is not set — the module was not installed before use."
+        )
     scores = _ORIGINAL_BELIEF_SCORES(record, consistency, sample_count)
     return _adjust_exit_belief_scores(record, scores)
 
@@ -463,7 +466,10 @@ def _postprocess_current_exit_candidates(
 
 
 def _observe_screen_v2(self: StarterPolicy, observation, telemetry) -> None:
-    assert _ORIGINAL_OBSERVE_SCREEN is not None
+    if _ORIGINAL_OBSERVE_SCREEN is None:
+        raise RuntimeError(
+            "_ORIGINAL_OBSERVE_SCREEN is not set — the module was not installed before use."
+        )
     _ORIGINAL_OBSERVE_SCREEN(self, observation, telemetry)
     if not getattr(observation, "visual_valid", False):
         return
@@ -474,7 +480,10 @@ def _map_update_v2(
     key: tuple[str, int, int],
     record: dict[str, object],
 ) -> dict[str, object]:
-    assert _ORIGINAL_MAP_UPDATE is not None
+    if _ORIGINAL_MAP_UPDATE is None:
+        raise RuntimeError(
+            "_ORIGINAL_MAP_UPDATE is not set — the module was not installed before use."
+        )
     update = _ORIGINAL_MAP_UPDATE(key, record)
     for field in EXIT_PERSISTED_FIELDS:
         if record.get(field) is not None:
@@ -489,12 +498,18 @@ def _visual_exit_is_actionable_v2(
 ) -> bool:
     if not exit_record_is_actionable(record):
         return False
-    assert _ORIGINAL_VISUAL_EXIT_ACTIONABLE is not None
+    if _ORIGINAL_VISUAL_EXIT_ACTIONABLE is None:
+        raise RuntimeError(
+            "_ORIGINAL_VISUAL_EXIT_ACTIONABLE is not set — the module was not installed before use."
+        )
     return _ORIGINAL_VISUAL_EXIT_ACTIONABLE(self, key, record)
 
 
 def _summary_v2(self: Run4Explorer) -> dict[str, object]:
-    assert _ORIGINAL_SUMMARY is not None
+    if _ORIGINAL_SUMMARY is None:
+        raise RuntimeError(
+            "_ORIGINAL_SUMMARY is not set — the module was not installed before use."
+        )
     summary = _ORIGINAL_SUMMARY(self)
     records = list(self.screen_regions.values())
     candidates = [
@@ -553,7 +568,10 @@ def _sanitize_exit_value(field: str, value: object) -> object | None:
 
 
 def _world_save_v2(self: WorldModel) -> None:
-    assert _ORIGINAL_WORLD_SAVE is not None
+    if _ORIGINAL_WORLD_SAVE is None:
+        raise RuntimeError(
+            "_ORIGINAL_WORLD_SAVE is not set — the module was not installed before use."
+        )
     _ORIGINAL_WORLD_SAVE(self)
     if self.path is None or not self.path.is_file():
         return
@@ -591,7 +609,10 @@ def _world_save_v2(self: WorldModel) -> None:
 
 
 def _world_load_v2(cls, path: Path | None) -> WorldModel:
-    assert _ORIGINAL_WORLD_LOAD is not None
+    if _ORIGINAL_WORLD_LOAD is None:
+        raise RuntimeError(
+            "_ORIGINAL_WORLD_LOAD is not set — the module was not installed before use."
+        )
     model = _ORIGINAL_WORLD_LOAD(cls, path)
     if path is None or not path.is_file():
         return model

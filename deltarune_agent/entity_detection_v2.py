@@ -80,7 +80,10 @@ def _belief_scores_entity_v2(
     consistency: float,
     sample_count: int,
 ) -> dict[str, float]:
-    assert _ORIGINAL_BELIEF_SCORES is not None
+    if _ORIGINAL_BELIEF_SCORES is None:
+        raise RuntimeError(
+            "_ORIGINAL_BELIEF_SCORES is not set — the module was not installed before use."
+        )
     scores = dict(_ORIGINAL_BELIEF_SCORES(record, consistency, sample_count))
     if not single_side_entity_candidate(record):
         return scores

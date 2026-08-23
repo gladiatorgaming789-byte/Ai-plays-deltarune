@@ -169,7 +169,10 @@ def _confirm_visual_exit_v2(
     source_cell: tuple[int, int],
     target_room: str,
 ) -> None:
-    assert _ORIGINAL_CONFIRM_VISUAL_EXIT is not None
+    if _ORIGINAL_CONFIRM_VISUAL_EXIT is None:
+        raise RuntimeError(
+            "_ORIGINAL_CONFIRM_VISUAL_EXIT is not set — the module was not installed before use."
+        )
     _ORIGINAL_CONFIRM_VISUAL_EXIT(self, room, source_cell, target_room)
     # The old routine may already have confirmed a semantic-ready candidate. If
     # so, this is idempotent; otherwise it catches a deliberately unresolved v2

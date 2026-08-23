@@ -128,14 +128,24 @@ def allocate_ports(base: int, count: int) -> tuple[int, ...]:
     try:
         for port in ports:
             probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            probe.bind(("127.0.0.1", port))
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError as exc:
+                # Close the just-created socket before re-raising so we
+                # never leak a file descriptor when bind() fails.
+                probe.close()
+                raise RuntimeError(
+                    f"Training telemetry port {port} is already in use."
+                ) from exc
             probes.append(probe)
-    except OSError as exc:
-        raise RuntimeError(f"Training telemetry port {port} is already in use.") from exc
-    finally:
+        # Sockets are kept open until we return so the OS cannot hand these
+        # ports to another process between probe-close and actual use
+        # (TOCTOU). Callers must close them once the game processes are up.
+        return ports
+    except Exception:
         for probe in probes:
             probe.close()
-    return ports
+        raise
 
 
 @dataclass
@@ -753,6 +763,18 @@ def run_multi_instance_training(args: Any) -> Path:
         raise ValueError("Independent population training requires --live input.")
     if bool(getattr(args, "no_telemetry", False)):
         raise ValueError("Independent population training requires telemetry.")
+    # Validate speed before launching any game processes so a bad value raises
+    # a clear pre-flight error instead of tearing down all windows mid-startup.
+    _requested_speed = str(getattr(args, "speed", "auto") or "auto")
+    if _requested_speed.casefold().removesuffix("x") != "auto":
+        try:
+            _speed_int = int(_requested_speed.removesuffix("x"))
+            if not 1 <= _speed_int <= 10:
+                raise ValueError
+        except ValueError:
+            raise ValueError(
+                f"--speed must be 'auto' or an integer from 1 to 10; got {_requested_speed!r}"
+            ) from None
     population_size = validate_population_size(getattr(args, "population_size", 4))
     ports = allocate_ports(getattr(args, "training_port_base", 42100), population_size)
     game_root = Path(getattr(args, "game_root", None) or DEFAULT_GAME_ROOT)

@@ -34,7 +34,10 @@ def _guarded_confirm_visual_exit(
 ) -> None:
     if not movement_crossing_is_confirmable(self):
         return
-    assert _ORIGINAL_CONFIRM_VISUAL_EXIT is not None
+    if _ORIGINAL_CONFIRM_VISUAL_EXIT is None:
+        raise RuntimeError(
+            "_ORIGINAL_CONFIRM_VISUAL_EXIT is not set — the module was not installed before use."
+        )
     _ORIGINAL_CONFIRM_VISUAL_EXIT(self, room, source_cell, target_room)
 
 

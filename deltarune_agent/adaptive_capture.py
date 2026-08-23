@@ -33,7 +33,10 @@ def _counter(observer: ScreenObserver, name: str) -> int:
 
 
 def _observe_adaptive(self: ScreenObserver, step: int) -> Observation:
-    assert _ORIGINAL_OBSERVE is not None
+    if _ORIGINAL_OBSERVE is None:
+        raise RuntimeError(
+            "_ORIGINAL_OBSERVE is not set — the module was not installed before use."
+        )
     observation = _ORIGINAL_OBSERVE(self, step)
     if self.window_hwnd is None or not observation.visual_valid:
         return observation
@@ -99,7 +102,10 @@ def _observe_adaptive(self: ScreenObserver, step: int) -> Observation:
 
 
 def _diagnostics_adaptive(self: ScreenObserver) -> dict[str, object]:
-    assert _ORIGINAL_DIAGNOSTICS is not None
+    if _ORIGINAL_DIAGNOSTICS is None:
+        raise RuntimeError(
+            "_ORIGINAL_DIAGNOSTICS is not set — the module was not installed before use."
+        )
     result = dict(_ORIGINAL_DIAGNOSTICS(self))
     result.update(
         {

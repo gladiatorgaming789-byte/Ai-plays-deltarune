@@ -323,7 +323,11 @@ def run(args: argparse.Namespace) -> Path:
                 break
 
             if args.live:
-                use_background_input = not is_window_foreground(window)
+                # Guard against None in case --background-input is passed
+                # directly without a resolved window (hidden flag path).
+                use_background_input = (
+                    window is not None and not is_window_foreground(window)
+                )
                 if use_background_input != background_input:
                     controller.set_background_input(use_background_input)
                     background_input = use_background_input
