@@ -31,14 +31,14 @@ PACKAGE_SPECS = (
     (
         "Telemetry",
         MODS_ROOT / "telemetry" / "tools" / "build_packages.py",
-        MODS_ROOT / "telemetry" / "deltamod" / "Telemetry-All-Chapters-DeltaMod-CSX-v9.3.0.zip",
-        MODS_ROOT / "telemetry" / "release_9.3.0.json",
+        MODS_ROOT / "telemetry" / "deltamod" / "Telemetry-All-Chapters-DeltaMod-CSX-v9.3.1.zip",
+        MODS_ROOT / "telemetry" / "release_9.3.1.json",
     ),
     (
         "Support",
         MODS_ROOT / "support" / "tools" / "build_packages.py",
-        MODS_ROOT / "support" / "deltamod" / "AI-Support-All-Chapters-DeltaMod-CSX-v2.0.0.zip",
-        MODS_ROOT / "support" / "release_2.0.0.json",
+        MODS_ROOT / "support" / "deltamod" / "AI-Support-All-Chapters-DeltaMod-CSX-v2.0.1.zip",
+        MODS_ROOT / "support" / "release_2.0.1.json",
     ),
 )
 
@@ -58,13 +58,23 @@ def load_json(path: Path) -> dict[str, object]:
     return value
 
 
-def expected_package(release_path: Path) -> tuple[int, str]:
+def expected_package(release_path: Path) -> tuple[int, str] | None:
     release = load_json(release_path)
     package = release.get("package")
     if not isinstance(package, dict):
         raise RuntimeError(f"Missing package record in {release_path}")
-    size = int(package["size"])
-    checksum = str(package["sha256"]).lower()
+
+    # Current release manifests intentionally do not pin ZIP bytes until the
+    # package is materialized. In that case the builder below creates and
+    # validates the package locally instead of comparing against withdrawn or
+    # historical bytes.
+    size = package.get("size")
+    checksum = package.get("sha256")
+    if size is None or checksum is None:
+        return None
+
+    size = int(size)
+    checksum = str(checksum).lower()
     if len(checksum) != 64:
         raise RuntimeError(f"Invalid package SHA-256 in {release_path}")
     if package.get("patch_type") != "csx":
@@ -72,12 +82,13 @@ def expected_package(release_path: Path) -> tuple[int, str]:
     return size, checksum
 
 
-def package_is_valid(path: Path, expected_size: int, expected_sha256: str) -> bool:
-    return (
-        path.is_file()
-        and path.stat().st_size == expected_size
-        and sha256_file(path) == expected_sha256
-    )
+def package_is_valid(path: Path, expected: tuple[int, str] | None) -> bool:
+    if not path.is_file():
+        return False
+    if expected is None:
+        return False
+    expected_size, expected_sha256 = expected
+    return path.stat().st_size == expected_size and sha256_file(path) == expected_sha256
 
 
 def _canonical_meta_bytes(payload: bytes) -> bytes:
@@ -172,9 +183,6 @@ def canonicalize_zip_storage(path: Path) -> None:
 def _verify_csx_declarations(path: Path) -> None:
     with zipfile.ZipFile(path, "r") as archive:
         lines = archive.read("modding.xml").decode("utf-8").splitlines()
-    # Derive the expected count from the declarations themselves rather than
-    # hardcoding 5. This allows partial chapter builds (e.g. --chapter 1 2)
-    # to pass verification without always requiring all five chapters.
     declaration_lines = [
         line for line in lines if line.strip() and not line.strip().startswith("<!--")
     ]
@@ -201,8 +209,8 @@ def build_package(
     target_version: str,
     hash_map: dict[str, str],
 ) -> None:
-    expected_size, expected_sha256 = expected_package(release_path)
-    if package_is_valid(output, expected_size, expected_sha256):
+    expected = expected_package(release_path)
+    if package_is_valid(output, expected):
         _verify_csx_declarations(output)
         print(f"[Mods] {label} package ready: {output.name}")
         return
@@ -244,6 +252,18 @@ def build_package(
     _verify_csx_declarations(output)
     actual_size = output.stat().st_size
     actual_sha256 = sha256_file(output)
+
+    # Current source-candidate releases intentionally leave package bytes
+    # unpinned. Their builder manifest records the exact materialized bytes,
+    # which is the validation artifact we should use for future reuse.
+    if expected is None:
+        print(
+            f"[Mods] {label} package built and verified: {output.name} "
+            f"({actual_size} bytes / {actual_sha256})"
+        )
+        return
+
+    expected_size, expected_sha256 = expected
     if actual_size != expected_size or actual_sha256 != expected_sha256:
         output.unlink(missing_ok=True)
         raise RuntimeError(
