@@ -297,14 +297,15 @@ buffer_delete(_ai_core_buffer);
 ";
 
 string Autosave() => @"
-// AI_BACKGROUND_AUTOSAVE_V1 - one invisible checkpoint per game session
+// AI_BACKGROUND_AUTOSAVE_V2 - training-only invisible checkpoint per game session
 if (!variable_global_exists(""__ai_runtime_configured"")) { ossafe_init(); }
 " + @"
 if (!variable_global_exists(""__ai_start_autosave_done""))
 {
     global.__ai_start_autosave_done = 0;
 }
-if (room == room_krisroom && global.__ai_start_autosave_done == 0)
+// V2: only autosave for named multi-instance training processes; ordinary saves untouched.
+if (room == room_krisroom && global.__ai_start_autosave_done == 0 && string_length(global.__ai_instance_id) > 0)
 {
     global.__ai_start_autosave_done = 1;
     scr_save();
