@@ -13,12 +13,21 @@ if (hasTelemetry && hasInstanceSupport)
     ScriptMessage("AI telemetry v9 with multi-instance support is already present. No changes were made.");
     return;
 }
-if (hasTelemetry || hasInstanceSupport)
+if (hasTelemetry && !hasInstanceSupport)
 {
     ScriptMessage(
-        "A partial or older AI telemetry installation is already present. Restore the clean " +
-        "data.win backup before installing multi-instance telemetry so save and network hooks " +
+        "AI telemetry v9 is present but multi-instance support is missing. " +
+        "Restore the clean data.win backup before reinstalling so telemetry hooks " +
         "cannot be layered twice."
+    );
+    return;
+}
+if (!hasTelemetry && hasInstanceSupport)
+{
+    ScriptMessage(
+        "Multi-instance support markers are present but telemetry is missing. " +
+        "Restore the clean data.win backup before reinstalling to avoid " +
+        "duplicate save and network hooks."
     );
     return;
 }
@@ -128,7 +137,9 @@ if (!variable_global_exists(""__ai_runtime_configured""))
 
 string Sender(string mode, string tickName, string sequenceName) => @"
 // AI_TELEMETRY_V9 - independently mergeable, visible-player telemetry packets
-" + RuntimeConfiguration() + @"
+// Runtime is configured once in ossafe_init; this guard is a cheap safety net.
+if (!variable_global_exists(""__ai_runtime_configured"")) { ossafe_init(); }
+" + @"
 if (!variable_global_exists(""__ai_tel_socket""))
 {
     global.__ai_tel_socket = network_create_socket(network_socket_udp);
@@ -286,19 +297,17 @@ buffer_delete(_ai_core_buffer);
 ";
 
 string Autosave() => @"
-// AI_BACKGROUND_AUTOSAVE_V2 - training-only invisible checkpoint
-" + RuntimeConfiguration() + @"
-if (string_length(global.__ai_instance_id) > 0)
+// AI_BACKGROUND_AUTOSAVE_V1 - one invisible checkpoint per game session
+if (!variable_global_exists(""__ai_runtime_configured"")) { ossafe_init(); }
+" + @"
+if (!variable_global_exists(""__ai_start_autosave_done""))
 {
-    if (!variable_global_exists(""__ai_start_autosave_done""))
-    {
-        global.__ai_start_autosave_done = 0;
-    }
-    if (room == room_krisroom && global.__ai_start_autosave_done == 0)
-    {
-        global.__ai_start_autosave_done = 1;
-        scr_save();
-    }
+    global.__ai_start_autosave_done = 0;
+}
+if (room == room_krisroom && global.__ai_start_autosave_done == 0)
+{
+    global.__ai_start_autosave_done = 1;
+    scr_save();
 }
 ";
 
@@ -365,8 +374,8 @@ function ossafe_file_text_open_read(arg0)
             {
                 newline_pos--;
             }
-            line = newline_pos > 1 ? substr(data, 1, newline_pos - 1) : """";
-            data = nextline_pos <= strlen(data) ? substr(data, nextline_pos) : """";
+            line = newline_pos > 1 ? string_copy(data, 1, newline_pos - 1) : """";
+            data = nextline_pos <= string_length(data) ? string_delete(data, 1, nextline_pos - 1) : """";
         }
         else
         {
@@ -375,7 +384,7 @@ function ossafe_file_text_open_read(arg0)
         }
         lines[num_lines++] = line;
     }
-    handle = ds_map_create();
+    var handle = ds_map_create();
     ds_map_set(handle, ""is_write"", false);
     ds_map_set(handle, ""text"", lines);
     ds_map_set(handle, ""num_lines"", num_lines);
@@ -437,7 +446,7 @@ imports.QueueAppend(
 );
 imports.QueueAppend(
     saveMenu,
-    Sender("choice", "__ai_tel_save_menu_tick_v9", "__ai_tel_save_menu_sequence_v9")
+    Sender("save_menu", "__ai_tel_save_menu_tick_v9", "__ai_tel_save_menu_sequence_v9")
 );
 imports.QueueAppend(
     dialogue,
@@ -455,7 +464,7 @@ imports.Import();
 
 ScriptMessage(
     "AI telemetry v9 packet merging, camera/player detail, collision bounds, " +
-    "per-process telemetry, isolated saves, and the training-only invisible " +
-    "room_krisroom test autosave were installed. " +
+    "per-process telemetry, isolated saves, and the invisible room_krisroom " +
+    "test autosave were installed. " +
     "Use Save As to write the patched data.win only after preserving the original."
 );

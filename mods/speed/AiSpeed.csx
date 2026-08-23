@@ -53,9 +53,8 @@ if (!variable_global_exists(""__ai_speed_port_configured""))
             }
         }
     }
-}
-if (!variable_global_exists(""__ai_speed_initialized""))
-{
+    // Initialise socket and speed state in the same guarded block so
+    // socket creation always follows port resolution (fix: ordering guarantee).
     global.__ai_speed_initialized = 1;
     global.__ai_speed_marker = ""AI_SPEED_MOD|1|"";
     global.__ai_speed_base_fps = game_get_speed(gamespeed_fps);
@@ -87,11 +86,13 @@ if (keyboard_check_pressed(vk_f8))
 }
 if (keyboard_check_pressed(vk_f9))
 {
-    global.__ai_speed_multiplier = max(1, global.__ai_speed_multiplier - 1);
+    // Capture previous before decrementing so F8 can always restore the
+    // last >1x speed, even when F9 takes the multiplier down to 1x.
     if (global.__ai_speed_multiplier > 1)
     {
         global.__ai_speed_previous = global.__ai_speed_multiplier;
     }
+    global.__ai_speed_multiplier = max(1, global.__ai_speed_multiplier - 1);
     _ai_speed_changed = 1;
 }
 if (keyboard_check_pressed(vk_f10))
