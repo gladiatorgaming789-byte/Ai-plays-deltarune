@@ -85,6 +85,10 @@ def test_telemetry_931_is_current_safe_source_candidate():
     assert withdrawn["status"] == "withdrawn"
     assert withdrawn["package"]["committed"] is False
     assert "AI_BACKGROUND_AUTOSAVE_V2" in source
+    assert 'const string safeAutosaveMarker = "AI_BACKGROUND_AUTOSAVE_V2";' in source
+    assert "if (hasTelemetry && hasInstanceSupport && hasSafeAutosave)" in source
+    assert "if (hasTelemetry || hasInstanceSupport)" in source
+    assert 'global.__ai_background_autosave_marker = ""AI_BACKGROUND_AUTOSAVE_V2"";' in source
     assert 'if (string_length(global.__ai_instance_id) > 0)' in source
     assert "scr_save();" in source
     assert source.index('if (string_length(global.__ai_instance_id) > 0)') < source.index(
