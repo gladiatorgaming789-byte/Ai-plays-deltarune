@@ -132,7 +132,7 @@ def main() -> int:
         ]
         if not payloads or not all(b"AI_BACKGROUND_AUTOSAVE_V2" in payload for payload in payloads):
             raise RuntimeError("Telemetry package lost the training-only autosave v2 safety marker")
-        if not payloads or not all(b"withdrawn startup-autosave build" in payload for payload in payloads):
+        if not payloads or not all(b"older or partial AI telemetry installation" in payload for payload in payloads):
             raise RuntimeError("Telemetry package lost stale-v9 migration protection")
 
     release = {
