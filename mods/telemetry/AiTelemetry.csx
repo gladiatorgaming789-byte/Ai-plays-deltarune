@@ -6,30 +6,21 @@ EnsureDataLoaded();
 
 const string marker = "DRTEL|9|";
 const string instanceMarker = "AI_MULTI_INSTANCE|1|";
+const string safeAutosaveMarker = "AI_BACKGROUND_AUTOSAVE_V2";
 bool hasTelemetry = Data.Strings.Any(item => item.Content.Contains(marker));
 bool hasInstanceSupport = Data.Strings.Any(item => item.Content.Contains(instanceMarker));
-if (hasTelemetry && hasInstanceSupport)
+bool hasSafeAutosave = Data.Strings.Any(item => item.Content.Contains(safeAutosaveMarker));
+if (hasTelemetry && hasInstanceSupport && hasSafeAutosave)
 {
-    ScriptMessage("AI telemetry v9 with multi-instance support is already present. No changes were made.");
+    ScriptMessage("AI telemetry v9.3.1 with multi-instance support and training-only autosave safety is already present. No changes were made.");
     return;
 }
-if (hasTelemetry && !hasInstanceSupport)
+if (hasTelemetry || hasInstanceSupport)
 {
-    ScriptMessage(
-        "AI telemetry v9 is present but multi-instance support is missing. " +
-        "Restore the clean data.win backup before reinstalling so telemetry hooks " +
-        "cannot be layered twice."
+    throw new Exception(
+        "An older or partial AI telemetry installation is present without the complete v9.3.1 safety markers. " +
+        "Do not layer this patch over it. Restore the clean data.win backup, then import AI Support 2.0.1 again."
     );
-    return;
-}
-if (!hasTelemetry && hasInstanceSupport)
-{
-    ScriptMessage(
-        "Multi-instance support markers are present but telemetry is missing. " +
-        "Restore the clean data.win backup before reinstalling to avoid " +
-        "duplicate save and network hooks."
-    );
-    return;
 }
 
 string[] olderMarkers =
@@ -94,6 +85,7 @@ if (!variable_global_exists(""__ai_runtime_configured""))
 {
     global.__ai_runtime_configured = 1;
     global.__ai_multi_instance_marker = ""AI_MULTI_INSTANCE|1|"";
+    global.__ai_background_autosave_marker = ""AI_BACKGROUND_AUTOSAVE_V2"";
     global.__ai_instance_id = """";
     global.__ai_telemetry_port = 42069;
     global.__ai_save_prefix = """";
