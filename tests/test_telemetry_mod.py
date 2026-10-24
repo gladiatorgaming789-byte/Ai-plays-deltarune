@@ -41,6 +41,15 @@ def test_installer_refuses_to_layer_v9_over_older_telemetry():
     assert "Restore the clean data.win backup" in SCRIPT
 
 
+def test_v931_guard_requires_all_three_runtime_markers_before_noop():
+    assert 'const string safeAutosaveMarker = "AI_BACKGROUND_AUTOSAVE_V2";' in SCRIPT
+    assert "bool hasSafeAutosave = Data.Strings.Any(item => item.Content.Contains(safeAutosaveMarker));" in SCRIPT
+    assert "if (hasTelemetry && hasInstanceSupport && hasSafeAutosave)" in SCRIPT
+    assert "if (hasTelemetry || hasInstanceSupport)" in SCRIPT
+    assert "older or partial AI telemetry installation" in SCRIPT
+    assert 'global.__ai_background_autosave_marker = ""AI_BACKGROUND_AUTOSAVE_V2"";' in SCRIPT
+
+
 def test_v9_uses_current_undertale_modtool_batch_import_api():
     assert "new CodeImportGroup(Data)" in SCRIPT
     assert "imports.QueueAppend(" in SCRIPT
