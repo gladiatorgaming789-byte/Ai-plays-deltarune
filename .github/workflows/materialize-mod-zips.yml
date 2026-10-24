@@ -12,10 +12,13 @@ on:
       - "mods/tools/**"
       - "mods/speed/AiSpeed.csx"
       - "mods/speed/tools/**"
-      - "mods/speed/release_1.3.1.json"
+      - "mods/speed/AiSpeed.csx"
+      - "mods/speed/tools/**"
+      - "mods/speed/release_1.4.0.json"
       - "mods/telemetry/AiTelemetry.csx"
       - "mods/telemetry/tools/**"
-      - "mods/telemetry/release_9.2.1.json"
+      - "mods/telemetry/tools/**"
+      - "mods/telemetry/release_9.3.1.json"
       - "mods/support/**"
 
 permissions:
@@ -59,9 +62,9 @@ jobs:
             mods/telemetry/deltamod \
             mods/support/deltamod
           git add -f \
-            mods/speed/deltamod/AI-Speed-All-Chapters-DeltaMod-CSX-v1.3.1.zip \
-            mods/telemetry/deltamod/Telemetry-All-Chapters-DeltaMod-CSX-v9.2.1.zip \
-            mods/support/deltamod/AI-Support-All-Chapters-DeltaMod-CSX-v1.0.0.zip
+            mods/speed/deltamod/AI-Speed-All-Chapters-DeltaMod-CSX-v1.4.0.zip \
+            mods/telemetry/deltamod/Telemetry-All-Chapters-DeltaMod-CSX-v9.3.1.zip \
+            mods/support/deltamod/AI-Support-All-Chapters-DeltaMod-CSX-v2.0.1.zip
           if git diff --cached --quiet; then
             echo "Validated package ZIPs are already committed."
             exit 0
