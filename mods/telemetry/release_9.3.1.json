@@ -1,11 +1,17 @@
 {
   "format": "DeltaMod direct-CSX source package",
-  "status": "current source candidate; exact ZIP bytes materialize locally; live runtime verification pending",
+  "status": "source-level package validation passed; DeltaMod runtime verification pending",
   "reason": "Telemetry 9.3.1 preserves protocol v9 and multi-instance isolation while restricting the invisible startup checkpoint to processes with a sanitized non-empty ai_instance_* identity.",
   "telemetry_mod_version": "9.3.1",
   "telemetry_protocol": 9,
   "target_version": "1.05",
-  "chapters": [1, 2, 3, 4, 5],
+  "chapters": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
   "merge_support": true,
   "source": "AiTelemetry.csx",
   "required_safety_marker": "AI_BACKGROUND_AUTOSAVE_V2",
@@ -13,6 +19,8 @@
     "file": "Telemetry-All-Chapters-DeltaMod-CSX-v9.3.1.zip",
     "patch_type": "csx",
     "materialization": "mods/build_validated_packages.py",
-    "committed": false
+    "committed": true,
+    "size": 91062,
+    "sha256": "1f380aef37740735e7ba8bf1da668e8ee883ed56daadeb9b8c897e7b1ea644c2"
   }
 }
