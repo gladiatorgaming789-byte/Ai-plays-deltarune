@@ -33,53 +33,25 @@ URL = "https://github.com/gladiatorgaming789-byte/Ai-plays-deltarune"
 PACKAGE_ID = "github.ai-telemetry.gladiatorgaming789-byte"
 
 
-# v9.3.0 could already contain DRTEL v9 + multi-instance support while still
-# carrying the old, unsafe startup autosave. The original installer returned
-# early on those markers, which meant importing 9.3.1 could never add the V2
-# safety fix. Keep the source file readable, but harden the materialized package
-# so a stale v9 installation is explicitly rejected and must be rebuilt from a
-# clean data.win rather than layered with another autosave hook.
-_LEGACY_GUARD = '''const string marker = "DRTEL|9|";
-const string instanceMarker = "AI_MULTI_INSTANCE|1|";
-bool hasTelemetry = Data.Strings.Any(item => item.Content.Contains(marker));
-bool hasInstanceSupport = Data.Strings.Any(item => item.Content.Contains(instanceMarker));
-if (hasTelemetry && hasInstanceSupport)
-{
-    ScriptMessage("AI telemetry v9 with multi-instance support is already present. No changes were made.");
-    return;
-}
-'''
-
-_HARDENED_GUARD = '''const string marker = "DRTEL|9|";
-const string instanceMarker = "AI_MULTI_INSTANCE|1|";
-const string safeAutosaveMarker = "AI_BACKGROUND_AUTOSAVE_V2";
-bool hasTelemetry = Data.Strings.Any(item => item.Content.Contains(marker));
-bool hasInstanceSupport = Data.Strings.Any(item => item.Content.Contains(instanceMarker));
-bool hasSafeAutosave = Data.Strings.Any(item => item.Content.Contains(safeAutosaveMarker));
-if (hasTelemetry && hasInstanceSupport && hasSafeAutosave)
-{
-    ScriptMessage("AI telemetry v9.3.1 with multi-instance support and training-only autosave safety is already present. No changes were made.");
-    return;
-}
-if (hasTelemetry && hasInstanceSupport && !hasSafeAutosave)
-{
-    throw new Exception(
-        "An older AI telemetry v9 installation is present without AI_BACKGROUND_AUTOSAVE_V2. " +
-        "This is the withdrawn startup-autosave build. Restore the clean data.win before " +
-        "importing Telemetry 9.3.1 / AI Support 2.0.1 so the unsafe autosave hook cannot be layered."
-    );
-}
-'''
-
-
+# The shared source now owns the hardened stale-installation guard. Do not
+# rewrite source text during packaging: the standalone and combined Support
+# packages must embed the same guard and runtime marker.
 def _hardened_source(source: Path) -> tuple[str, str]:
     text = source.read_text(encoding="utf-8")
-    if _LEGACY_GUARD not in text:
+    required = (
+        'const string safeAutosaveMarker = "AI_BACKGROUND_AUTOSAVE_V2";',
+        "bool hasSafeAutosave = Data.Strings.Any(item => item.Content.Contains(safeAutosaveMarker));",
+        "AI_BACKGROUND_AUTOSAVE_V2",
+        "Restore the clean data.win backup",
+        'global.__ai_background_autosave_marker = ""AI_BACKGROUND_AUTOSAVE_V2"";',
+    )
+    missing = [marker for marker in required if marker not in text]
+    if missing:
         raise RuntimeError(
-            "Telemetry source guard changed unexpectedly; refusing to materialize "
-            "9.3.1 without explicitly verifying stale-v9 upgrade behavior."
+            "Telemetry source is missing hardened autosave migration checks: "
+            + ", ".join(missing)
         )
-    return text.replace(_LEGACY_GUARD, _HARDENED_GUARD, 1), text
+    return text, text
 
 
 def _clean_hashes(path: Path | None, chapters: tuple[int, ...]) -> dict[int, str] | None:
