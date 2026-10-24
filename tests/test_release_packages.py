@@ -80,7 +80,9 @@ def test_telemetry_931_is_current_safe_source_candidate():
         "Telemetry-All-Chapters-DeltaMod-CSX-v9.3.1.zip"
     )
     assert current["package"]["patch_type"] == "csx"
-    assert current["package"]["committed"] is False
+    assert current["package"]["committed"] is True
+    assert current["package"]["size"] == 91062
+    assert current["package"]["sha256"] == "1f380aef37740735e7ba8bf1da668e8ee883ed56daadeb9b8c897e7b1ea644c2"
     assert current["required_safety_marker"] == "AI_BACKGROUND_AUTOSAVE_V2"
     assert withdrawn["status"] == "withdrawn"
     assert withdrawn["package"]["committed"] is False
