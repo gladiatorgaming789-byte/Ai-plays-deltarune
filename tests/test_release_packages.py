@@ -120,7 +120,9 @@ def test_support_201_composes_speed_140_and_safe_telemetry_931():
     assert current["package"]["file"] == (
         "AI-Support-All-Chapters-DeltaMod-CSX-v2.0.1.zip"
     )
-    assert current["package"]["committed"] is False
+    assert current["package"]["committed"] is True
+    assert current["package"]["size"] == 130066
+    assert current["package"]["sha256"] == "10f13d8ea570b8fa7610eaaf4e0c2eae25d744cb260f5dc0e8df32a3deca2790"
     assert withdrawn["status"] == "withdrawn"
     assert "void InstallAiSpeed()" in combined
     assert "void InstallAiTelemetry()" in combined
