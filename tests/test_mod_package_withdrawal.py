@@ -73,7 +73,7 @@ def test_current_safe_source_records_require_v2_autosave_marker() -> None:
         assert "current source candidate" in payload["status"]
         assert payload["required_safety_marker"] == "AI_BACKGROUND_AUTOSAVE_V2"
         assert payload["package"]["patch_type"] == "csx"
-        assert payload["package"]["committed"] is False
+        assert payload["package"]["committed"] is True
 
 
 def test_compiled_release_records_remain_withdrawn() -> None:
