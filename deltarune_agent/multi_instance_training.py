@@ -168,6 +168,7 @@ class IndependentCandidate:
     latest_reason: str = ""
     latest_room: str = ""
     decisions: int = 0
+    telemetry_decisions: int = 0
     rooms: set[str] = field(default_factory=set)
     total_points: float = 0.0
     normalized_score: float = 0.0
