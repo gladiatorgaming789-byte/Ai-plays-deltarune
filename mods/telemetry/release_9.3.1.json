@@ -1,6 +1,6 @@
 {
   "format": "DeltaMod direct-CSX source package",
-  "status": "source-level package validation passed; DeltaMod runtime verification pending",
+  "status": "current source candidate; source-level package validation passed; DeltaMod runtime verification pending",
   "reason": "Telemetry 9.3.1 preserves protocol v9 and multi-instance isolation while restricting the invisible startup checkpoint to processes with a sanitized non-empty ai_instance_* identity.",
   "telemetry_mod_version": "9.3.1",
   "telemetry_protocol": 9,
