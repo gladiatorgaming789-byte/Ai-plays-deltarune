@@ -799,10 +799,10 @@ class WorldModel:
         return record
 
     def _merge_cluster(self, record: dict[str, object], cluster: PortalCluster) -> None:
-        # Sum rather than max: the rich portal record may have been updated
-        # incrementally (record_warp_transition uses +=1), so taking the
-        # maximum would silently drop crossings already counted there.
-        record["crossings"] = int(record.get("crossings", 0)) + cluster.crossings
+        # The legacy warp counter and rich portal record describe the same
+        # observations. Merge each variant by its maximum count, then derive
+        # the total from those merged variants. Adding the two totals double-
+        # counts every transition whenever save() reconciles the same data.
         for warp, count in cluster.variants:
             self._merge_portal_sample(
                 record,
@@ -819,6 +819,16 @@ class WorldModel:
                 count,
             )
             self._merge_portal_variant(record, warp, count)
+        variant_counts = [
+            int(item.get("count", 0))
+            for item in record.get("variants", [])
+            if isinstance(item, dict)
+        ]
+        record["crossings"] = max(
+            int(record.get("crossings", 0)),
+            sum(variant_counts),
+            cluster.crossings,
+        )
         # Migrate novel-destination history that _portal_record_from_cluster
         # initialises to 0. Without this, reconcile_warp_portals would silently
         # drop "discovered a new area" evidence that the legacy counter holds.
