@@ -188,6 +188,11 @@ def test_nearby_variants_keep_stable_id_and_expand_aperture(tmp_path: Path) -> N
         destination_was_novel=False,
     ) == portal_id
     model.save()
+    # Reconciliation is also invoked on every later save. It must not merge
+    # the same legacy counters into the already-counted rich record twice.
+    assert model.warp_portals[portal_id]["crossings"] == 2
+    model.save()
+    assert model.warp_portals[portal_id]["crossings"] == 2
 
     reloaded = WorldModel.load(path)
     record = reloaded.warp_portals[portal_id]
