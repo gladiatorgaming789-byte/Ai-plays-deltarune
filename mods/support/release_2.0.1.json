@@ -1,6 +1,6 @@
 {
   "format": "DeltaMod atomic combined direct-CSX source package",
-  "status": "source-level package validation passed; DeltaMod runtime verification pending",
+  "status": "current source candidate; source-level package validation passed; DeltaMod runtime verification pending",
   "reason": "AI Support 2.0.1 combines unchanged Speed 1.4.0 with Telemetry 9.3.1, including training-only AI_BACKGROUND_AUTOSAVE_V2 identity gating.",
   "version": "2.0.1",
   "speed_component_version": "1.4.0",
