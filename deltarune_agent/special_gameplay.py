@@ -23,7 +23,7 @@ from .perception import GameState
 
 SPECIAL_GAMEPLAY_VERSION = 1
 MISSING_TELEMETRY_GRACE = 8
-MIN_DYNAMIC_ACTIVITY = 0.018
+MIN_DYNAMIC_ACTIVITY = 0.006
 CONTROL_ACTIONS = ("left", "right", "up", "down", "confirm", "cancel")
 MAX_EXPERIMENTS_PER_CONTEXT = 48
 
