@@ -391,8 +391,19 @@ The command writes `transition_benchmark/oracle.json`,
 `transition_benchmark/summary.json`. It automatically reads that run's
 `events.jsonl` and `predictions.jsonl`. The summary reports matched,
 missed, false-positive, and wrong-destination counts; precision, recall, F1;
-and measured detection latency. The optional `--predictions <file.json>`
-argument accepts a separate JSON-list prediction stream.
+and measured detection latency. It also writes
+`visual_exit_evaluation.json`, which spatially associates the earliest
+observed exit-candidate anchor in each room region with later, explicitly
+confirmed room transitions. It reports transition recall, semantic-ready
+recall, lead time in run steps, and candidate-to-crossing distance. Candidates
+without a later crossing are labeled **unvalidated**, not false positives,
+because the run may have ended before the agent tested them.
+
+The spatial matcher defaults to a 64-world-unit radius and a 180-step lead
+window. Tune those assumptions with `--exit-match-radius` and
+`--exit-max-lead-steps`; these are evaluation parameters, not game knowledge.
+The optional `--predictions <file.json>` argument accepts a separate JSON-list
+room-transition prediction stream.
 
 The oracle accepts only explicit transition metadata. It does not infer a
 transition merely because adjacent telemetry packets have different room
