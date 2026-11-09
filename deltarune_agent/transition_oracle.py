@@ -188,8 +188,8 @@ def evaluate_transitions(
             available.remove(min(
                 candidates,
                 key=lambda item: abs(
-                    (item.step or item.sequence)
-                    - (prediction.step or prediction.sequence)
+                    (item.step if item.step is not None else item.sequence)
+                    - (prediction.step if prediction.step is not None else prediction.sequence)
                 ),
             ))
             continue
