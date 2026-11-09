@@ -352,10 +352,13 @@ def run(args: argparse.Namespace) -> Path:
                 if telemetry_receiver
                 else None
             )
-            if telemetry_receiver is not None:
-                policy.observe_room_trace(
-                    telemetry_receiver.drain_overworld_trace()
-                )
+            room_trace = (
+                telemetry_receiver.drain_overworld_trace()
+                if telemetry_receiver is not None
+                else []
+            )
+            if room_trace:
+                policy.observe_room_trace(room_trace)
             if telemetry is not None:
                 telemetry_seen = True
             elif (
@@ -440,6 +443,7 @@ def run(args: argparse.Namespace) -> Path:
                 map_updates=map_updates,
                 prediction_snapshot=prediction_snapshot,
                 transition_predictions=transition_predictions,
+                telemetry_trace=[sample.as_dict() for sample in room_trace],
             )
             if args.event_stream:
                 print(
