@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 
 from .run_artifacts import json_safe, write_json
-from .transition_oracle import (
+from .visual_exit_benchmark import (\n    collect_visual_exit_candidates,\n    evaluate_visual_exits,\n    write_visual_exit_evaluation,\n)\nfrom .transition_oracle import (
     TransitionPrediction,
     build_oracle_from_telemetry,
     evaluate_transitions,
