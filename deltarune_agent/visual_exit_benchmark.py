@@ -34,6 +34,7 @@ class VisualExitCandidate:
     score: float | None
     anchor_x: float
     anchor_y: float
+    state_history: tuple[tuple[int, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -131,8 +132,35 @@ def collect_visual_exit_candidates(
                 anchor_y=anchor[1],
             )
             previous = earliest.get(candidate_id)
-            if previous is None or candidate.step < previous.step:
-                earliest[candidate_id] = candidate
+            if previous is None:
+                earliest[candidate_id] = VisualExitCandidate(
+                    candidate_id=candidate.candidate_id,
+                    room=candidate.room,
+                    region=candidate.region,
+                    step=candidate.step,
+                    state=candidate.state,
+                    source=candidate.source,
+                    score=candidate.score,
+                    anchor_x=candidate.anchor_x,
+                    anchor_y=candidate.anchor_y,
+                    state_history=((step, state),),
+                )
+            else:
+                history = list(previous.state_history)
+                if not history or history[-1] != (step, state):
+                    history.append((step, state))
+                earliest[candidate_id] = VisualExitCandidate(
+                    candidate_id=previous.candidate_id,
+                    room=previous.room,
+                    region=previous.region,
+                    step=previous.step,
+                    state=candidate.state,
+                    source=previous.source,
+                    score=previous.score,
+                    anchor_x=previous.anchor_x,
+                    anchor_y=previous.anchor_y,
+                    state_history=tuple(history),
+                )
     return sorted(earliest.values(), key=lambda item: (item.step, item.room, item.candidate_id))
 
 
@@ -179,11 +207,19 @@ def evaluate_visual_exits(
         transition = transitions[transition_index]
         used_candidates.add(candidate_index)
         used_transitions.add(transition_index)
+        state_at_crossing = candidate.state
+        if transition.step is not None:
+            eligible_states = [
+                state for observed_step, state in candidate.state_history
+                if observed_step <= transition.step
+            ]
+            if eligible_states:
+                state_at_crossing = eligible_states[-1]
         matches.append(VisualExitMatch(
             candidate_id=candidate.candidate_id,
             transition_sequence=transition.sequence,
             room=transition.source_room,
-            candidate_state=candidate.state,
+            candidate_state=state_at_crossing,
             candidate_step=candidate.step,
             transition_step=transition.step,
             lead_steps=lead,
