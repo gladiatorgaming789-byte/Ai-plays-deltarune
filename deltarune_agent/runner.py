@@ -443,7 +443,7 @@ def run(args: argparse.Namespace) -> Path:
                 map_updates=map_updates,
                 prediction_snapshot=prediction_snapshot,
                 transition_predictions=transition_predictions,
-                telemetry_trace=[sample.as_dict() for sample in room_trace],
+                telemetry_trace=room_trace,
             )
             if args.event_stream:
                 print(
