@@ -275,7 +275,13 @@ class EpisodeTracker:
             "decision_context": context,
             "prediction_snapshot": snapshot,
         }
-        transition_rows = [\n            json_safe(item) for item in (transition_predictions or [])\n            if isinstance(item, Mapping)\n        ]\n        if transition_rows:\n            prediction["transition_predictions"] = transition_rows\n        if isinstance(telemetry_data, dict):\n            prediction["location"] = {
+        transition_rows = [
+            json_safe(item) for item in (transition_predictions or [])
+            if isinstance(item, Mapping)
+        ]
+        if transition_rows:
+            prediction["transition_predictions"] = transition_rows
+        if isinstance(telemetry_data, dict):\n            prediction["location"] = {
                 "room": (
                     telemetry_data.get("room_name")
                     or telemetry_data.get("room_id")
