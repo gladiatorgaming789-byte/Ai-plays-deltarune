@@ -154,7 +154,7 @@ def collect_visual_exit_candidates(
                     room=previous.room,
                     region=previous.region,
                     step=previous.step,
-                    state=candidate.state,
+                    state=previous.state,
                     source=previous.source,
                     score=previous.score,
                     anchor_x=previous.anchor_x,
@@ -248,7 +248,10 @@ def evaluate_visual_exits(
         candidate_count=len(candidates),
         semantic_ready_candidate_count=sum(
             1 for candidate in candidates
-            if candidate.state in {"semantic_ready", "confirmed"}
+            if any(
+                state in {"semantic_ready", "confirmed"}
+                for _step, state in candidate.state_history
+            )
         ),
         transition_count=transition_count,
         matched_transitions=matched,
