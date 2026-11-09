@@ -203,6 +203,7 @@ class EpisodeTracker:
             Iterable[Mapping[str, Any]] | Mapping[str, Any] | None
         ) = None,
         prediction_snapshot: Mapping[str, Any] | Iterable[Any] | None = None,
+        transition_predictions: Iterable[Mapping[str, Any]] | None = None,
     ) -> None:
         """Record an action and its structured evidence.
 
@@ -274,8 +275,7 @@ class EpisodeTracker:
             "decision_context": context,
             "prediction_snapshot": snapshot,
         }
-        if isinstance(telemetry_data, dict):
-            prediction["location"] = {
+        transition_rows = [\n            json_safe(item) for item in (transition_predictions or [])\n            if isinstance(item, Mapping)\n        ]\n        if transition_rows:\n            prediction["transition_predictions"] = transition_rows\n        if isinstance(telemetry_data, dict):\n            prediction["location"] = {
                 "room": (
                     telemetry_data.get("room_name")
                     or telemetry_data.get("room_id")
