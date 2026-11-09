@@ -108,3 +108,25 @@ def test_oracle_ignores_ordinary_room_name_change_without_transition_metadata():
     ])
 
     assert truth == []
+
+def test_recorded_oracle_prefers_run_relative_time_and_keeps_zero_coordinates():
+    truth = build_oracle_from_telemetry([{
+        "room_name": "room_b",
+        "transition_from_room_name": "room_a",
+        "transition_sequence": 19,
+        "transition_from_foot_x": 0,
+        "transition_from_foot_y": 0,
+        "transition_from_x": 99,
+        "transition_from_y": 99,
+        "player_foot_x": 12,
+        "player_foot_y": 14,
+        "received_at": 9000.0,
+        "_run_elapsed_seconds": 3.5,
+        "_run_step": 27,
+    }])
+
+    assert len(truth) == 1
+    assert truth[0].source_x == 0
+    assert truth[0].source_y == 0
+    assert truth[0].observed_at == 3.5
+    assert truth[0].step == 27
