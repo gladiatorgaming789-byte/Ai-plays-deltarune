@@ -246,10 +246,20 @@ class EpisodeTracker:
             "reason": reason,
             "live": live,
         }
-        trace_rows = [
-            json_safe(item) for item in (telemetry_trace or [])
-            if isinstance(item, Mapping)
-        ]
+        trace_rows: list[dict[str, Any]] = []
+        for item in telemetry_trace or []:
+            if isinstance(item, Mapping):
+                trace_row = json_safe(item)
+            elif isinstance(item, TelemetrySample):
+                trace_row = item.as_dict()
+                trace_row["_run_elapsed_seconds"] = max(
+                    0.0,
+                    float(item.received_at) - self._started_monotonic,
+                )
+            else:
+                continue
+            if isinstance(trace_row, dict):
+                trace_rows.append(trace_row)
         if trace_rows:
             event["telemetry_trace"] = trace_rows
         if context is not None:
