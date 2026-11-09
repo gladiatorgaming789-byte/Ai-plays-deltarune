@@ -145,3 +145,27 @@ def test_semantic_readiness_is_only_credited_if_observed_before_crossing():
 
     assert before_ready.semantic_ready_matches == 0
     assert after_ready.semantic_ready_matches == 1
+
+def test_candidate_first_seen_on_crossing_step_does_not_count_as_prediction():
+    candidates = collect_visual_exit_candidates([{
+        "step": 10,
+        "map_updates": [{
+            "type": "screen_region",
+            "exit_detection_version": 2,
+            "room": "room_a",
+            "region": [1, 1],
+            "guess_id": "room_a@1,1",
+            "anchor_world": [100, 100],
+            "last_seen_step": 10,
+            "exit_candidate_state": "semantic_ready",
+        }],
+    }])
+    result = evaluate_visual_exits(
+        candidates,
+        [TransitionTruth(1, "room_a", "room_b", 100, 100, step=10)],
+        spatial_match_radius=4,
+    )
+
+    assert result.matched_transitions == 0
+    assert result.missed_transitions == 1
+    assert result.unmatched_candidates_unvalidated == 1
