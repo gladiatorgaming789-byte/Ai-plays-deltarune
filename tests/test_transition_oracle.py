@@ -79,3 +79,32 @@ def test_transition_evaluation_accepts_unknown_predicted_source():
 
     assert result.matched == 1
     assert result.missed == 0
+
+
+def test_oracle_accepts_recorded_json_telemetry_dicts():
+    truth = build_oracle_from_telemetry([
+        {
+            "room_name": "room_b",
+            "transition_from_room_name": "room_a",
+            "transition_sequence": 12,
+            "transition_from_x": 90,
+            "transition_from_y": 50,
+            "x": 100,
+            "y": 50,
+            "received_at": 15.0,
+        }
+    ])
+
+    assert len(truth) == 1
+    assert truth[0].sequence == 12
+    assert truth[0].source_room == "room_a"
+    assert truth[0].destination_room == "room_b"
+
+
+def test_oracle_ignores_ordinary_room_name_change_without_transition_metadata():
+    truth = build_oracle_from_telemetry([
+        {"room_name": "room_a", "received_at": 1.0},
+        {"room_name": "room_b", "received_at": 2.0},
+    ])
+
+    assert truth == []
