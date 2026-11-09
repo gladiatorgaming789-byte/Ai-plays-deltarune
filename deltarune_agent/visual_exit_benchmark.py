@@ -168,7 +168,7 @@ def evaluate_visual_exits(
     candidates: Sequence[VisualExitCandidate],
     transitions: Sequence[TransitionTruth],
     *,
-    spatial_match_radius: float = 64.0,
+    spatial_match_radius: float = 16.0,
     max_lead_steps: int = 180,
 ) -> VisualExitEvaluation:
     """Spatially associate pre-crossing candidates with real room transitions.
