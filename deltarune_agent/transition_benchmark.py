@@ -1,8 +1,7 @@
-"""Developer-only transition benchmark CLI.
+"""Developer-only room-transition and visual-exit benchmark CLI.
 
-This tool is deliberately a post-run utility. It reads recorded run artifacts,
-builds developer-side transition truth, and optionally scores an independently
-recorded detector prediction file. It is never imported by the live agent.
+This post-run utility reads recorded observations and scores independently
+recorded policy predictions. It is never imported by the live agent.
 """
 
 from __future__ import annotations
@@ -12,12 +11,17 @@ import json
 from pathlib import Path
 
 from .run_artifacts import json_safe, write_json
-from .visual_exit_benchmark import (\n    collect_visual_exit_candidates,\n    evaluate_visual_exits,\n    write_visual_exit_evaluation,\n)\nfrom .transition_oracle import (
+from .transition_oracle import (
     TransitionPrediction,
     build_oracle_from_telemetry,
     evaluate_transitions,
     write_evaluation,
     write_oracle,
+)
+from .visual_exit_benchmark import (
+    collect_visual_exit_candidates,
+    evaluate_visual_exits,
+    write_visual_exit_evaluation,
 )
 
 
@@ -45,7 +49,9 @@ def _telemetry_from_event_rows(rows: list[dict[str, object]]) -> list[dict[str, 
                 telemetry.append({
                     **sample,
                     "_run_step": row.get("step"),
-                    "_run_elapsed_seconds": sample.get("_run_elapsed_seconds", row.get("elapsed_seconds")),
+                    "_run_elapsed_seconds": sample.get(
+                        "_run_elapsed_seconds", row.get("elapsed_seconds")
+                    ),
                 })
     return telemetry
 
@@ -83,39 +89,38 @@ def _load_predictions(path: Path) -> list[TransitionPrediction]:
     for row in rows:
         if not isinstance(row, dict):
             continue
-        result.append(
-            TransitionPrediction(
-                sequence=int(row["sequence"]),
-                source_room=(
-                    str(row["source_room"])
-                    if row.get("source_room") is not None
-                    else None
-                ),
-                destination_room=(
-                    str(row["destination_room"])
-                    if row.get("destination_room") is not None
-                    else None
-                ),
-                predicted_at=(
-                    float(row["predicted_at"])
-                    if row.get("predicted_at") is not None
-                    else None
-                ),
-                confidence=float(row.get("confidence", 0.0)),
-            )
-        )
+        result.append(TransitionPrediction(
+            sequence=int(row["sequence"]),
+            source_room=str(row["source_room"]) if row.get("source_room") is not None else None,
+            destination_room=str(row["destination_room"]) if row.get("destination_room") is not None else None,
+            predicted_at=float(row["predicted_at"]) if row.get("predicted_at") is not None else None,
+            confidence=float(row.get("confidence", 0.0)),
+            step=int(row["step"]) if row.get("step") is not None else None,
+        ))
     return result
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Build/evaluate developer-only Deltarune room-transition benchmarks"
+        description="Build/evaluate developer-only Deltarune transition benchmarks"
     )
     parser.add_argument("run_directory", type=Path)
     parser.add_argument(
         "--predictions",
         type=Path,
-        help="optional JSON list of predictions; defaults to this run's predictions.jsonl",
+        help="optional JSON-list prediction file; defaults to this run's predictions.jsonl",
+    )
+    parser.add_argument(
+        "--exit-match-radius",
+        type=float,
+        default=64.0,
+        help="maximum world-space distance between candidate anchor and transition source",
+    )
+    parser.add_argument(
+        "--exit-max-lead-steps",
+        type=int,
+        default=180,
+        help="maximum steps between first candidate observation and transition",
     )
     parser.add_argument(
         "--output",
@@ -135,10 +140,20 @@ def main(argv: list[str] | None = None) -> int:
     events = _load_jsonl(events_path)
     telemetry = _telemetry_from_event_rows(events)
     truth = build_oracle_from_telemetry(telemetry)
+    exit_candidates = collect_visual_exit_candidates(events)
+    exit_evaluation = evaluate_visual_exits(
+        exit_candidates,
+        truth,
+        spatial_match_radius=args.exit_match_radius,
+        max_lead_steps=args.exit_max_lead_steps,
+    )
 
     output = args.output or args.run_directory / "transition_benchmark"
     output.mkdir(parents=True, exist_ok=True)
     write_oracle(output / "oracle.json", truth)
+    write_visual_exit_evaluation(
+        output / "visual_exit_evaluation.json", exit_evaluation
+    )
 
     summary: dict[str, object] = {
         "oracle_version": 1,
@@ -147,6 +162,8 @@ def main(argv: list[str] | None = None) -> int:
         "oracle_transitions": len(truth),
         "prediction_source": None,
         "evaluation": None,
+        "visual_exit_candidates": len(exit_candidates),
+        "visual_exit_evaluation": exit_evaluation.as_dict(),
     }
 
     prediction_path = args.predictions or args.run_directory / "predictions.jsonl"
