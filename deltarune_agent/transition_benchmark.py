@@ -45,7 +45,7 @@ def _telemetry_from_event_rows(rows: list[dict[str, object]]) -> list[dict[str, 
                 telemetry.append({
                     **sample,
                     "_run_step": row.get("step"),
-                    "_run_elapsed_seconds": row.get("elapsed_seconds"),
+                    "_run_elapsed_seconds": sample.get("_run_elapsed_seconds", row.get("elapsed_seconds")),
                 })
     return telemetry
 
