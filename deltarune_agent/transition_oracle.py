@@ -78,7 +78,7 @@ def _stable_room(value: object) -> str | None:
     return room if room and room.casefold() != "unknown" else None
 
 
-def build_oracle_from_telemetry(samples: Iterable[object]) -> list[TransitionTruth]:
+def _field(sample: object, name: str) -> object:\n    if isinstance(sample, Mapping):\n        return sample.get(name)\n    return getattr(sample, name, None)\n\n\ndef build_oracle_from_telemetry(samples: Iterable[object]) -> list[TransitionTruth]:
     """Extract trusted transition truth from developer-side telemetry samples.
 
     A transition is accepted only when the telemetry packet explicitly carries
@@ -91,9 +91,9 @@ def build_oracle_from_telemetry(samples: Iterable[object]) -> list[TransitionTru
     seen: set[tuple[int, str, str]] = set()
 
     for sample in samples:
-        source = _stable_room(getattr(sample, "transition_from_room_name", None))
-        destination = _stable_room(getattr(sample, "room_name", None))
-        sequence = getattr(sample, "transition_sequence", None)
+        source = _stable_room(_field(sample, "transition_from_room_name"))
+        destination = _stable_room(_field(sample, "room_name"))
+        sequence = _field(sample, "transition_sequence")
         if source is None or destination is None or source == destination:
             continue
         try:
@@ -115,9 +115,9 @@ def build_oracle_from_telemetry(samples: Iterable[object]) -> list[TransitionTru
                 source_y=_finite_float(
                     getattr(sample, "transition_from_y", None)
                 ),
-                destination_x=_finite_float(getattr(sample, "x", None)),
-                destination_y=_finite_float(getattr(sample, "y", None)),
-                observed_at=_finite_float(getattr(sample, "received_at", None)),
+                destination_x=_finite_float(_field(sample, "x")),
+                destination_y=_finite_float(_field(sample, "y")),
+                observed_at=_finite_float(_field(sample, "received_at")),
             )
         )
 
