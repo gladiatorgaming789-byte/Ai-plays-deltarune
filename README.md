@@ -371,6 +371,34 @@ After installing the patch on one chapter, test its output without controls:
 python -m deltarune_agent telemetry --seconds 30
 ```
 
+## Room-transition benchmark
+
+Each run now records the AI policy's observed room-change predictions in
+`predictions.jsonl`, separately from the raw telemetry evidence. The run also
+preserves the ordered telemetry trace packets that the policy actually
+observed. This makes it possible to compare the baseline room-change detector
+against explicit transition metadata without exposing developer oracle records
+to the gameplay policy.
+
+After a run, generate its developer-only benchmark with:
+
+```powershell
+python -m deltarune_agent.transition_benchmark runs/<run-folder>
+```
+
+The command writes `transition_benchmark/oracle.json`,
+`transition_benchmark/evaluation.json`, and
+`transition_benchmark/summary.json`. It automatically reads that run's
+`events.jsonl` and `predictions.jsonl`. The summary reports matched,
+missed, false-positive, and wrong-destination counts; precision, recall, F1;
+and measured detection latency. The optional `--predictions <file.json>`
+argument accepts a separate JSON-list prediction stream.
+
+The oracle accepts only explicit transition metadata. It does not infer a
+transition merely because adjacent telemetry packets have different room
+names. The oracle and benchmark modules are post-run developer tooling and
+must not be imported by gameplay decision code.
+
 ## Architecture
 
 `observer.py` captures frames, `room_view.py` stitches only observed camera
