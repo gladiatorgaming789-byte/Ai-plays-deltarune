@@ -2417,3 +2417,34 @@ def test_hidden_nearby_interactable_telemetry_is_not_used_by_policy():
     assert policy.interaction_candidate is None
     assert not policy.interactables
     assert "skip interaction" in policy.reason
+
+def test_policy_emits_room_transition_prediction_from_observed_room_change():
+    policy = StarterPolicy()
+    source = TelemetrySample(
+        "overworld", 1, "room_a", 100, 100, "obj_mainchara", 1.0
+    )
+    destination = TelemetrySample(
+        "overworld",
+        2,
+        "room_b",
+        20,
+        30,
+        "obj_mainchara",
+        2.0,
+        transition_from_room_name="room_a",
+        transition_sequence=42,
+    )
+
+    policy.observe_room_trace([source, destination])
+    predictions = policy.drain_transition_predictions(step=17)
+
+    assert predictions == [{
+        "sequence": 42,
+        "source_room": "room_a",
+        "destination_room": "room_b",
+        "confidence": 1.0,
+        "detector": "policy_observed_room_change",
+        "step": 17,
+    }]
+    assert policy.drain_transition_predictions(step=18) == []
+
