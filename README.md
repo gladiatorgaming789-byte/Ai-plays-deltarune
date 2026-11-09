@@ -399,7 +399,7 @@ recall, lead time in run steps, and candidate-to-crossing distance. Candidates
 without a later crossing are labeled **unvalidated**, not false positives,
 because the run may have ended before the agent tested them.
 
-The spatial matcher defaults to a 64-world-unit radius and a 180-step lead
+The spatial matcher defaults to a 16-world-unit radius (two 8-unit navigation cells) and a 180-step lead
 window. Tune those assumptions with `--exit-match-radius` and
 `--exit-max-lead-steps`; these are evaluation parameters, not game knowledge.
 The optional `--predictions <file.json>` argument accepts a separate JSON-list
