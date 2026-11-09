@@ -205,6 +205,7 @@ class EpisodeTracker:
         ) = None,
         prediction_snapshot: Mapping[str, Any] | Iterable[Any] | None = None,
         transition_predictions: Iterable[Mapping[str, Any]] | None = None,
+        telemetry_trace: Iterable[Mapping[str, Any]] | None = None,
     ) -> None:
         """Record an action and its structured evidence.
 
@@ -245,6 +246,12 @@ class EpisodeTracker:
             "reason": reason,
             "live": live,
         }
+        trace_rows = [
+            json_safe(item) for item in (telemetry_trace or [])
+            if isinstance(item, Mapping)
+        ]
+        if trace_rows:
+            event["telemetry_trace"] = trace_rows
         if context is not None:
             event["decision_context"] = context
         if updates:
