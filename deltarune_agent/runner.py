@@ -413,6 +413,7 @@ def run(args: argparse.Namespace) -> Path:
             map_updates = policy.drain_map_updates()
             decision_context = policy.decision_context()
             prediction_snapshot = policy.prediction_snapshot()
+            transition_predictions = policy.drain_transition_predictions(step=step)
             location = (
                 f" room={telemetry.room_name or telemetry.room_id} "
                 f"pos=({telemetry.x:.0f},{telemetry.y:.0f})"
@@ -438,6 +439,7 @@ def run(args: argparse.Namespace) -> Path:
                 decision_context=decision_context,
                 map_updates=map_updates,
                 prediction_snapshot=prediction_snapshot,
+                transition_predictions=transition_predictions,
             )
             if args.event_stream:
                 print(
