@@ -113,7 +113,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--exit-match-radius",
         type=float,
-        default=64.0,
+        default=16.0,
         help="maximum world-space distance between candidate anchor and transition source",
     )
     parser.add_argument(
