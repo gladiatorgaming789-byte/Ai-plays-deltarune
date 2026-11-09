@@ -20,6 +20,17 @@ def test_benchmark_automatically_compares_recorded_policy_predictions(tmp_path):
             "step": 17,
             "elapsed_seconds": 1.2,
             "telemetry": telemetry,
+            "map_updates": [{
+                "type": "screen_region",
+                "exit_detection_version": 2,
+                "room": "room_a",
+                "region": [1, 2],
+                "guess_id": "room_a@1,2",
+                "anchor_world": [90, 50],
+                "exit_candidate_state": "semantic_ready",
+                "exit_candidate_source": "doorway_facade",
+                "exit_candidate_visual_score": 0.9,
+            }],
         }) + "\n",
         encoding="utf-8",
     )
@@ -51,3 +62,8 @@ def test_benchmark_automatically_compares_recorded_policy_predictions(tmp_path):
     assert evaluation["false_positives"] == 0
     assert evaluation["f1"] == 1.0
     assert evaluation["mean_latency_seconds"] == 0.1
+    exit_evaluation = output["visual_exit_evaluation"]
+    assert exit_evaluation["candidate_count"] == 1
+    assert exit_evaluation["matched_transitions"] == 1
+    assert exit_evaluation["semantic_ready_matches"] == 1
+    assert (run / "transition_benchmark" / "visual_exit_evaluation.json").is_file()
