@@ -46,7 +46,8 @@ class _JsonLinesWriter:
                 ensure_ascii=False,
                 allow_nan=False,
             )
-            + "\n"
+            + "
+"
         )
         self._pending += 1
         if self._pending >= self.flush_interval:
@@ -281,7 +282,8 @@ class EpisodeTracker:
         ]
         if transition_rows:
             prediction["transition_predictions"] = transition_rows
-        if isinstance(telemetry_data, dict):\n            prediction["location"] = {
+        if isinstance(telemetry_data, dict):
+            prediction["location"] = {
                 "room": (
                     telemetry_data.get("room_name")
                     or telemetry_data.get("room_id")
