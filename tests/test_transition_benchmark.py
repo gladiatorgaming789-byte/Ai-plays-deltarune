@@ -26,6 +26,7 @@ def test_benchmark_automatically_compares_recorded_policy_predictions(tmp_path):
                 "room": "room_a",
                 "region": [1, 2],
                 "guess_id": "room_a@1,2",
+                "last_seen_step": 16,
                 "anchor_world": [90, 50],
                 "exit_candidate_state": "semantic_ready",
                 "exit_candidate_source": "doorway_facade",
