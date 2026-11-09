@@ -43,6 +43,7 @@ def test_collects_first_observed_visual_exit_candidate_per_region():
     assert candidates[0].candidate_id == "room_a@2,3"
     assert candidates[0].step == 5
     assert candidates[0].state == "visual_candidate"
+    assert candidates[0].state_history == ((5, "visual_candidate"), (9, "semantic_ready"))
 
 
 def test_visual_exit_benchmark_matches_spatially_and_reports_lead_time():
@@ -103,3 +104,44 @@ def test_unmatched_visual_candidates_are_unvalidated_not_false_positives():
     assert result.unmatched_candidates_unvalidated == 1
     assert result.missed_transitions == 0
     assert result.detection_recall == 1.0
+
+def test_semantic_readiness_is_only_credited_if_observed_before_crossing():
+    candidates = collect_visual_exit_candidates([
+        {
+            "step": 5,
+            "map_updates": [{
+                "type": "screen_region",
+                "exit_detection_version": 2,
+                "room": "room_a",
+                "region": [1, 1],
+                "guess_id": "room_a@1,1",
+                "anchor_world": [100, 100],
+                "exit_candidate_state": "visual_candidate",
+            }],
+        },
+        {
+            "step": 12,
+            "map_updates": [{
+                "type": "screen_region",
+                "exit_detection_version": 2,
+                "room": "room_a",
+                "region": [1, 1],
+                "guess_id": "room_a@1,1",
+                "anchor_world": [100, 100],
+                "exit_candidate_state": "semantic_ready",
+            }],
+        },
+    ])
+    before_ready = evaluate_visual_exits(
+        candidates,
+        [TransitionTruth(1, "room_a", "room_b", 100, 100, step=8)],
+        spatial_match_radius=4,
+    )
+    after_ready = evaluate_visual_exits(
+        candidates,
+        [TransitionTruth(1, "room_a", "room_b", 100, 100, step=15)],
+        spatial_match_radius=4,
+    )
+
+    assert before_ready.semantic_ready_matches == 0
+    assert after_ready.semantic_ready_matches == 1
