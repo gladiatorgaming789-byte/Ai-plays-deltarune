@@ -100,9 +100,11 @@ def build_oracle_from_telemetry(samples: Iterable[object]) -> list[TransitionTru
         if key in seen:
             continue
         seen.add(key)
-        observed_at = _finite_float(_field(sample, "received_at"))
+        # Run-relative time aligns with predictions.jsonl. The raw monotonic
+        # receive timestamp is intentionally not used for recorded runs.
+        observed_at = _finite_float(_field(sample, "_run_elapsed_seconds"))
         if observed_at is None:
-            observed_at = _finite_float(_field(sample, "_run_elapsed_seconds"))
+            observed_at = _finite_float(_field(sample, "received_at"))
         raw_step = _field(sample, "_run_step")
         try:
             step = int(raw_step) if raw_step is not None else None
@@ -113,16 +115,36 @@ def build_oracle_from_telemetry(samples: Iterable[object]) -> list[TransitionTru
                 sequence=sequence,
                 source_room=source,
                 destination_room=destination,
-                source_x=_finite_float(_field(sample, "transition_from_foot_x"))
-                or _finite_float(_field(sample, "transition_from_x")),
-                source_y=_finite_float(_field(sample, "transition_from_foot_y"))
-                or _finite_float(_field(sample, "transition_from_y")),
-                destination_x=_finite_float(_field(sample, "player_foot_x"))
-                or _finite_float(_field(sample, "player_x"))
-                or _finite_float(_field(sample, "x")),
-                destination_y=_finite_float(_field(sample, "player_foot_y"))
-                or _finite_float(_field(sample, "player_y"))
-                or _finite_float(_field(sample, "y")),
+                source_x=next(
+                    (value for value in (
+                        _finite_float(_field(sample, "transition_from_foot_x")),
+                        _finite_float(_field(sample, "transition_from_x")),
+                    ) if value is not None),
+                    None,
+                ),
+                source_y=next(
+                    (value for value in (
+                        _finite_float(_field(sample, "transition_from_foot_y")),
+                        _finite_float(_field(sample, "transition_from_y")),
+                    ) if value is not None),
+                    None,
+                ),
+                destination_x=next(
+                    (value for value in (
+                        _finite_float(_field(sample, "player_foot_x")),
+                        _finite_float(_field(sample, "player_x")),
+                        _finite_float(_field(sample, "x")),
+                    ) if value is not None),
+                    None,
+                ),
+                destination_y=next(
+                    (value for value in (
+                        _finite_float(_field(sample, "player_foot_y")),
+                        _finite_float(_field(sample, "player_y")),
+                        _finite_float(_field(sample, "y")),
+                    ) if value is not None),
+                    None,
+                ),
                 observed_at=observed_at,
                 step=step,
             )
