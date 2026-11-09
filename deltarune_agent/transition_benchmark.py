@@ -35,13 +35,18 @@ def _load_jsonl(path: Path) -> list[dict[str, object]]:
 def _telemetry_from_event_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     telemetry: list[dict[str, object]] = []
     for row in rows:
-        sample = row.get("telemetry")
-        if isinstance(sample, dict):
-            telemetry.append({
-                **sample,
-                "_run_step": row.get("step"),
-                "_run_elapsed_seconds": row.get("elapsed_seconds"),
-            })
+        candidates = row.get("telemetry_trace")
+        samples = candidates if isinstance(candidates, list) else []
+        current = row.get("telemetry")
+        if isinstance(current, dict):
+            samples = [*samples, current]
+        for sample in samples:
+            if isinstance(sample, dict):
+                telemetry.append({
+                    **sample,
+                    "_run_step": row.get("step"),
+                    "_run_elapsed_seconds": row.get("elapsed_seconds"),
+                })
     return telemetry
 
 
