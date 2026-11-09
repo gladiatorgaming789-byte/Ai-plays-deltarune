@@ -120,11 +120,15 @@ def collect_visual_exit_candidates(
             candidate_id = str(update.get("guess_id") or f"{room}@{region_key[0]},{region_key[1]}")
             state = str(update.get("exit_candidate_state") or "unknown")
             score = _number(update.get("exit_candidate_visual_score"))
+            try:
+                candidate_step = int(update.get("last_seen_step", step))
+            except (TypeError, ValueError, OverflowError):
+                candidate_step = step
             candidate = VisualExitCandidate(
                 candidate_id=candidate_id,
                 room=room,
                 region=region_key,
-                step=step,
+                step=candidate_step,
                 state=state,
                 source=str(update.get("exit_candidate_source")) if update.get("exit_candidate_source") is not None else None,
                 score=score,
@@ -188,7 +192,7 @@ def evaluate_visual_exits(
             if transition.source_x is None or transition.source_y is None or transition.step is None:
                 continue
             lead = transition.step - candidate.step
-            if lead < 0 or lead > lead_window:
+            if lead <= 0 or lead > lead_window:
                 continue
             distance = math.hypot(
                 candidate.anchor_x - transition.source_x,
@@ -211,7 +215,7 @@ def evaluate_visual_exits(
         if transition.step is not None:
             eligible_states = [
                 state for observed_step, state in candidate.state_history
-                if observed_step <= transition.step
+                if observed_step < transition.step
             ]
             if eligible_states:
                 state_at_crossing = eligible_states[-1]
