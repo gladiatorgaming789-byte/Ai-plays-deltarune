@@ -37,8 +37,37 @@ def _telemetry_from_event_rows(rows: list[dict[str, object]]) -> list[dict[str, 
     for row in rows:
         sample = row.get("telemetry")
         if isinstance(sample, dict):
-            telemetry.append(sample)
+            telemetry.append({
+                **sample,
+                "_run_step": row.get("step"),
+                "_run_elapsed_seconds": row.get("elapsed_seconds"),
+            })
     return telemetry
+
+
+def _load_recorded_predictions(path: Path) -> list[TransitionPrediction]:
+    predictions: list[TransitionPrediction] = []
+    for row in _load_jsonl(path):
+        elapsed = row.get("elapsed_seconds")
+        run_step = row.get("step")
+        nested = row.get("transition_predictions")
+        if not isinstance(nested, list):
+            continue
+        for item in nested:
+            if not isinstance(item, dict):
+                continue
+            raw_sequence = item.get("sequence")
+            sequence = int(raw_sequence if raw_sequence is not None else run_step or 0)
+            raw_step = item.get("step", run_step)
+            predictions.append(TransitionPrediction(
+                sequence=sequence,
+                source_room=str(item["source_room"]) if item.get("source_room") is not None else None,
+                destination_room=str(item["destination_room"]) if item.get("destination_room") is not None else None,
+                predicted_at=float(elapsed) if elapsed is not None else None,
+                confidence=float(item.get("confidence", 0.0)),
+                step=int(raw_step) if raw_step is not None else None,
+            ))
+    return predictions
 
 
 def _load_predictions(path: Path) -> list[TransitionPrediction]:
@@ -81,7 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--predictions",
         type=Path,
-        help="JSON list of independent detector predictions",
+        help="optional JSON list of predictions; defaults to this run's predictions.jsonl",
     )
     parser.add_argument(
         "--output",
@@ -115,12 +144,20 @@ def main(argv: list[str] | None = None) -> int:
         "evaluation": None,
     }
 
-    if args.predictions is not None:
-        predictions = _load_predictions(args.predictions)
+    prediction_path = args.predictions or args.run_directory / "predictions.jsonl"
+    if prediction_path.is_file():
+        predictions = (
+            _load_predictions(prediction_path)
+            if args.predictions is not None
+            else _load_recorded_predictions(prediction_path)
+        )
         evaluation = evaluate_transitions(truth, predictions)
         write_evaluation(output / "evaluation.json", evaluation)
-        summary["prediction_source"] = str(args.predictions)
+        summary["prediction_source"] = str(prediction_path)
+        summary["prediction_count"] = len(predictions)
         summary["evaluation"] = evaluation.as_dict()
+    else:
+        summary["prediction_warning"] = f"No prediction file found: {prediction_path}"
 
     write_json(output / "summary.json", json_safe(summary))
     print(json.dumps(summary, indent=2, ensure_ascii=False))
