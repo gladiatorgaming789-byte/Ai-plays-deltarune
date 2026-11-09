@@ -156,6 +156,7 @@ def test_finished_run_packages_predictions_memory_and_rendered_maps(
         decision_context={"kind": "visual_guess", "id": "room_test@0,0"},
         map_updates=[{"type": "screen_region", "room": "room_test"}],
         prediction_snapshot={"selected_guess_id": "room_test@0,0"},
+        transition_predictions=[{"sequence": 8, "source_room": "room_a", "destination_room": "room_b", "step": 0}],
     )
     tracker.finish(
         {"story_progress_events": 0},
@@ -169,6 +170,7 @@ def test_finished_run_packages_predictions_memory_and_rendered_maps(
     assert prediction["location"]["x"] == 12
     assert prediction["location"]["y"] == 20
     assert prediction["prediction_snapshot"]["selected_guess_id"] == "room_test@0,0"
+    assert prediction["transition_predictions"][0]["destination_room"] == "room_b"
     assert tracker.navigation_updates.is_file()
     assert (tracker.directory / "navigation.json").is_file()
     assert (tracker.directory / "room_views" / "index.json").is_file()
