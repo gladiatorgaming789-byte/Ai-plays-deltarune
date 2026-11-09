@@ -205,7 +205,7 @@ class EpisodeTracker:
         ) = None,
         prediction_snapshot: Mapping[str, Any] | Iterable[Any] | None = None,
         transition_predictions: Iterable[Mapping[str, Any]] | None = None,
-        telemetry_trace: Iterable[Mapping[str, Any]] | None = None,
+        telemetry_trace: Iterable[Mapping[str, Any] | TelemetrySample] | None = None,
     ) -> None:
         """Record an action and its structured evidence.
 
