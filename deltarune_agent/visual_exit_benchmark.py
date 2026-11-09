@@ -147,12 +147,12 @@ def collect_visual_exit_candidates(
                     score=candidate.score,
                     anchor_x=candidate.anchor_x,
                     anchor_y=candidate.anchor_y,
-                    state_history=((step, state),),
+                    state_history=((candidate_step, state),),
                 )
             else:
                 history = list(previous.state_history)
-                if not history or history[-1] != (step, state):
-                    history.append((step, state))
+                if not history or history[-1] != (candidate_step, state):
+                    history.append((candidate_step, state))
                 earliest[candidate_id] = VisualExitCandidate(
                     candidate_id=previous.candidate_id,
                     room=previous.room,
