@@ -146,6 +146,7 @@ class StarterPolicy:
         ) = None
         self.completed_interaction: tuple[str, int, int, str] | None = None
         self.transitions = self.world.transitions
+        self.transition_predictions: list[dict[str, object]] = []
         self.warps = self.world.warps
         self.last_portal_id: str | None = None
         self.last_portal_crossing_tick = 0
@@ -835,6 +836,15 @@ class StarterPolicy:
             self.recent_rooms.append(self.observed_room or room)
         if self.observed_room is not None and room != self.observed_room:
             source_room = self.observed_room
+            # AI-side baseline: detect room changes from observations only.
+            # This queue never reads developer-oracle records.
+            self.transition_predictions.append({
+                "sequence": telemetry.transition_sequence,
+                "source_room": source_room,
+                "destination_room": room,
+                "confidence": 1.0,
+                "detector": "policy_observed_room_change",
+            })
             source_x: float | None = None
             source_y: float | None = None
             if telemetry.transition_from_room_name == source_room:
@@ -4068,6 +4078,15 @@ class StarterPolicy:
 
     def save_memory(self) -> None:
         self.world.save()
+
+    def drain_transition_predictions(self, *, step: int) -> list[dict[str, object]]:
+        """Return AI-side room-change detections for run auditing."""
+        predictions = [
+            {**item, "step": int(step)}
+            for item in self.transition_predictions
+        ]
+        self.transition_predictions.clear()
+        return predictions
 
     def drain_map_updates(self) -> list[dict[str, object]]:
         updates = self.map_updates
