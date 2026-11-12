@@ -1,7 +1,9 @@
 from deltarune_agent.transition_oracle import TransitionTruth
 from deltarune_agent.visual_exit_benchmark import (
     collect_visual_exit_candidates,
+    calibrate_visual_exit_candidates,
     evaluate_visual_exits,
+    write_visual_exit_calibration,
 )
 
 
@@ -169,3 +171,81 @@ def test_candidate_first_seen_on_crossing_step_does_not_count_as_prediction():
     assert result.matched_transitions == 0
     assert result.missed_transitions == 1
     assert result.unmatched_candidates_unvalidated == 1
+
+
+def test_calibration_sweeps_observed_scores_without_changing_agent_thresholds(tmp_path):
+    candidates = collect_visual_exit_candidates([
+        {
+            "step": 2,
+            "map_updates": [{
+                "type": "screen_region",
+                "exit_detection_version": 2,
+                "room": "room_a",
+                "region": [0, 0],
+                "guess_id": "low-score",
+                "anchor_world": [100, 100],
+                "exit_candidate_state": "visual_candidate",
+                "exit_candidate_source": "doorway_facade",
+                "exit_candidate_visual_score": 0.4,
+            }],
+        },
+        {
+            "step": 4,
+            "map_updates": [{
+                "type": "screen_region",
+                "exit_detection_version": 2,
+                "room": "room_a",
+                "region": [1, 0],
+                "guess_id": "high-score",
+                "anchor_world": [101, 100],
+                "exit_candidate_state": "semantic_ready",
+                "exit_candidate_source": "floor_boundary",
+                "exit_candidate_visual_score": 0.9,
+            }],
+        },
+    ])
+    transitions = [
+        TransitionTruth(1, "room_a", "room_b", 100, 100, step=10),
+    ]
+
+    report = calibrate_visual_exit_candidates(
+        candidates, transitions, spatial_match_radius=8
+    )
+
+    assert report["agent_thresholds_modified"] is False
+    assert report["candidate_count"] == 2
+    assert report["scored_candidate_count"] == 2
+    assert [row["score_threshold"] for row in report["threshold_sweep"]] == [0.4, 0.9]
+    assert report["threshold_sweep"][0]["candidate_count"] == 2
+    assert report["threshold_sweep"][1]["candidate_count"] == 1
+    assert report["threshold_sweep"][0]["matched_transitions"] == 1
+    assert report["threshold_sweep"][1]["matched_transitions"] == 1
+    assert len(report["source_breakdown"]) == 2
+    assert "Precision, specificity" in report["limitations"][1]
+
+    output = tmp_path / "visual_exit_calibration.json"
+    write_visual_exit_calibration(output, report)
+    saved = json.loads(output.read_text(encoding="utf-8"))
+    assert saved["calibration_version"] == 1
+    assert saved["agent_thresholds_modified"] is False
+
+
+def test_calibration_with_no_scores_returns_empty_sweep():
+    candidates = collect_visual_exit_candidates([{
+        "step": 1,
+        "map_updates": [{
+            "type": "screen_region",
+            "exit_detection_version": 2,
+            "room": "room_a",
+            "region": [0, 0],
+            "guess_id": "unscored",
+            "anchor_world": [10, 10],
+            "exit_candidate_state": "visual_candidate",
+        }],
+    }])
+
+    report = calibrate_visual_exit_candidates(candidates, [])
+
+    assert report["candidate_count"] == 1
+    assert report["unscored_candidate_count"] == 1
+    assert report["threshold_sweep"] == []
