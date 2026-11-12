@@ -1,3 +1,5 @@
+import json
+
 from deltarune_agent.transition_oracle import TransitionTruth
 from deltarune_agent.visual_exit_benchmark import (
     collect_visual_exit_candidates,
