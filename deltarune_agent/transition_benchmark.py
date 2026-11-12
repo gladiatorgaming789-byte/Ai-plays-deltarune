@@ -20,7 +20,9 @@ from .transition_oracle import (
 )
 from .visual_exit_benchmark import (
     collect_visual_exit_candidates,
+    calibrate_visual_exit_candidates,
     evaluate_visual_exits,
+    write_visual_exit_calibration,
     write_visual_exit_evaluation,
 )
 
@@ -154,6 +156,15 @@ def main(argv: list[str] | None = None) -> int:
     write_visual_exit_evaluation(
         output / "visual_exit_evaluation.json", exit_evaluation
     )
+    exit_calibration = calibrate_visual_exit_candidates(
+        exit_candidates,
+        truth,
+        spatial_match_radius=args.exit_match_radius,
+        max_lead_steps=args.exit_max_lead_steps,
+    )
+    write_visual_exit_calibration(
+        output / "visual_exit_calibration.json", exit_calibration
+    )
 
     summary: dict[str, object] = {
         "oracle_version": 1,
@@ -164,6 +175,7 @@ def main(argv: list[str] | None = None) -> int:
         "evaluation": None,
         "visual_exit_candidates": len(exit_candidates),
         "visual_exit_evaluation": exit_evaluation.as_dict(),
+        "visual_exit_calibration": exit_calibration,
     }
 
     prediction_path = args.predictions or args.run_directory / "predictions.jsonl"
