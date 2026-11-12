@@ -399,6 +399,14 @@ recall, lead time in run steps, and candidate-to-crossing distance. Candidates
 without a later crossing are labeled **unvalidated**, not false positives,
 because the run may have ended before the agent tested them.
 
+The same command also writes `visual_exit_calibration.json`: an offline
+sweep over the visual scores actually observed in the run, plus a breakdown by
+candidate source. It shows how transition recall changes as a score cutoff is
+raised. This is diagnostic only and never changes the live detector. Since
+untested candidates are not known negatives, the report deliberately does not
+claim precision or an optimal threshold; those require explicit tested-negative
+labels.
+
 The spatial matcher defaults to a 16-world-unit radius (two 8-unit navigation cells) and a 180-step lead
 window. Tune those assumptions with `--exit-match-radius` and
 `--exit-max-lead-steps`; these are evaluation parameters, not game knowledge.
