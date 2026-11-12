@@ -273,6 +273,122 @@ def evaluate_visual_exits(
     )
 
 
+
+def calibrate_visual_exit_candidates(
+    candidates: Sequence[VisualExitCandidate],
+    transitions: Sequence[TransitionTruth],
+    *,
+    spatial_match_radius: float = 16.0,
+    max_lead_steps: int = 180,
+    max_thresholds: int = 25,
+) -> dict[str, object]:
+    """Produce an offline score-threshold sweep without changing agent behavior.
+
+    Thresholds are selected from observed candidate scores, not hand-picked
+    constants. Because untested candidates have no negative labels, this report
+    deliberately does not claim precision, specificity, or an optimal cutoff.
+    """
+    scored = sorted(
+        score for score in (candidate.score for candidate in candidates)
+        if score is not None
+    )
+    unique_scores = sorted({round(score, 4) for score in scored})
+    if len(unique_scores) > max(2, int(max_thresholds)):
+        count = max(2, int(max_thresholds))
+        indices = {
+            round(index * (len(unique_scores) - 1) / (count - 1))
+            for index in range(count)
+        }
+        thresholds = [unique_scores[index] for index in sorted(indices)]
+    else:
+        thresholds = unique_scores
+
+    sweep: list[dict[str, object]] = []
+    for threshold in thresholds:
+        selected = [
+            candidate for candidate in candidates
+            if candidate.score is not None and candidate.score >= threshold
+        ]
+        result = evaluate_visual_exits(
+            selected,
+            transitions,
+            spatial_match_radius=spatial_match_radius,
+            max_lead_steps=max_lead_steps,
+        )
+        sweep.append({
+            "score_threshold": threshold,
+            "candidate_count": len(selected),
+            "matched_transitions": result.matched_transitions,
+            "missed_transitions": result.missed_transitions,
+            "detection_recall": result.detection_recall,
+            "semantic_ready_matches": result.semantic_ready_matches,
+            "semantic_ready_recall": result.semantic_ready_recall,
+            "mean_lead_steps": result.mean_lead_steps,
+            "unmatched_candidates_unvalidated": result.unmatched_candidates_unvalidated,
+        })
+
+    source_breakdown: list[dict[str, object]] = []
+    sources = sorted({candidate.source or "unknown" for candidate in candidates})
+    for source in sources:
+        source_candidates = [
+            candidate for candidate in candidates
+            if (candidate.source or "unknown") == source
+        ]
+        result = evaluate_visual_exits(
+            source_candidates,
+            transitions,
+            spatial_match_radius=spatial_match_radius,
+            max_lead_steps=max_lead_steps,
+        )
+        source_breakdown.append({
+            "source": source,
+            "candidate_count": len(source_candidates),
+            "matched_transitions": result.matched_transitions,
+            "detection_recall": result.detection_recall,
+            "semantic_ready_recall": result.semantic_ready_recall,
+            "mean_lead_steps": result.mean_lead_steps,
+        })
+
+    return {
+        "calibration_version": 1,
+        "purpose": "offline_visual_exit_score_threshold_sweep",
+        "agent_thresholds_modified": False,
+        "candidate_count": len(candidates),
+        "scored_candidate_count": len(scored),
+        "unscored_candidate_count": len(candidates) - len(scored),
+        "score_min": min(scored) if scored else None,
+        "score_median": (
+            float(scored[len(scored) // 2]) if scored else None
+        ),
+        "score_max": max(scored) if scored else None,
+        "transition_count": len(transitions),
+        "spatial_match_radius_world_units": max(0.0, float(spatial_match_radius)),
+        "max_lead_steps": max(0, int(max_lead_steps)),
+        "threshold_sweep": sweep,
+        "source_breakdown": source_breakdown,
+        "limitations": [
+            "Unmatched candidates are unvalidated, not confirmed negatives.",
+            "Precision, specificity, and an optimal threshold cannot be estimated without labeled tested-negative candidates.",
+            "This report does not modify live detector thresholds.",
+        ],
+    }
+
+
+def write_visual_exit_calibration(path: Path, report: Mapping[str, object]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "benchmark_version": BENCHMARK_VERSION,
+        **dict(report),
+    }
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+    return path
+
+
 def write_visual_exit_evaluation(path: Path, evaluation: VisualExitEvaluation) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
