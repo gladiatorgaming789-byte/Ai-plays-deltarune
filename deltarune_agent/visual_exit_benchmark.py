@@ -382,7 +382,7 @@ def write_visual_exit_calibration(path: Path, report: Mapping[str, object]) -> P
     }
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False) + "\\n",
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
     temporary.replace(path)
