@@ -68,3 +68,7 @@ def test_benchmark_automatically_compares_recorded_policy_predictions(tmp_path):
     assert exit_evaluation["matched_transitions"] == 1
     assert exit_evaluation["semantic_ready_matches"] == 1
     assert (run / "transition_benchmark" / "visual_exit_evaluation.json").is_file()
+    calibration = output["visual_exit_calibration"]
+    assert calibration["agent_thresholds_modified"] is False
+    assert calibration["candidate_count"] == 1
+    assert (run / "transition_benchmark" / "visual_exit_calibration.json").is_file()
