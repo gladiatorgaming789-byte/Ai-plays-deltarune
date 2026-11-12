@@ -387,7 +387,9 @@ python -m deltarune_agent.transition_benchmark runs/<run-folder>
 ```
 
 The command writes `transition_benchmark/oracle.json`,
-`transition_benchmark/evaluation.json`, and
+`transition_benchmark/evaluation.json`,
+`transition_benchmark/visual_exit_evaluation.json`,
+`transition_benchmark/visual_exit_calibration.json`, and
 `transition_benchmark/summary.json`. It automatically reads that run's
 `events.jsonl` and `predictions.jsonl`. The summary reports matched,
 missed, false-positive, and wrong-destination counts; precision, recall, F1;
