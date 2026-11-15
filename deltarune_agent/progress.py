@@ -46,8 +46,7 @@ class _JsonLinesWriter:
                 ensure_ascii=False,
                 allow_nan=False,
             )
-            + "
-"
+            + "\n"
         )
         self._pending += 1
         if self._pending >= self.flush_interval:
