@@ -436,3 +436,28 @@ planner, or reinforcement learning without changing capture or input code.
 ## Next milestones
 
 The ordered, evidence-gated project plan is maintained in `ROADMAP.md`.
+
+
+## Developer-only tested visual-exit dataset
+
+After a run, the transition benchmark creates an editable
+`transition_benchmark/exit_adjudications.template.jsonl`. Copy it to
+`transition_benchmark/exit_adjudications.jsonl` and review each candidate.
+Allowed labels are:
+
+- `confirmed_exit`: explicitly observed to lead to a room transition.
+- `tested_non_exit`: explicitly tested and established not to be an exit.
+- `unreachable`: could not be tested; excluded from supervised examples.
+- `unknown`: not adjudicated; excluded from supervised examples.
+
+Both supervised labels require a non-empty evidence note. The benchmark never
+turns an unmatched candidate into a negative example. To use a separately
+stored review file, pass `--exit-adjudications path\to\labels.jsonl`:
+
+```powershell
+py -m deltarune_agent.transition_benchmark runs/<run-folder>
+```
+
+The output includes `tested_exit_dataset.jsonl` and
+`tested_exit_dataset_summary.json`. These are developer-side evaluation
+artifacts only; they are not loaded by the gameplay agent or its action policy.
