@@ -99,6 +99,15 @@ def build_tested_exit_dataset(
     candidate_by_id = {candidate.candidate_id: candidate for candidate in candidates}
     if len(candidate_by_id) != len(candidates):
         raise ValueError("Candidate IDs must be unique before dataset construction")
+    adjudication_ids = [item.candidate_id for item in adjudications]
+    if len(set(adjudication_ids)) != len(adjudication_ids):
+        duplicates = sorted({item for item in adjudication_ids if adjudication_ids.count(item) > 1})
+        raise ValueError(f"Duplicate adjudications for candidate IDs: {duplicates}")
+    for item in adjudications:
+        if item.status not in VALID_STATUSES:
+            raise ValueError(f"Unsupported status {item.status!r} for candidate {item.candidate_id!r}")
+        if item.status in SUPERVISED_STATUSES and not item.evidence.strip():
+            raise ValueError(f"{item.status} requires explicit evidence for candidate {item.candidate_id!r}")
     labels = {item.candidate_id: item for item in adjudications}
     unknown_ids = sorted(set(labels) - set(candidate_by_id))
     if unknown_ids:
