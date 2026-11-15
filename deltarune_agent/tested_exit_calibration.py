@@ -215,10 +215,6 @@ def calibrate_tested_exit_dataset(
         cv_status = "complete" if folds and not skipped_folds else (
             "partial" if folds else "insufficient_training_classes"
         )
-        aggregate = (
-            _metrics(held_out_examples, 0.0)
-            if False else None
-        )
         # Aggregate confusion counts from each fold's own threshold. Do not
         # recompute predictions with one shared threshold across held-out rooms.
         if folds:
@@ -226,9 +222,6 @@ def calibrate_tested_exit_dataset(
                 key: sum(int(fold["metrics"][key]) for fold in folds)
                 for key in ("true_positives", "false_positives", "true_negatives", "false_negatives")
             }
-            aggregate_rows = []
-            for fold in folds:
-                aggregate_rows.append(fold["metrics"])
             tp, fp = totals["true_positives"], totals["false_positives"]
             tn, fn = totals["true_negatives"], totals["false_negatives"]
             precision = tp / (tp + fp) if tp + fp else None
