@@ -23,6 +23,10 @@ from .tested_exit_dataset import (
     load_adjudications,
     write_dataset_artifacts,
 )
+from .tested_exit_calibration import (
+    calibrate_tested_exit_dataset,
+    write_tested_exit_calibration,
+)
 from .visual_exit_benchmark import (
     collect_visual_exit_candidates,
     calibrate_visual_exit_candidates,
@@ -185,6 +189,10 @@ def main(argv: list[str] | None = None) -> int:
     dataset_artifacts = write_dataset_artifacts(
         output, exit_candidates, dataset_rows, dataset_summary
     )
+    tested_exit_calibration = calibrate_tested_exit_dataset(dataset_rows)
+    tested_exit_calibration_path = write_tested_exit_calibration(
+        output / "tested_exit_calibration.json", tested_exit_calibration
+    )
 
     summary: dict[str, object] = {
         "oracle_version": 1,
@@ -200,6 +208,8 @@ def main(argv: list[str] | None = None) -> int:
         "tested_exit_dataset_artifacts": {
             key: str(path) for key, path in dataset_artifacts.items()
         },
+        "tested_exit_calibration": tested_exit_calibration,
+        "tested_exit_calibration_path": str(tested_exit_calibration_path),
     }
 
     prediction_path = args.predictions or args.run_directory / "predictions.jsonl"
