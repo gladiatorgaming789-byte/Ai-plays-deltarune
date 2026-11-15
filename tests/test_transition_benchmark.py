@@ -72,3 +72,7 @@ def test_benchmark_automatically_compares_recorded_policy_predictions(tmp_path):
     assert calibration["agent_thresholds_modified"] is False
     assert calibration["candidate_count"] == 1
     assert (run / "transition_benchmark" / "visual_exit_calibration.json").is_file()
+    tested_calibration = output["tested_exit_calibration"]
+    assert tested_calibration["calibration_status"] == "insufficient_supervised_data"
+    assert tested_calibration["gameplay_thresholds_modified"] is False
+    assert (run / "transition_benchmark" / "tested_exit_calibration.json").is_file()
