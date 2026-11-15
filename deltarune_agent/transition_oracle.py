@@ -205,15 +205,10 @@ def evaluate_transitions(
         ]
         if not exact:
             wrong_destinations += 1
-            # Consume the nearest truth so a wrong prediction cannot also
-            # inflate the missed count for the same event.
-            available.remove(min(
-                candidates,
-                key=lambda item: abs(
-                    (item.step if item.step is not None else item.sequence)
-                    - (prediction.step if prediction.step is not None else prediction.sequence)
-                ),
-            ))
+            # Keep the truth unmatched: a wrong-destination prediction
+            # is not a successful detection of the actual transition. It is
+            # reported separately as wrong_destinations, while the real
+            # transition remains in the missed count and recall denominator.
             continue
 
         candidate = min(
