@@ -458,6 +458,15 @@ stored review file, pass `--exit-adjudications path\to\labels.jsonl`:
 py -m deltarune_agent.transition_benchmark runs/<run-folder>
 ```
 
-The output includes `tested_exit_dataset.jsonl` and
-`tested_exit_dataset_summary.json`. These are developer-side evaluation
-artifacts only; they are not loaded by the gameplay agent or its action policy.
+The output includes `tested_exit_dataset.jsonl`,
+`tested_exit_dataset_summary.json`, and
+`tested_exit_calibration.json`. The calibration report scores the existing
+visual heuristic against only explicitly reviewed positive and negative labels.
+It reports precision, recall, specificity, F1, a diagnostic score-threshold
+sweep, source breakdowns, and leave-one-room-out threshold validation when
+there is enough labeled data. Unknown and unreachable candidates are excluded,
+never converted into negatives. The selected threshold is diagnostic only: no
+model is trained and no gameplay threshold is changed. These are developer-side
+evaluation artifacts only; they are not loaded by the gameplay agent or its
+action policy. After reviewing `exit_adjudications.jsonl`, rerun the benchmark
+to refresh the dataset and calibration report.
