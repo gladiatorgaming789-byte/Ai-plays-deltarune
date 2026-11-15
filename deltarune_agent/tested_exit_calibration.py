@@ -32,6 +32,8 @@ def _validated_examples(
         seen_ids.add(candidate_id)
 
         label = str(row.get("label") or "unknown").strip()
+        if label not in {"confirmed_exit", "tested_non_exit", "unreachable", "unknown"}:
+            raise ValueError(f"Unsupported dataset label {label!r} for candidate {candidate_id!r}")
         label_counts[label] += 1
         if label not in SUPERVISED_LABELS:
             continue
