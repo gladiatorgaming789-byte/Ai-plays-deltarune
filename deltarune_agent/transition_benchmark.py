@@ -18,6 +18,11 @@ from .transition_oracle import (
     write_evaluation,
     write_oracle,
 )
+from .tested_exit_dataset import (
+    build_tested_exit_dataset,
+    load_adjudications,
+    write_dataset_artifacts,
+)
 from .visual_exit_benchmark import (
     collect_visual_exit_candidates,
     calibrate_visual_exit_candidates,
@@ -125,6 +130,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="maximum steps between first candidate observation and transition",
     )
     parser.add_argument(
+        "--exit-adjudications",
+        type=Path,
+        default=None,
+        help="optional JSONL file of developer-reviewed exit labels; defaults to <output>/exit_adjudications.jsonl",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=None,
@@ -166,6 +177,15 @@ def main(argv: list[str] | None = None) -> int:
         output / "visual_exit_calibration.json", exit_calibration
     )
 
+    adjudication_path = args.exit_adjudications or output / "exit_adjudications.jsonl"
+    adjudications = load_adjudications(adjudication_path)
+    dataset_rows, dataset_summary = build_tested_exit_dataset(
+        exit_candidates, adjudications
+    )
+    dataset_artifacts = write_dataset_artifacts(
+        output, exit_candidates, dataset_rows, dataset_summary
+    )
+
     summary: dict[str, object] = {
         "oracle_version": 1,
         "run_directory": str(args.run_directory),
@@ -176,6 +196,10 @@ def main(argv: list[str] | None = None) -> int:
         "visual_exit_candidates": len(exit_candidates),
         "visual_exit_evaluation": exit_evaluation.as_dict(),
         "visual_exit_calibration": exit_calibration,
+        "tested_exit_dataset": dataset_summary,
+        "tested_exit_dataset_artifacts": {
+            key: str(path) for key, path in dataset_artifacts.items()
+        },
     }
 
     prediction_path = args.predictions or args.run_directory / "predictions.jsonl"
