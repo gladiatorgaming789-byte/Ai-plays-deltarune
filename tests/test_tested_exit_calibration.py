@@ -61,8 +61,13 @@ def test_leave_one_room_out_selects_threshold_without_held_out_room():
 
     assert validation["status"] == "complete"
     assert validation["fold_count"] == 3
-    assert validation["aggregate_metrics"]["true_positives"] == 3
+    # The held-out room_c positive scores below the threshold learned
+    # from room_a and room_b. This is a genuine cross-room false negative,
+    # not a reason to leak held-out labels into threshold selection.
+    assert validation["aggregate_metrics"]["true_positives"] == 2
     assert validation["aggregate_metrics"]["true_negatives"] == 3
+    assert validation["aggregate_metrics"]["false_negatives"] == 1
+    assert validation["aggregate_metrics"]["recall"] == pytest.approx(2 / 3)
     assert all(fold["testing_example_count"] == 2 for fold in validation["folds"])
 
 
