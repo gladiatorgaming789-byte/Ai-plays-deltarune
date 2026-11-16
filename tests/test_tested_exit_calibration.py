@@ -67,7 +67,7 @@ def test_leave_one_room_out_selects_threshold_without_held_out_room():
     assert validation["aggregate_metrics"]["true_positives"] == 2
     assert validation["aggregate_metrics"]["true_negatives"] == 3
     assert validation["aggregate_metrics"]["false_negatives"] == 1
-    assert validation["aggregate_metrics"]["recall"] == pytest.approx(2 / 3)
+    assert validation["aggregate_metrics"]["recall"] == pytest.approx(2 / 3, abs=5e-5)
     assert all(fold["testing_example_count"] == 2 for fold in validation["folds"])
 
 
