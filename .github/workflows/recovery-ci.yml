@@ -92,5 +92,14 @@ jobs:
           python -m pytest -q tests/test_run20_run_analysis_fixes.py
           -k "mouse_corner"
 
-      - name: Run tests
-        run: python -m pytest -q
+      - name: Run full test suite
+        shell: pwsh
+        run: python -m pytest -q --junitxml=pytest-results.xml
+
+      - name: Upload pytest results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results-python-${{ matrix.python-version }}
+          path: pytest-results.xml
+          if-no-files-found: ignore
