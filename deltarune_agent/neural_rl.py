@@ -8,7 +8,6 @@ rather than a hidden developer label.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from .actions import ACTIONS
@@ -37,15 +36,10 @@ def train_actor_critic(
     if not transitions:
         raise ValueError("dataset contains no transitions")
 
-    raw_lines = dataset.read_text(encoding="utf-8").splitlines()
-    for line in raw_lines:
-        if not line.strip():
-            continue
-        raw = json.loads(line)
-        if raw.get("reward_status") == "unassigned":
-            raise ValueError(
-                "dataset contains unassigned rewards; provide environment rewards before RL training"
-            )
+    if any(item.reward_status != "assigned" for item in transitions):
+        raise ValueError(
+            "dataset contains unassigned rewards; provide environment rewards before RL training"
+        )
 
     device_obj = (
         torch.device("cuda" if torch.cuda.is_available() else "cpu")
