@@ -398,35 +398,36 @@ def run(args: argparse.Namespace) -> Path:
                         else ("received_at", telemetry.received_at)
                     )
                     is_new_sample = sample_key != last_experience_sample_key
-                    if fresh and is_new_sample:
-                        last_experience_sample_key = sample_key
+                    if fresh:
                         current_neural = neural_encoder.encode(
                             telemetry,
                             previous_action=last_executed_action,
                             previous_action_duration=last_executed_duration,
                         )
                         current_neural_observation = current_neural
-                        if pending_experience is not None:
-                            previous_sequence = pending_experience["observation"].source_sequence
-                            sequence_is_new = (
-                                current_sequence is None
-                                or previous_sequence is None
-                                or current_sequence > previous_sequence
-                            )
-                            if sequence_is_new:
-                                from .experience import NeuralTransition
-
-                                experience_writer.write(
-                                    NeuralTransition.from_observations(
-                                        pending_experience["observation"],
-                                        pending_experience["action"],
-                                        0.0,
-                                        current_neural,
-                                        done=False,
-                                    )
+                        if is_new_sample:
+                            last_experience_sample_key = sample_key
+                            if pending_experience is not None:
+                                previous_sequence = pending_experience["observation"].source_sequence
+                                current_sequence = telemetry.packet_sequence
+                                sequence_is_new = (
+                                    current_sequence is None
+                                    or previous_sequence is None
+                                    or current_sequence > previous_sequence
                                 )
-                            pending_experience = None
-                    elif not fresh:
+                                if sequence_is_new:
+                                    from .experience import NeuralTransition
+
+                                    experience_writer.write(
+                                        NeuralTransition.from_observations(
+                                            pending_experience["observation"],
+                                            pending_experience["action"],
+                                            0.0,
+                                            current_neural,
+                                            done=False,
+                                        )
+                                    )
+                    else:
                         pending_experience = None
             elif (
                 telemetry_receiver is not None
@@ -543,8 +544,6 @@ def run(args: argparse.Namespace) -> Path:
                     "action": action.name,
                     "duration": action.duration,
                 }
-            else:
-                pending_experience = None
             last_executed_action = action.name
             last_executed_duration = action.duration
             controller.execute(action)
