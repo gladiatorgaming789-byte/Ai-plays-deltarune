@@ -1365,6 +1365,11 @@ class AgentGUI:
             style="Accent.TButton",
         )
         self.start_button.pack(side="left", padx=3)
+        ttk.Button(
+            controls,
+            text="Neural Shadow",
+            command=self._open_neural_shadow,
+        ).pack(side="left", padx=3)
         self.stop_button = ttk.Button(
             controls, text="Stop AI", command=self.stop, state="disabled"
         )
@@ -1403,6 +1408,17 @@ class AgentGUI:
             textvariable=self.speed_status_var,
             style="Subtitle.TLabel",
         ).pack(side="right", padx=(8, 4))
+
+    def _open_neural_shadow(self) -> None:
+        """Open the read-only numerical neural-agent monitor."""
+        try:
+            from .neural_shadow_gui import launch_neural_shadow_gui
+            launch_neural_shadow_gui()
+        except Exception as exc:
+            messagebox.showerror(
+                "Could not open Neural Shadow",
+                f"{type(exc).__name__}: {exc}",
+            )
 
     def _send_speed_key(self, key: str) -> None:
         try:
