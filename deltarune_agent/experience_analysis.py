@@ -38,10 +38,21 @@ def analyze_dataset(path: Path) -> dict[str, object]:
 
     widths = sorted({len(item.observation) for item in transitions})
     next_widths = sorted({len(item.next_observation) for item in transitions})
+    transition_width_mismatches = sum(
+        len(item.observation) != len(item.next_observation)
+        for item in transitions
+    )
     state_keys = [item.observation for item in transitions]
     duplicates = total - len(set(state_keys))
 
-    feature_width = widths[0] if len(widths) == 1 else None
+    feature_width = (
+        widths[0]
+        if len(widths) == 1
+        and len(next_widths) == 1
+        and widths[0] == next_widths[0]
+        and transition_width_mismatches == 0
+        else None
+    )
     feature_names = (
         DEFAULT_ENCODER.feature_names
         if feature_width == DEFAULT_ENCODER.width
@@ -96,6 +107,10 @@ def analyze_dataset(path: Path) -> dict[str, object]:
         )
     if len(widths) > 1 or len(next_widths) > 1:
         blockers.append("Observation widths are inconsistent across transitions.")
+    if transition_width_mismatches:
+        blockers.append(
+            f"{transition_width_mismatches} transitions have different current/next observation widths."
+        )
     if never_available_features:
         blockers.append(
             "Features never available: " + ", ".join(never_available_features) + "."
@@ -117,6 +132,7 @@ def analyze_dataset(path: Path) -> dict[str, object]:
         "underrepresented_actions": underrepresented_actions,
         "observation_widths": widths,
         "next_observation_widths": next_widths,
+        "transition_width_mismatches": transition_width_mismatches,
         "unique_observation_count": len(set(state_keys)),
         "duplicate_observation_count": duplicates,
         "duplicate_observation_fraction": duplicates / total if total else 0.0,
