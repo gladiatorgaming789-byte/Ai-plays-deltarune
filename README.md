@@ -310,6 +310,61 @@ python -m deltarune_agent train-neural-policy runs/neural-experiences.jsonl --ch
 The Qt Training page also exposes **Train neural policy** for the active
 profile's experience dataset.
 
+### Temporal neural policy
+
+The neural stack now has a recurrent stage that consumes short, contiguous
+histories of the same numerical observation contract. The default sequence
+length is 8 telemetry observations. A GRU produces the policy logits and value
+estimate from the latest hidden state. Sequence construction refuses to bridge
+telemetry sequence gaps, so the model is not trained on fabricated temporal
+continuity.
+
+Train it with:
+
+```powershell
+python -m deltarune_agent train-neural-temporal runs/neural-experiences.jsonl --checkpoint runs/neural-temporal-policy.pt --device auto
+```
+
+This is still a supervised warm-start: it learns the recorded actions before
+reinforcement learning is introduced.
+
+### Optional neural live control
+
+A trained temporal checkpoint can now control Deltarune through the same
+keyboard controller, but this mode is deliberately opt-in and requires
+explicit `--live`, fresh telemetry, and a checkpoint. Vision is disabled.
+
+```powershell
+python -m deltarune_agent run --live --neural-live --neural-checkpoint runs/neural-temporal-policy.pt --steps 1000
+```
+
+The existing hierarchical controller remains the default. Neural live mode
+does not consult its route tables, story text, developer benchmarks, or
+screenshots. The normal emergency stop still applies.
+
+The first recurrent model is intentionally conservative: it waits until a
+complete real telemetry history exists before choosing a non-wait action. It
+also does not pretend that a supervised imitation checkpoint has learned how
+to finish the game.
+
+### Reinforcement-learning infrastructure
+
+A separate actor-critic trainer is now available for datasets whose rewards
+have been explicitly assigned by the environment. It refuses the current
+`reward_status=unassigned` experience files rather than silently treating
+placeholder zeros as meaningful rewards.
+
+```powershell
+python -m deltarune_agent train-neural-rl DATASET.jsonl --checkpoint runs/neural-rl-policy.pt --device auto
+```
+
+The RL trainer uses one-step actor-critic updates with a value target,
+advantage-weighted policy loss, value loss, entropy regularization, gradient
+clipping, and CUDA when available. Reward design is intentionally not hidden
+inside the neural network: the next stage is to define and validate an
+outcome-based reward contract from information the agent is legitimately
+allowed to observe.
+
 ### Neural policy evaluation
 
 After a supervised checkpoint exists, evaluate it on the same chronological
