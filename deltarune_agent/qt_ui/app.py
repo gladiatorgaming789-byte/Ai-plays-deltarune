@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -275,6 +276,32 @@ class OperatorWindow(QMainWindow):
             "Rewards remain unassigned; this does not give the neural agent control."
         )
         primary.addWidget(self.collect_neural)
+
+        self.neural_live = QCheckBox("Neural AI")
+        self.neural_live.setChecked(
+            str(self.settings.value("run/neural_live", "false")).casefold()
+            in {"1", "true", "yes"}
+        )
+        self.neural_live.setToolTip(
+            "Use the trained temporal neural policy for live decisions. "
+            "Vision remains disabled; the neural controller uses numerical telemetry only."
+        )
+        primary.addWidget(self.neural_live)
+
+        self.neural_checkpoint = QLineEdit()
+        self.neural_checkpoint.setPlaceholderText("Neural checkpoint")
+        saved_checkpoint = str(self.settings.value("run/neural_checkpoint", "")).strip()
+        if saved_checkpoint:
+            self.neural_checkpoint.setText(saved_checkpoint)
+        self.neural_checkpoint.setMinimumWidth(250)
+        self.neural_checkpoint.setMaximumWidth(360)
+        primary.addWidget(self.neural_checkpoint)
+
+        self.neural_browse = QPushButton("Model…")
+        self.neural_browse.setToolTip("Choose a temporal neural policy checkpoint.")
+        self.neural_browse.clicked.connect(self._browse_neural_checkpoint)
+        primary.addWidget(self.neural_browse)
+
         self.run_mode = QComboBox()
         self.run_mode.addItems(["Normal run", "Population training"])
         self.run_mode.setCurrentText(str(self.settings.value("run/mode", "Normal run")))
@@ -359,6 +386,15 @@ class OperatorWindow(QMainWindow):
         self.collect_neural.setEnabled(
             mode != "Population training" and not self.controller.running
         )
+        self.neural_live.setEnabled(
+            mode != "Population training" and not self.controller.running
+        )
+        self.neural_checkpoint.setEnabled(
+            mode != "Population training" and not self.controller.running
+        )
+        self.neural_browse.setEnabled(
+            mode != "Population training" and not self.controller.running
+        )
 
     def _connect(self) -> None:
         self.controller.eventReceived.connect(self._controller_event)
@@ -398,10 +434,23 @@ class OperatorWindow(QMainWindow):
             button.setChecked(page_id == identifier)
         self.settings.setValue("ui/page", identifier)
 
+    def _browse_neural_checkpoint(self) -> None:
+        path, _filter = QFileDialog.getOpenFileName(
+            self,
+            "Choose temporal neural policy checkpoint",
+            self.neural_checkpoint.text().strip() or str(
+                self.store.memory_directory(self.active_profile.id)
+            ),
+            "PyTorch checkpoints (*.pt *.pth);;All files (*)",
+        )
+        if path:
+            self.neural_checkpoint.setText(path)
+
     def start_run(self) -> None:
         if self.controller.running:
             return
         training = self.run_mode.currentText() == "Population training"
+        neural_live = self.neural_live.isChecked()
         if training and not self.live_input.isChecked():
             QMessageBox.warning(
                 self,
@@ -410,6 +459,32 @@ class OperatorWindow(QMainWindow):
                 "Deltarune window per AI; the current AI Support mod must be installed.",
             )
             return
+        if neural_live:
+            if training:
+                QMessageBox.warning(
+                    self,
+                    "Neural AI is unavailable in population training",
+                    "Run the neural controller as a single normal AI first. "
+                    "Population training still uses the existing training controller.",
+                )
+                return
+            if not self.live_input.isChecked():
+                QMessageBox.warning(
+                    self,
+                    "Neural AI needs live input",
+                    "Enable Live input before enabling Neural AI. "
+                    "The neural controller is otherwise completely disabled.",
+                )
+                return
+            checkpoint = Path(self.neural_checkpoint.text().strip())
+            if not checkpoint.is_file():
+                QMessageBox.warning(
+                    self,
+                    "Neural checkpoint not found",
+                    f"No neural checkpoint exists at:\n{checkpoint}",
+                )
+                return
+
         if not self.build_status.safe_for_testing:
             answer = QMessageBox.warning(
                 self,
@@ -427,6 +502,8 @@ class OperatorWindow(QMainWindow):
         self.settings.setValue("run/mode", self.run_mode.currentText())
         self.settings.setValue("run/population_size", self.population_size.value())
         self.settings.setValue("run/training_chapter", self.training_chapter.currentText())
+        self.settings.setValue("run/neural_live", neural_live)
+        self.settings.setValue("run/neural_checkpoint", self.neural_checkpoint.text().strip())
         if (
             not training
             and self.live_input.isChecked()
@@ -447,6 +524,8 @@ class OperatorWindow(QMainWindow):
             speed=self.speed.currentText(),
             live=self.live_input.isChecked(),
             collect_neural_experiences=self.collect_neural.isChecked(),
+            neural_live=neural_live,
+            neural_checkpoint=Path(self.neural_checkpoint.text().strip()) if neural_live else None,
             training=training,
             population_size=self.population_size.value(),
             chapter=self.training_chapter.currentIndex() + 1,
