@@ -70,9 +70,9 @@ def test_training_creates_checkpoint_and_report(tmp_path):
     payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
     assert payload["format"] == "deltarune-neural-policy-v1"
     assert payload["encoder_width"] == DEFAULT_ENCODER.width
-    assert payload["action_names"] == list(actions if False else (
+    assert payload["action_names"] == [
         "wait", "confirm", "cancel", "menu", "up", "down", "left", "right"
-    ))
+    ]
 
 
 def test_training_rejects_empty_dataset(tmp_path):
