@@ -110,9 +110,12 @@ def test_previous_action_is_encoded_numerically():
     right = encoder.encode(make_sample(), previous_action="right", previous_action_duration=0.25)
     left = encoder.encode(make_sample(), previous_action="left", previous_action_duration=0.25)
 
-    right_index = right.feature_names.index("action.previous_index")
-    left_index = left.feature_names.index("action.previous_index")
-    assert right.values[right_index] != left.values[left_index]
+    right_index = right.feature_names.index("action.previous.right")
+    left_index = left.feature_names.index("action.previous.left")
+    assert right.values[right_index] == 1.0
+    assert right.values[left_index] == 0.0
+    assert left.values[right_index] == 0.0
+    assert left.values[left_index] == 1.0
 
 
 def test_room_identity_does_not_expose_room_name_text():
