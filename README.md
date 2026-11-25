@@ -488,3 +488,10 @@ Vision remains an optional future input channel rather than a prerequisite for t
 The neural stack now has a transition/replay layer in `deltarune_agent/experience.py`. A `NeuralTransition` stores the numerical observation, action, reward, next observation, terminal flag, and telemetry sequence IDs. `NeuralReplayBuffer` provides bounded storage and deterministic sampling, while JSONL helpers make transitions portable for offline training.
 
 This layer intentionally does **not** calculate rewards or inject developer-only labels. Reward assignment remains an environment/controller responsibility. The next step is to connect this transition interface to live/shadow execution so real observations and actions can be recorded without giving the untrained neural policy control of the game.
+
+
+## Neural shadow mode
+
+The neural stack now has a non-authoritative shadow runner in `deltarune_agent/neural_shadow.py`. It consumes the same telemetry-based numerical observation contract as the future neural controller, produces an action distribution and value estimate, and records predictions/transitions without sending keyboard input.
+
+Shadow mode is intentionally separate from the existing gameplay policy: the existing policy remains authoritative. This makes it safe to collect real observations before the neural model is trusted with control. A checkpoint can be loaded later for trained-model evaluation.
