@@ -131,6 +131,7 @@ class OperatorWindow(QMainWindow):
         self.store = store
         self.migration_result = migration_result or MigrationResult()
         self.active_profile = store.active()
+        self._profile_root = self.store.profile_directory(self.active_profile.id)
         self.build_status = inspect_build(self.project_root, AGENT_REVISION, fetch_remote=False)
         self.settings = QSettings("GladiatorGaming", "DeltaruneAIController")
         self.themes, self.theme_warnings = discover_themes(self.store.root / "themes")
@@ -295,7 +296,7 @@ class OperatorWindow(QMainWindow):
             self.neural_checkpoint.setText(saved_checkpoint)
         else:
             self.neural_checkpoint.setText(
-                str(self.store.memory_directory(self.active_profile.id) / "neural-temporal-policy.pt")
+                str(self._profile_root / "memory" / "neural-temporal-policy.pt")
             )
         self.neural_checkpoint.setMinimumWidth(250)
         self.neural_checkpoint.setMaximumWidth(360)
@@ -604,6 +605,10 @@ class OperatorWindow(QMainWindow):
 
     def _profile_activated(self, profile: Profile) -> None:
         self.active_profile = profile
+        self._profile_root = self.store.profile_directory(self.active_profile.id)
+        self.neural_checkpoint.setText(
+            str(self._profile_root / "memory" / "neural-temporal-policy.pt")
+        )
         self.live_page.reload_memory()
         self.learning_page.reload()
         self.runs_page.set_runs_root(self.store.runs_directory(profile.id))
