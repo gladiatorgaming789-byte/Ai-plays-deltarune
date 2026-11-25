@@ -181,6 +181,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="do not write metrics.json and replay.json",
     )
+    analyze = sub.add_parser(
+        "analyze-experiences",
+        help="inspect a collected neural experience dataset",
+    )
+    analyze.add_argument("dataset", type=Path)
+    analyze.add_argument("--output", type=Path)
+
     gui = sub.add_parser(
         "gui",
         help="open the desktop controller and remembered-map operator console",
@@ -626,6 +633,15 @@ def main() -> None:
                 save_report=not args.no_save,
             )
         )
+    elif args.command == "analyze-experiences":
+        from .experience_analysis import analyze_dataset
+
+        report = analyze_dataset(args.dataset)
+        rendered = json.dumps(report, indent=2, ensure_ascii=False)
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(rendered + "\\n", encoding="utf-8")
+        print(rendered)
     elif args.command == "gui":
         if args.legacy:
             from .integrated_gui import launch_integrated_gui
