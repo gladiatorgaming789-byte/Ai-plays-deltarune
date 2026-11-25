@@ -425,7 +425,13 @@ out.
 The **Live input** checkbox remains off by default. Enable it before pressing
 **Start AI** to send controls to Deltarune; leave it off for a safe dry run.
 
-The **Neural AI** toggle in the run bar is also opt-in. When enabled for a normal
+The **Neural AI** toggle in the run bar is also opt-in. The Training page can now create a **fresh temporal neural checkpoint**
+with random weights using **New temporal model**, without requiring an experience
+dataset. **Train temporal model** then trains that same recurrent architecture
+from recorded numerical experiences. The live-run model path defaults to
+`neural-temporal-policy.pt`.
+
+ When enabled for a normal
 live run, the GUI passes the selected temporal neural checkpoint to the live
 controller. Neural control uses the numerical telemetry observation contract
 only; vision remains disabled. A checkpoint must exist and **Live input** must
