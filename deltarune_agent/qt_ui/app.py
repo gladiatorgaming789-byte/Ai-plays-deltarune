@@ -293,6 +293,10 @@ class OperatorWindow(QMainWindow):
         saved_checkpoint = str(self.settings.value("run/neural_checkpoint", "")).strip()
         if saved_checkpoint:
             self.neural_checkpoint.setText(saved_checkpoint)
+        else:
+            self.neural_checkpoint.setText(
+                str(self.store.memory_directory(self.active_profile.id) / "neural-temporal-policy.pt")
+            )
         self.neural_checkpoint.setMinimumWidth(250)
         self.neural_checkpoint.setMaximumWidth(360)
         primary.addWidget(self.neural_checkpoint)
