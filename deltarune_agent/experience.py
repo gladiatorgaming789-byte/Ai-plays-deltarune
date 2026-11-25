@@ -32,8 +32,11 @@ class NeuralTransition:
     done: bool
     source_sequence: int | None = None
     next_source_sequence: int | None = None
+    reward_status: str = "unassigned"
 
     def __post_init__(self) -> None:
+        if self.reward_status not in {"unassigned", "assigned"}:
+            raise ValueError("reward_status must be 'unassigned' or 'assigned'")
         if self.action not in ACTIONS:
             raise ValueError(f"unknown neural action: {self.action!r}")
         if len(self.observation) != len(self.available):
@@ -67,6 +70,7 @@ class NeuralTransition:
             done=bool(done),
             source_sequence=observation.source_sequence,
             next_source_sequence=next_observation.source_sequence,
+            reward_status="unassigned",
         )
 
     def as_dict(self) -> dict[str, object]:
@@ -75,7 +79,7 @@ class NeuralTransition:
             "available": list(self.available),
             "action": self.action,
             "reward": self.reward,
-            "reward_status": "unassigned",
+            "reward_status": self.reward_status,
             "next_observation": list(self.next_observation),
             "next_available": list(self.next_available),
             "done": self.done,
@@ -156,6 +160,7 @@ def read_transitions(path: Path) -> list[NeuralTransition]:
                     done=bool(raw["done"]),
                     source_sequence=raw.get("source_sequence"),
                     next_source_sequence=raw.get("next_source_sequence"),
+                    reward_status=str(raw.get("reward_status", "unassigned")),
                 ))
             except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
                 raise ValueError(f"invalid transition on line {line_number}") from exc
