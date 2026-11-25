@@ -490,6 +490,30 @@ The neural stack now has a transition/replay layer in `deltarune_agent/experienc
 This layer intentionally does **not** calculate rewards or inject developer-only labels. Reward assignment remains an environment/controller responsibility. The next step is to connect this transition interface to live/shadow execution so real observations and actions can be recorded without giving the untrained neural policy control of the game.
 
 
+## Neural Shadow GUI
+
+The existing desktop controller now exposes a **Neural Shadow** button in its
+run controls. It opens a separate read-only monitor that consumes the same
+localhost telemetry stream as the controller, encodes the fixed numerical
+observation vector, and runs the neural policy/value network.
+
+Shadow mode is intentionally non-authoritative:
+
+- It never calls `KeyboardController` and cannot send game input.
+- Vision is disabled; screenshots and room art are not part of the neural input.
+- It displays the predicted action, confidence, value estimate, and all eight
+  action probabilities.
+- It shows the named numerical features and their availability mask so the
+  observation seen by the network is inspectable.
+- Predictions are recorded under `runs/neural-shadow/`.
+- An optional PyTorch checkpoint can be loaded from the GUI.
+- The existing normal AI run remains unchanged and continues to be the only
+  controller that can send gameplay input.
+
+This makes the GUI useful for collecting and validating real neural
+observations before the model is ever allowed to control Deltarune.
+
+
 ## Neural shadow mode
 
 The neural stack now has a non-authoritative shadow runner in `deltarune_agent/neural_shadow.py`. It consumes the same telemetry-based numerical observation contract as the future neural controller, produces an action distribution and value estimate, and records predictions/transitions without sending keyboard input.
