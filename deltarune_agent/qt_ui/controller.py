@@ -56,6 +56,8 @@ class RunController(QObject):
         speed: str,
         live: bool,
         collect_neural_experiences: bool = False,
+        neural_live: bool = False,
+        neural_checkpoint: Path | None = None,
         training: bool = False,
         population_size: int = DEFAULT_POPULATION_SIZE,
         chapter: int = 1,
@@ -104,6 +106,14 @@ class RunController(QObject):
             arguments.extend(("--runs-root", str(Path(runs_root))))
         if live:
             arguments.append("--live")
+        if neural_live and not training:
+            if neural_checkpoint is None:
+                raise ValueError("Neural AI requires a temporal neural checkpoint.")
+            arguments.extend((
+                "--neural-live",
+                "--neural-checkpoint",
+                str(Path(neural_checkpoint)),
+            ))
         if collect_neural_experiences and not training:
             dataset_path = (
                 Path(memory_directory) / "neural-experiences.jsonl"
