@@ -470,3 +470,14 @@ model is trained and no gameplay threshold is changed. These are developer-side
 evaluation artifacts only; they are not loaded by the gameplay agent or its
 action policy. After reviewing `exit_adjudications.jsonl`, rerun the benchmark
 to refresh the dataset and calibration report.
+
+
+## Neural environment interface
+
+Phase 1 adds `deltarune_agent/neural_env.py`, a vision-free numerical observation contract for the future neural policy. It converts the telemetry the agent is already permitted to observe into a fixed-width vector of finite values in approximately `[-1, 1]`, plus a parallel availability mask for optional fields.
+
+The observation includes player position and foot position, horizontal/vertical velocity, speed, motion direction, room/camera geometry, collision bounds, sprite dimensions/scales, timing, observed movement deltas, numerical room identity, interaction/control state, facing and game mode, and the previous action/duration. It does **not** expose screenshots, room art, hidden interactable identities/coordinates, story text, or developer-only benchmark/oracle data.
+
+The encoder is deliberately pure Python and has no ML dependency yet. The next neural milestone can consume `NeuralObservation.combined()` directly, while a later recurrent model can stack these observations over time without changing the environment contract.
+
+Vision remains an optional future input channel rather than a prerequisite for the neural agent.
