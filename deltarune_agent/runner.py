@@ -429,8 +429,12 @@ def run(args: argparse.Namespace) -> Path:
                                     )
                     else:
                         pending_experience = None
-            elif (
-                telemetry_receiver is not None
+            else:
+                if experience_writer is not None:
+                    pending_experience = None
+            if (
+                telemetry is None
+                and telemetry_receiver is not None
                 and step == 15
                 and not telemetry_seen
             ):
