@@ -247,8 +247,9 @@ not end the run and does not redirect Deltarune controls into that app.
 
 The neural observation encoder and policy/value network can be evaluated in
 read-only shadow mode. To begin building a sequential dataset while the
-existing hierarchical controller remains in charge, run a normal bounded
-episode with the opt-in collector:
+existing hierarchical controller remains in charge, enable **Collect neural
+experiences** in the desktop run bar, or run a normal bounded episode with the
+opt-in collector:
 
 ```powershell
 python -m deltarune_agent run --steps 2000 --collect-neural-experiences
