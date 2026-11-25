@@ -84,3 +84,42 @@ def test_training_rejects_empty_dataset(tmp_path):
             tmp_path / "policy.pt",
             config=NeuralTrainingConfig(device="cpu"),
         )
+
+
+def test_evaluation_reports_holdout_metrics(tmp_path):
+    from deltarune_agent.neural_evaluation import evaluate_policy
+
+    actions = ("left", "right", "up", "down")
+    transitions = [
+        make_transition(actions[index % len(actions)], float(index) / 100, index)
+        for index in range(40)
+    ]
+    dataset = tmp_path / "dataset.jsonl"
+    checkpoint = tmp_path / "policy.pt"
+    write_transitions(dataset, transitions)
+    train_policy(
+        dataset,
+        checkpoint,
+        config=NeuralTrainingConfig(
+            epochs=2,
+            batch_size=8,
+            learning_rate=1e-2,
+            validation_fraction=0.2,
+            device="cpu",
+        ),
+    )
+
+    report = evaluate_policy(
+        dataset,
+        checkpoint,
+        validation_fraction=0.2,
+        device="cpu",
+    )
+
+    assert report["format"] == "deltarune-neural-policy-evaluation-v1"
+    assert report["validation_count"] == 8
+    assert report["validation_split"] == "chronological"
+    assert 0.0 <= report["metrics"]["accuracy"] <= 1.0
+    assert report["metrics"]["sample_count"] == 8
+    assert len(report["metrics"]["confusion_matrix"]["rows_actual_columns_predicted"]) == 8
+    assert len(report["metrics"]["calibration"]) == 10
