@@ -30,14 +30,30 @@ class NeuralShadowAgent:
         import torch
 
         encoder = NeuralObservationEncoder()
-        model = build_policy_value_network(
-            encoder.combined_width,
-            NeuralPolicyConfig(),
-        )
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        config = NeuralPolicyConfig()
+        checkpoint_payload = None
+        if checkpoint is not None:
+            checkpoint_payload = torch.load(
+                checkpoint,
+                map_location=device,
+                weights_only=True,
+            )
+            if isinstance(checkpoint_payload, dict) and "model_state_dict" in checkpoint_payload:
+                policy_config = checkpoint_payload.get("policy_config", {})
+                config = NeuralPolicyConfig(
+                    hidden_sizes=tuple(policy_config.get("hidden_sizes", config.hidden_sizes)),
+                    dropout=float(policy_config.get("dropout", config.dropout)),
+                )
+        model = build_policy_value_network(encoder.combined_width, config)
         model.to(device)
         if checkpoint is not None:
-            state = torch.load(checkpoint, map_location=device, weights_only=True)
+            state = (
+                checkpoint_payload["model_state_dict"]
+                if isinstance(checkpoint_payload, dict)
+                and "model_state_dict" in checkpoint_payload
+                else checkpoint_payload
+            )
             model.load_state_dict(state)
         model.eval()
         return cls(encoder, model, device)
