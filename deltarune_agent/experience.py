@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import math
 import random
 from pathlib import Path
 from typing import Iterable
@@ -39,10 +40,12 @@ class NeuralTransition:
             raise ValueError("observation and availability widths differ")
         if len(self.next_observation) != len(self.next_available):
             raise ValueError("next observation and availability widths differ")
-        if not all(isinstance(value, (int, float)) for value in self.observation):
-            raise ValueError("observation contains a non-numeric value")
-        if not all(isinstance(value, (int, float)) for value in self.next_observation):
-            raise ValueError("next observation contains a non-numeric value")
+        numeric = (*self.observation, *self.available, self.reward,
+                   *self.next_observation, *self.next_available)
+        if not all(isinstance(value, (int, float)) and math.isfinite(value) for value in numeric):
+            raise ValueError("transition contains a non-finite or non-numeric value")
+        if any(value not in (0, 1, 0.0, 1.0) for value in (*self.available, *self.next_available)):
+            raise ValueError("availability masks must contain only 0 or 1")
 
     @classmethod
     def from_observations(
