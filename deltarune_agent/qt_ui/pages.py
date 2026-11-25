@@ -1290,6 +1290,7 @@ class TrainingPage(QWidget):
         self._run_paths: list[Path] = []
         self._selected_run: Path | None = None
         self._neural_process: QProcess | None = None
+        self._neural_temporal_process: QProcess | None = None
         self._build()
         self.reload()
 
@@ -1373,6 +1374,22 @@ class TrainingPage(QWidget):
         self.neural_train_button.setObjectName("primary")
         self.neural_train_button.clicked.connect(self._train_neural_policy)
         neural_heading.addWidget(self.neural_train_button)
+
+        self.neural_fresh_button = QPushButton("New temporal model")
+        self.neural_fresh_button.setToolTip(
+            "Create a fresh randomly initialized temporal neural checkpoint. "
+            "No dataset is required."
+        )
+        self.neural_fresh_button.clicked.connect(self._initialize_fresh_temporal)
+        neural_heading.addWidget(self.neural_fresh_button)
+
+        self.neural_temporal_button = QPushButton("Train temporal model")
+        self.neural_temporal_button.setObjectName("primary")
+        self.neural_temporal_button.setToolTip(
+            "Train the recurrent temporal neural controller from recorded experiences."
+        )
+        self.neural_temporal_button.clicked.connect(self._train_temporal_policy)
+        neural_heading.addWidget(self.neural_temporal_button)
         neural_layout.addLayout(neural_heading)
 
         self.neural_dataset = QLineEdit()
@@ -1384,14 +1401,121 @@ class TrainingPage(QWidget):
         )
         neural_layout.addWidget(self.neural_dataset)
 
+        self.neural_checkpoint_label = QLabel(
+            f"Live model: {self.memory_path() / 'neural-temporal-policy.pt'}"
+        )
+        self.neural_checkpoint_label.setObjectName("meta")
+        neural_layout.addWidget(self.neural_checkpoint_label)
+
         self.neural_status = QLabel(
-            "Imitation training uses numerical observations and recorded actions only. "
-            "Rewards are ignored; validation is chronological."
+            "Fresh temporal models start with random weights. Training uses numerical "
+            "observations and recorded actions only; rewards are ignored for supervised "
+            "warm-start training."
         )
         self.neural_status.setWordWrap(True)
         self.neural_status.setObjectName("meta")
         neural_layout.addWidget(self.neural_status)
         root.addWidget(neural)
+
+    def _fresh_temporal_checkpoint_path(self) -> Path:
+        return self.memory_path() / "neural-temporal-policy.pt"
+
+    def _initialize_fresh_temporal(self) -> None:
+        checkpoint = self._fresh_temporal_checkpoint_path()
+        if checkpoint.exists():
+            answer = QMessageBox.question(
+                self,
+                "Replace neural model?",
+                f"A temporal neural checkpoint already exists at:\n{checkpoint}\n\n"
+                "Replace it with a fresh randomly initialized model?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        process = QProcess(self)
+        self._neural_process = process
+        process.setWorkingDirectory(str(Path.cwd()))
+        process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        process.setProgram(sys.executable)
+        process.setArguments([
+            "-u", "-m", "deltarune_agent", "train-neural-temporal",
+            "--fresh", "--checkpoint", str(checkpoint), "--device", "cpu",
+        ])
+        process.readyReadStandardOutput.connect(self._neural_training_output)
+        process.finished.connect(self._neural_fresh_finished)
+        self.neural_fresh_button.setEnabled(False)
+        self.neural_temporal_button.setEnabled(False)
+        self.neural_status.setText("Creating fresh temporal neural model...")
+        process.start()
+
+    def _neural_fresh_finished(self, exit_code: int, _status) -> None:
+        self.neural_fresh_button.setEnabled(True)
+        self.neural_temporal_button.setEnabled(True)
+        if exit_code == 0:
+            self.neural_status.setText(
+                "Fresh temporal neural model created. "
+                f"Checkpoint: {self._fresh_temporal_checkpoint_path()}"
+            )
+            self.neural_checkpoint_label.setText(
+                f"Live model: {self._fresh_temporal_checkpoint_path()}"
+            )
+        else:
+            self.neural_status.setText(
+                f"Fresh temporal model creation failed with exit code {exit_code}."
+            )
+        self._neural_process = None
+
+    def _train_temporal_policy(self) -> None:
+        if self._neural_temporal_process is not None and self._neural_temporal_process.state() != QProcess.ProcessState.NotRunning:
+            return
+        dataset = Path(self.neural_dataset.text().strip())
+        if not dataset.is_file():
+            QMessageBox.warning(
+                self,
+                "Neural dataset not found",
+                f"No dataset exists at:\n{dataset}",
+            )
+            return
+        checkpoint = self._fresh_temporal_checkpoint_path()
+        self._neural_temporal_process = QProcess(self)
+        process = self._neural_temporal_process
+        process.setWorkingDirectory(str(Path.cwd()))
+        process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        process.setProgram(sys.executable)
+        process.setArguments([
+            "-u", "-m", "deltarune_agent", "train-neural-temporal",
+            str(dataset), "--checkpoint", str(checkpoint), "--device", "auto",
+        ])
+        process.readyReadStandardOutput.connect(self._neural_temporal_output)
+        process.finished.connect(self._neural_temporal_finished)
+        self.neural_temporal_button.setEnabled(False)
+        self.neural_fresh_button.setEnabled(False)
+        self.neural_status.setText("Training temporal neural model...")
+        process.start()
+
+    def _neural_temporal_output(self) -> None:
+        if self._neural_temporal_process is None:
+            return
+        text = bytes(self._neural_temporal_process.readAllStandardOutput()).decode(
+            "utf-8", errors="replace"
+        )
+        if text:
+            self.neural_status.setText(text[-1800:].strip())
+
+    def _neural_temporal_finished(self, exit_code: int, _status) -> None:
+        self.neural_temporal_button.setEnabled(True)
+        self.neural_fresh_button.setEnabled(True)
+        if exit_code == 0:
+            self.neural_status.setText(
+                "Temporal neural model training complete. "
+                f"Checkpoint: {self._fresh_temporal_checkpoint_path()}"
+            )
+        else:
+            self.neural_status.setText(
+                f"Temporal neural model training failed with exit code {exit_code}."
+            )
+        self._neural_temporal_process = None
 
     def _train_neural_policy(self) -> None:
         if self._neural_process is not None and self._neural_process.state() != QProcess.ProcessState.NotRunning:
