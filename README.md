@@ -310,6 +310,21 @@ python -m deltarune_agent train-neural-policy runs/neural-experiences.jsonl --ch
 The Qt Training page also exposes **Train neural policy** for the active
 profile's experience dataset.
 
+### Neural policy evaluation
+
+After a supervised checkpoint exists, evaluate it on the same chronological
+holdout contract without updating the model:
+
+```powershell
+python -m deltarune_agent evaluate-neural-policy runs/neural-experiences.jsonl runs/neural-policy.pt --device auto --output runs/neural-policy-evaluation.json
+```
+
+The evaluator reports held-out accuracy, per-action accuracy and confidence,
+negative log-likelihood, Brier score, a full confusion matrix, and ten
+confidence-calibration buckets. This is still numerical-only evaluation:
+screenshots, room text, rewards, and developer-only oracle data are not used.
+
+
 
 ## Desktop GUI
 
