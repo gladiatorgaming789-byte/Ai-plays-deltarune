@@ -289,6 +289,28 @@ controller's behavior; they are not evidence of neural policy performance.
 The report does not claim that the policy has learned or that the dataset is
 balanced.
 
+### Supervised neural policy training
+
+The first neural training stage is an offline supervised warm-start: it learns
+to predict the actions already present in the collected numerical telemetry.
+It does not use rewards, next-state targets, screenshots, room text, or
+developer-only calibration/oracle data.
+
+Training uses a chronological validation split rather than a random split, so
+adjacent gameplay samples are not deliberately mixed between training and
+validation. The resulting checkpoint uses the portable
+`deltarune-neural-policy-v1` format and can be loaded by Neural Shadow.
+
+CLI:
+
+```powershell
+python -m deltarune_agent train-neural-policy runs/neural-experiences.jsonl --checkpoint runs/neural-policy.pt --device auto
+```
+
+The Qt Training page also exposes **Train neural policy** for the active
+profile's experience dataset.
+
+
 ## Desktop GUI
 
 Start the functional desktop controller with:
