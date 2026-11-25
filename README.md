@@ -358,6 +358,19 @@ placeholder zeros as meaningful rewards.
 python -m deltarune_agent train-neural-rl DATASET.jsonl --checkpoint runs/neural-rl-policy.pt --device auto
 ```
 
+Before RL training, an explicit bootstrap reward can be assigned from
+observable movement. This is deliberately only a learning scaffold: movement
+is not the same thing as game progress or completion.
+
+```powershell
+python -m deltarune_agent assign-neural-rewards runs/neural-experiences.jsonl runs/neural-experiences-rewarded.jsonl
+python -m deltarune_agent train-neural-rl runs/neural-experiences-rewarded.jsonl --checkpoint runs/neural-rl-policy.pt --device auto
+```
+
+The reward contract is recorded as `observable_movement_v1` in the generated
+dataset. It uses only the numerical position already exposed to the neural
+agent and marks each transition explicitly as assigned.
+
 The RL trainer uses one-step actor-critic updates with a value target,
 advantage-weighted policy loss, value loss, entropy regularization, gradient
 clipping, and CUDA when available. Reward design is intentionally not hidden
