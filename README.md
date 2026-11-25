@@ -276,9 +276,14 @@ Inspect the dataset with:
 python -m deltarune_agent analyze-experiences runs/neural-experiences.jsonl
 ```
 
-The report includes action counts, observation duplicates, feature
-availability, and telemetry sequence gaps. It does not claim that the policy
-has learned or that the dataset is balanced.
+The report includes counts and fractions for every action, missing and
+underrepresented actions, duplicate observations, named per-feature
+availability, inconsistent observation widths, and telemetry sequence gaps.
+The 1% action and 5% feature-availability thresholds are screening heuristics,
+not training guarantees. Action counts describe the existing hierarchical
+controller's behavior; they are not evidence of neural policy performance.
+The report does not claim that the policy has learned or that the dataset is
+balanced.
 
 ## Desktop GUI
 
