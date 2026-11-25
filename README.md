@@ -243,6 +243,42 @@ The GUI status changes to **Running in background** when another window has
 focus. Clicking the controller, inspecting the map, or using another app does
 not end the run and does not redirect Deltarune controls into that app.
 
+## Neural experience collection
+
+The neural observation encoder and policy/value network can be evaluated in
+read-only shadow mode. To begin building a sequential dataset while the
+existing hierarchical controller remains in charge, run a normal bounded
+episode with the opt-in collector:
+
+```powershell
+python -m deltarune_agent run --steps 2000 --collect-neural-experiences
+```
+
+This writes append-only JSONL transitions to
+`runs/neural-experiences.jsonl` by default. Use
+`--neural-experiences PATH` to select another dataset file. Collection
+requires fresh telemetry and ignores repeated polls of the same telemetry
+sample. A transition links the observation before an action to the next newer
+telemetry observation. Telemetry dropouts break the pending transition rather
+than guessing what happened in between.
+
+Rewards are deliberately marked **unassigned** (stored as zero only as a
+neutral placeholder). This dataset is suitable for inspecting state/action
+coverage, but it is **not ready for reinforcement-learning training** until an
+outcome-based reward definition is designed and validated. The collector does
+not use hidden story flags, oracle labels, benchmark answers, or screenshots
+as neural inputs.
+
+Inspect the dataset with:
+
+```powershell
+python -m deltarune_agent analyze-experiences runs/neural-experiences.jsonl
+```
+
+The report includes action counts, observation duplicates, feature
+availability, and telemetry sequence gaps. It does not claim that the policy
+has learned or that the dataset is balanced.
+
 ## Desktop GUI
 
 Start the functional desktop controller with:
