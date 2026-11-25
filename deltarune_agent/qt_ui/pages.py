@@ -1407,13 +1407,15 @@ class TrainingPage(QWidget):
         checkpoint = self.memory_path() / "neural-policy.pt"
         self._neural_process = QProcess(self)
         self._neural_process.setWorkingDirectory(str(Path.cwd()))
+        self._neural_process.setProcessChannelMode(
+            QProcess.ProcessChannelMode.MergedChannels
+        )
         self._neural_process.setProgram(sys.executable)
         self._neural_process.setArguments([
             "-u", "-m", "deltarune_agent", "train-neural-policy",
             str(dataset), "--checkpoint", str(checkpoint), "--device", "auto",
         ])
         self._neural_process.readyReadStandardOutput.connect(self._neural_training_output)
-        self._neural_process.readyReadStandardError.connect(self._neural_training_output)
         self._neural_process.finished.connect(self._neural_training_finished)
         self.neural_train_button.setEnabled(False)
         self.neural_status.setText("Training neural policy...")
