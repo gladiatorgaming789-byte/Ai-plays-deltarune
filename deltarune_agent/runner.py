@@ -326,6 +326,7 @@ def run(args: argparse.Namespace) -> Path:
     pending_experience = None
     last_executed_action = "wait"
     last_executed_duration = 0.0
+    last_experience_sample_key = None
     if args.collect_neural_experiences:
         from .experience import NeuralExperienceWriter
         from .neural_env import NeuralObservationEncoder
@@ -391,8 +392,14 @@ def run(args: argparse.Namespace) -> Path:
                 telemetry_seen = True
                 if experience_writer is not None and neural_encoder is not None:
                     fresh = telemetry.is_fresh(max_age=1.0)
-                    current_sequence = telemetry.packet_sequence
-                    if fresh:
+                    sample_key = (
+                        ("sequence", telemetry.packet_sequence)
+                        if telemetry.packet_sequence is not None
+                        else ("received_at", telemetry.received_at)
+                    )
+                    is_new_sample = sample_key != last_experience_sample_key
+                    if fresh and is_new_sample:
+                        last_experience_sample_key = sample_key
                         current_neural = neural_encoder.encode(
                             telemetry,
                             previous_action=last_executed_action,
@@ -419,7 +426,7 @@ def run(args: argparse.Namespace) -> Path:
                                     )
                                 )
                             pending_experience = None
-                    else:
+                    elif not fresh:
                         pending_experience = None
             elif (
                 telemetry_receiver is not None
