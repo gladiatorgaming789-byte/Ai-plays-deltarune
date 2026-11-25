@@ -324,6 +324,8 @@ def run(args: argparse.Namespace) -> Path:
     experience_writer = None
     neural_encoder = None
     pending_experience = None
+    last_executed_action = "wait"
+    last_executed_duration = 0.0
     if args.collect_neural_experiences:
         from .experience import NeuralExperienceWriter
         from .neural_env import NeuralObservationEncoder
@@ -377,6 +379,7 @@ def run(args: argparse.Namespace) -> Path:
                 if telemetry_receiver
                 else None
             )
+            current_neural_observation = None
             room_trace = (
                 telemetry_receiver.drain_overworld_trace()
                 if telemetry_receiver is not None
@@ -392,17 +395,10 @@ def run(args: argparse.Namespace) -> Path:
                     if fresh:
                         current_neural = neural_encoder.encode(
                             telemetry,
-                            previous_action=(
-                                pending_experience["action"]
-                                if pending_experience is not None
-                                else "wait"
-                            ),
-                            previous_action_duration=(
-                                pending_experience["duration"]
-                                if pending_experience is not None
-                                else 0.0
-                            ),
+                            previous_action=last_executed_action,
+                            previous_action_duration=last_executed_duration,
                         )
+                        current_neural_observation = current_neural
                         if pending_experience is not None:
                             previous_sequence = pending_experience["observation"].source_sequence
                             sequence_is_new = (
@@ -534,24 +530,16 @@ def run(args: argparse.Namespace) -> Path:
                     flush=True,
                 )
 
-            if experience_writer is not None and neural_encoder is not None and telemetry is not None and telemetry.is_fresh(max_age=1.0):
+            if current_neural_observation is not None:
                 pending_experience = {
-                    "observation": neural_encoder.encode(
-                        telemetry,
-                        previous_action=(
-                            pending_experience["action"]
-                            if pending_experience is not None
-                            else "wait"
-                        ),
-                        previous_action_duration=(
-                            pending_experience["duration"]
-                            if pending_experience is not None
-                            else 0.0
-                        ),
-                    ),
+                    "observation": current_neural_observation,
                     "action": action.name,
                     "duration": action.duration,
                 }
+            else:
+                pending_experience = None
+            last_executed_action = action.name
+            last_executed_duration = action.duration
             controller.execute(action)
             time.sleep(
                 action.cooldown
