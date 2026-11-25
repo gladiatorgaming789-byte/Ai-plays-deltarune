@@ -71,6 +71,7 @@ jobs:
           python -m deltarune_agent run --help
           python -m deltarune_agent telemetry --help
           python -m deltarune_agent replay --help
+          python -m deltarune_agent analyze-experiences --help
 
       - name: Check Run 20 portal and doorway behavior
         run: >-
