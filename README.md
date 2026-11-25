@@ -423,7 +423,15 @@ goal changes, path checks, exit searches, interactions, and loop recovery stand
 out.
 
 The **Live input** checkbox remains off by default. Enable it before pressing
-**Start AI** to send controls to Deltarune; leave it off for a safe dry run. The
+**Start AI** to send controls to Deltarune; leave it off for a safe dry run.
+
+The **Neural AI** toggle in the run bar is also opt-in. When enabled for a normal
+live run, the GUI passes the selected temporal neural checkpoint to the live
+controller. Neural control uses the numerical telemetry observation contract
+only; vision remains disabled. A checkpoint must exist and **Live input** must
+also be enabled. The GUI never enables Neural AI automatically and disables
+the neural controls during Population training. Use **Model…** to select a
+`.pt`/`.pth` temporal checkpoint; the last selection is remembered. The
 mode selector starts a normal run by default. Choosing **Population training**
 requires live input and telemetry, opens a compact grid showing all 2–16 AI
 scorecards at once, launches and tiles one visible game per AI, and enables an
