@@ -41,7 +41,7 @@ class NeuralTemporalAgent:
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         payload = torch.load(checkpoint, map_location=device, weights_only=True)
-        if not isinstance(payload, dict) or payload.get("format") != "deltarune-neural-temporal-policy-v1":
+        if not isinstance(payload, dict) or payload.get("format") not in {"deltarune-neural-temporal-policy-v1", "deltarune-neural-rl-v2"}:
             raise ValueError("checkpoint is not a temporal neural policy checkpoint")
         raw = payload.get("temporal_config", {})
         config = NeuralTemporalConfig(
