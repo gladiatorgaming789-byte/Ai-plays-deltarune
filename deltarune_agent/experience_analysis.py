@@ -59,7 +59,7 @@ def analyze_dataset(path: Path) -> dict[str, object]:
         else tuple(f"feature_{index}" for index in range(feature_width or 0))
     )
     feature_available_counts = [0] * (feature_width or 0)
-    feature_slots = total * 2
+    feature_slots = total * 2 * (feature_width or 0)
     if feature_width is not None:
         for item in transitions:
             for index, mask in enumerate(item.available):
