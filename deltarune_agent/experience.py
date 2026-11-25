@@ -186,3 +186,43 @@ class NeuralExperienceWriter:
         if not self._handle.closed:
             self._handle.flush()
             self._handle.close()
+
+
+@dataclass(frozen=True)
+class NeuralPolicySample:
+    """One supervised policy-training example with an unassigned reward."""
+
+    observation: tuple[float, ...]
+    available: tuple[float, ...]
+    action: str
+    source_sequence: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.action not in ACTIONS:
+            raise ValueError(f"unknown neural action: {self.action!r}")
+        if len(self.observation) != len(self.available):
+            raise ValueError("observation and availability widths differ")
+        if not all(
+            isinstance(value, (int, float)) and math.isfinite(value)
+            for value in (*self.observation, *self.available)
+        ):
+            raise ValueError(
+                "policy sample contains a non-finite or non-numeric value"
+            )
+        if any(value not in (0, 1, 0.0, 1.0) for value in self.available):
+            raise ValueError("availability masks must contain only 0 or 1")
+
+
+def policy_samples_from_transitions(
+    transitions: Iterable[NeuralTransition],
+) -> list[NeuralPolicySample]:
+    """Extract current-state/action pairs without carrying reward into training."""
+    return [
+        NeuralPolicySample(
+            observation=item.observation,
+            available=item.available,
+            action=item.action,
+            source_sequence=item.source_sequence,
+        )
+        for item in transitions
+    ]
