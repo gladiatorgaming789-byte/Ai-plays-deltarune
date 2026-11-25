@@ -59,6 +59,11 @@ def main() -> None:
 
         launch_neural_shadow_gui()
         return
+    if argv and argv[0] == "train-neural-policy":
+        from .neural_training import main as train_main
+
+        raise SystemExit(train_main(argv[1:]))
+
     if argv and argv[0] == "run-doctor":
         # Trusted v1.0 stays on the lightweight, read-only artifact path.
         from .run_doctor_release import cli
