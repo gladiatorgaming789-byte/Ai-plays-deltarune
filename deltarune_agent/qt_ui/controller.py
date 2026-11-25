@@ -55,6 +55,7 @@ class RunController(QObject):
         game_window: str,
         speed: str,
         live: bool,
+        collect_neural_experiences: bool = False,
         training: bool = False,
         population_size: int = DEFAULT_POPULATION_SIZE,
         chapter: int = 1,
@@ -103,6 +104,17 @@ class RunController(QObject):
             arguments.extend(("--runs-root", str(Path(runs_root))))
         if live:
             arguments.append("--live")
+        if collect_neural_experiences and not training:
+            dataset_path = (
+                Path(memory_directory) / "neural-experiences.jsonl"
+                if memory_directory is not None
+                else self.project_root / "runs" / "neural-experiences.jsonl"
+            )
+            arguments.extend((
+                "--collect-neural-experiences",
+                "--neural-experiences",
+                str(dataset_path),
+            ))
         if training:
             arguments.extend(
                 (
