@@ -76,3 +76,27 @@ def test_transition_round_trip(tmp_path: Path):
     loaded = read_transitions(path)
 
     assert loaded == original
+
+
+def test_streaming_writer_appends_and_flushes(tmp_path: Path):
+    from deltarune_agent.experience import NeuralExperienceWriter
+
+    path = tmp_path / "stream.jsonl"
+    writer = NeuralExperienceWriter(path)
+    writer.write(transition())
+    writer.write(transition(action="left"))
+    assert writer.count == 2
+    writer.close()
+    loaded = read_transitions(path)
+    assert [item.action for item in loaded] == ["right", "left"]
+
+
+def test_transition_rejects_non_finite_values():
+    from dataclasses import replace
+
+    try:
+        replace(transition(), reward=float("nan"))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("NaN reward was accepted")
