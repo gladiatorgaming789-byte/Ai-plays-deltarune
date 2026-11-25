@@ -495,7 +495,12 @@ This layer intentionally does **not** calculate rewards or inject developer-only
 The existing desktop controller now exposes a **Neural Shadow** button in its
 run controls. It opens a separate read-only monitor that consumes the same
 localhost telemetry stream as the controller, encodes the fixed numerical
-observation vector, and runs the neural policy/value network.
+observation vector, and runs the neural policy/value network. It can also be
+opened directly with:
+
+```powershell
+python -m deltarune_agent neural-shadow
+```
 
 Shadow mode is intentionally non-authoritative:
 
