@@ -69,6 +69,16 @@ def main() -> None:
 
         raise SystemExit(evaluate_main(argv[1:]))
 
+    if argv and argv[0] == "train-neural-temporal":
+        from .neural_temporal import main as temporal_main
+
+        raise SystemExit(temporal_main(argv[1:]))
+
+    if argv and argv[0] == "train-neural-rl":
+        from .neural_rl import main as rl_main
+
+        raise SystemExit(rl_main(argv[1:]))
+
     if argv and argv[0] == "run-doctor":
         # Trusted v1.0 stays on the lightweight, read-only artifact path.
         from .run_doctor_release import cli
