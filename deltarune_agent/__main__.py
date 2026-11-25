@@ -79,6 +79,11 @@ def main() -> None:
 
         raise SystemExit(rl_main(argv[1:]))
 
+    if argv and argv[0] == "assign-neural-rewards":
+        from .neural_rewards import main as reward_main
+
+        raise SystemExit(reward_main(argv[1:]))
+
     if argv and argv[0] == "run-doctor":
         # Trusted v1.0 stays on the lightweight, read-only artifact path.
         from .run_doctor_release import cli
