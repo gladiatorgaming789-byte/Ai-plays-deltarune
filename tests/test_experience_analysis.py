@@ -33,7 +33,8 @@ def test_dataset_analysis_reports_quality_and_unassigned_rewards(tmp_path: Path)
     report = analyze_dataset(path)
 
     assert report["transition_count"] == 2
-    assert report["action_counts"] == {"right": 2}
+    assert report["action_counts"]["right"] == 2
+    assert report["action_counts"]["wait"] == 0
     assert report["duplicate_observation_count"] == 1
     assert report["sequence_gap_pairs"] == 1
     assert report["reward_status"] == "unassigned"
