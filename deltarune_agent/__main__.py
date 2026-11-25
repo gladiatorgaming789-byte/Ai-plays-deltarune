@@ -54,6 +54,11 @@ def main() -> None:
         _auto_update_gui(argv)
         _launch_gui(argv[1:])
         return
+    if argv and argv[0] == "neural-shadow":
+        from .neural_shadow_gui import launch_neural_shadow_gui
+
+        launch_neural_shadow_gui()
+        return
     if argv and argv[0] == "run-doctor":
         # Trusted v1.0 stays on the lightweight, read-only artifact path.
         from .run_doctor_release import cli
