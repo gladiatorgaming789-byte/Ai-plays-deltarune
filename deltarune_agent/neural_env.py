@@ -129,7 +129,14 @@ class NeuralObservationEncoder:
             "state.mode.menu",
             "state.mode.battle",
             "state.mode.unknown",
-            "action.previous_index",
+            "action.previous.wait",
+            "action.previous.confirm",
+            "action.previous.cancel",
+            "action.previous.menu",
+            "action.previous.up",
+            "action.previous.down",
+            "action.previous.left",
+            "action.previous.right",
             "action.previous_duration",
         )
     )
@@ -258,8 +265,8 @@ class NeuralObservationEncoder:
             add(value, 1.0)
 
         action_name = previous_action if previous_action in ACTION_ORDER else "wait"
-        action_index = ACTION_ORDER.index(action_name)
-        add(action_index / max(1, len(ACTION_ORDER) - 1), 1.0)
+        for candidate in ACTION_ORDER:
+            add(1.0 if action_name == candidate else 0.0, 1.0)
         add_norm_positive(previous_action_duration, ACTION_DURATION_SCALE)
 
         if len(values) != len(self.feature_names):
