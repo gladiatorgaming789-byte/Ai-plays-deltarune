@@ -108,3 +108,22 @@ def test_analysis_handles_empty_dataset(tmp_path: Path):
     assert report["transition_count"] == 0
     assert report["action_fractions"]["wait"] == 0.0
     assert report["training_ready"] is False
+
+
+def test_analysis_blocks_current_next_width_mismatch(tmp_path: Path):
+    transition = NeuralTransition(
+        observation=(0.0, 0.5),
+        available=(1.0, 1.0),
+        action="wait",
+        reward=0.0,
+        next_observation=(0.1, 0.5, 0.2),
+        next_available=(1.0, 1.0, 1.0),
+        done=False,
+    )
+    path = tmp_path / "width-mismatch.jsonl"
+    write_transitions(path, [transition])
+
+    report = analyze_dataset(path)
+
+    assert report["transition_width_mismatches"] == 1
+    assert any("different current/next" in item for item in report["training_blockers"])
