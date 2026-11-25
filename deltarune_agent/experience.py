@@ -178,7 +178,7 @@ class NeuralExperienceWriter:
             transition.as_dict(),
             separators=(",", ":"),
             allow_nan=False,
-        ) + "\\n")
+        ) + "\n")
         self.count += 1
         self._handle.flush()
 
