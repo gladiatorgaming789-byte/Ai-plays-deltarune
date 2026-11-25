@@ -8,8 +8,9 @@ import json
 from pathlib import Path
 import shutil
 from typing import Callable, Mapping
+import sys
 
-from PySide6.QtCore import QObject, QPointF, QRect, QRunnable, QSize, QThreadPool, QTimer, Qt, QUrl, Signal
+from PySide6.QtCore import QObject, QPointF, QRect, QRunnable, QSize, QProcess, QThreadPool, QTimer, Qt, QUrl, Signal
 from PySide6.QtGui import QBrush, QColor, QDesktopServices, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -1288,6 +1289,7 @@ class TrainingPage(QWidget):
         self.can_promote = can_promote
         self._run_paths: list[Path] = []
         self._selected_run: Path | None = None
+        self._neural_process: QProcess | None = None
         self._build()
         self.reload()
 
@@ -1359,6 +1361,85 @@ class TrainingPage(QWidget):
         self.promote_button.clicked.connect(self._promote)
         review_layout.addWidget(self.promote_button)
         root.addWidget(review)
+
+        neural = Card()
+        neural_layout = QVBoxLayout(neural)
+        neural_heading = QHBoxLayout()
+        neural_heading.addWidget(
+            QLabel("Supervised Neural Policy"),
+            1,
+        )
+        self.neural_train_button = QPushButton("Train neural policy")
+        self.neural_train_button.setObjectName("primary")
+        self.neural_train_button.clicked.connect(self._train_neural_policy)
+        neural_heading.addWidget(self.neural_train_button)
+        neural_layout.addLayout(neural_heading)
+
+        self.neural_dataset = QLineEdit()
+        self.neural_dataset.setPlaceholderText(
+            "Profile neural-experiences.jsonl"
+        )
+        self.neural_dataset.setText(
+            str(self.memory_path() / "neural-experiences.jsonl")
+        )
+        neural_layout.addWidget(self.neural_dataset)
+
+        self.neural_status = QLabel(
+            "Imitation training uses numerical observations and recorded actions only. "
+            "Rewards are ignored; validation is chronological."
+        )
+        self.neural_status.setWordWrap(True)
+        self.neural_status.setObjectName("meta")
+        neural_layout.addWidget(self.neural_status)
+        root.addWidget(neural)
+
+    def _train_neural_policy(self) -> None:
+        if self._neural_process is not None and self._neural_process.state() != QProcess.ProcessState.NotRunning:
+            return
+        dataset = Path(self.neural_dataset.text().strip())
+        if not dataset.is_file():
+            QMessageBox.warning(
+                self,
+                "Neural dataset not found",
+                f"No dataset exists at:\n{dataset}",
+            )
+            return
+        checkpoint = self.memory_path() / "neural-policy.pt"
+        self._neural_process = QProcess(self)
+        self._neural_process.setWorkingDirectory(str(Path.cwd()))
+        self._neural_process.setProgram(sys.executable)
+        self._neural_process.setArguments([
+            "-u", "-m", "deltarune_agent", "train-neural-policy",
+            str(dataset), "--checkpoint", str(checkpoint), "--device", "auto",
+        ])
+        self._neural_process.readyReadStandardOutput.connect(self._neural_training_output)
+        self._neural_process.readyReadStandardError.connect(self._neural_training_output)
+        self._neural_process.finished.connect(self._neural_training_finished)
+        self.neural_train_button.setEnabled(False)
+        self.neural_status.setText("Training neural policy...")
+        self._neural_process.start()
+
+    def _neural_training_output(self) -> None:
+        if self._neural_process is None:
+            return
+        text = bytes(self._neural_process.readAllStandardOutput()).decode(
+            "utf-8", errors="replace"
+        )
+        if text:
+            self.neural_status.setText(text[-1800:].strip())
+
+    def _neural_training_finished(self, exit_code: int, _status) -> None:
+        self.neural_train_button.setEnabled(True)
+        if exit_code == 0:
+            self.neural_status.setText(
+                "Neural policy training complete. "
+                f"Checkpoint: {self.memory_path() / 'neural-policy.pt'}"
+            )
+        else:
+            self.neural_status.setText(
+                f"Neural policy training failed with exit code {exit_code}."
+            )
+        self._neural_process = None
 
     def set_runs_root(self, path: Path) -> None:
         self.runs_root = Path(path)
