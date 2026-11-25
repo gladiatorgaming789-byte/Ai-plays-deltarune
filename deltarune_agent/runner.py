@@ -81,6 +81,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="record telemetry-aligned state/action/next-state samples (no reward labels)",
     )
     run.add_argument(
+        "--neural-checkpoint",
+        type=Path,
+        help="temporal neural-policy checkpoint used by the optional neural controller",
+    )
+    run.add_argument(
+        "--neural-live",
+        action="store_true",
+        help="let the temporal neural policy send input; requires --live, telemetry, and --neural-checkpoint",
+    )
+    run.add_argument(
         "--neural-experiences",
         type=Path,
         default=Path("runs/neural-experiences.jsonl"),
@@ -291,6 +301,23 @@ def run(args: argparse.Namespace) -> Path:
         if args.no_telemetry
         else TelemetryReceiver(args.telemetry_port)
     )
+    neural_agent = None
+    if args.neural_live:
+        if not args.live:
+            raise ValueError("--neural-live requires --live")
+        if args.no_telemetry:
+            raise ValueError("--neural-live requires telemetry")
+        if args.neural_checkpoint is None:
+            raise ValueError("--neural-live requires --neural-checkpoint")
+        from .neural_controller import NeuralTemporalAgent
+
+        neural_agent = NeuralTemporalAgent.load(args.neural_checkpoint)
+        print(
+            f"Neural LIVE mode: {args.neural_checkpoint} | "
+            f"vision disabled | sequence={neural_agent.sequence_length}",
+            flush=True,
+        )
+
     policy = HierarchicalPolicy(args.seed, args.memory)
     if policy.memory_warning:
         print(f"Memory warning: {policy.memory_warning}")
@@ -469,11 +496,25 @@ def run(args: argparse.Namespace) -> Path:
                 telemetry,
                 observation.visual_valid,
             )
-            action = policy.choose(
-                observation,
-                perception,
-                telemetry,
-            )
+            if neural_agent is not None:
+                if telemetry is None or not telemetry.is_fresh(max_age=1.0):
+                    action = ACTIONS["wait"]
+                    policy.reason = "neural_waiting_for_fresh_telemetry"
+                else:
+                    neural_observation = neural_agent.observe(telemetry)
+                    neural_decision = neural_agent.predict(neural_observation)
+                    action = ACTIONS[neural_decision.action]
+                    policy.reason = (
+                        f"neural:{neural_decision.action} "
+                        f"confidence={neural_decision.confidence:.3f} "
+                        f"value={neural_decision.value:.3f}"
+                    )
+            else:
+                action = policy.choose(
+                    observation,
+                    perception,
+                    telemetry,
+                )
             observation = replace(
                 observation,
                 visual_valid=policy.last_visual_valid,
