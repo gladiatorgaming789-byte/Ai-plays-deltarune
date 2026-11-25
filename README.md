@@ -675,3 +675,23 @@ observations before the model is ever allowed to control Deltarune.
 The neural stack now has a non-authoritative shadow runner in `deltarune_agent/neural_shadow.py`. It consumes the same telemetry-based numerical observation contract as the future neural controller, produces an action distribution and value estimate, and records predictions/transitions without sending keyboard input.
 
 Shadow mode is intentionally separate from the existing gameplay policy: the existing policy remains authoritative. This makes it safe to collect real observations before the neural model is trusted with control. A checkpoint can be loaded later for trained-model evaluation.
+
+
+## Neural autonomy finalization path
+
+The neural stack now has the pieces needed for a controlled progression from recorded behavior to numerical-only recurrent control:
+
+1. Collect real telemetry-aligned transitions with `--collect-neural-experiences`.
+2. Analyze action/feature coverage before training.
+3. Warm-start a recurrent GRU policy with `train-neural-temporal`.
+4. Assign only an explicit, observable reward contract before RL training.
+5. Train the recurrent actor-critic with `train-neural-rl`. The RL checkpoint uses the same temporal architecture as live neural control and can be supplied as the live checkpoint.
+6. Evaluate the held-out chronological portion before allowing live control.
+7. Run the neural controller in shadow mode first.
+8. Only then opt into `--neural-live --live`.
+
+The recurrent RL trainer never treats missing rewards as zero: transitions remain `reward_status="unassigned"` until an environment/reward pass explicitly assigns them. RL validation is chronological rather than a random shuffle, and the final training transition does not bootstrap from itself when no successor state exists.
+
+The current movement reward is deliberately only a bootstrap experiment. It does not mean that the AI has learned Deltarune's objectives. The next learning upgrade should replace it with validated outcome rewards based on events the gameplay agent is legitimately able to observe, while preserving the same numerical observation contract.
+
+Neural live control remains opt-in and vision-free by default. A recurrent checkpoint is not allowed to bypass the existing emergency stop, telemetry freshness checks, or input-release cleanup. The long-term goal is a genuinely learned agent whose competence comes from observations, actions, consequences, and training—not from a hidden route list or developer-provided progression answers.
