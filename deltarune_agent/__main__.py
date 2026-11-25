@@ -64,6 +64,11 @@ def main() -> None:
 
         raise SystemExit(train_main(argv[1:]))
 
+    if argv and argv[0] == "evaluate-neural-policy":
+        from .neural_evaluation import main as evaluate_main
+
+        raise SystemExit(evaluate_main(argv[1:]))
+
     if argv and argv[0] == "run-doctor":
         # Trusted v1.0 stays on the lightweight, read-only artifact path.
         from .run_doctor_release import cli
