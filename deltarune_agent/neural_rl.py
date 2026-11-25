@@ -164,8 +164,15 @@ def train_actor_critic(
         # training sequence has no later state in this split, so it uses zero.
         with torch.no_grad():
             if len(train_x) > 1:
-                next_train = torch.cat((train_x[1:], train_x[-1:]), dim=0)
-                bootstrap = model(next_train.to(device_obj))["value"].detach()
+                # Shift only within the same chronological training split.
+                # The final transition has no observed successor in this
+                # dataset, so its bootstrap value is explicitly zero.
+                next_train = train_x[1:]
+                next_values = model(next_train.to(device_obj))["value"].detach()
+                bootstrap = torch.cat(
+                    (next_values, torch.zeros(1, device=device_obj)),
+                    dim=0,
+                )
             else:
                 bootstrap = torch.zeros_like(train_rewards.to(device_obj))
         target = (
