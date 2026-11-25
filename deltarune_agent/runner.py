@@ -400,7 +400,7 @@ def run(args: argparse.Namespace) -> Path:
                 if experience_writer is not None and neural_encoder is not None:
                     fresh = telemetry.is_fresh(max_age=1.0)
                     sample_key = (
-                        ("sequence", telemetry.packet_sequence)
+                        ("sequence", telemetry.packet_sequence, telemetry.received_at)
                         if telemetry.packet_sequence is not None
                         else ("received_at", telemetry.received_at)
                     )
