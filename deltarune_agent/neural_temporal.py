@@ -126,6 +126,52 @@ def build_temporal_policy_network(input_width: int, config: NeuralTemporalConfig
     return TemporalPolicyValueNetwork()
 
 
+def initialize_temporal_policy_checkpoint(
+    checkpoint: Path,
+    *,
+    config: NeuralTemporalConfig | None = None,
+    overwrite: bool = False,
+) -> dict[str, object]:
+    """Create a fresh, randomly initialized temporal policy checkpoint.
+
+    This deliberately does not require a dataset. The resulting checkpoint is
+    structurally compatible with the live neural controller and is intended as
+    a starting point for later supervised or RL training.
+    """
+    import torch
+
+    config = config or NeuralTemporalConfig(epochs=1, batch_size=1)
+    if checkpoint.exists() and not overwrite:
+        raise FileExistsError(f"checkpoint already exists: {checkpoint}")
+
+    torch.manual_seed(config.seed)
+    model = build_temporal_policy_network(DEFAULT_ENCODER.combined_width, config)
+    checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "format": "deltarune-neural-temporal-policy-v1",
+            "model_state_dict": model.state_dict(),
+            "encoder_width": DEFAULT_ENCODER.width,
+            "combined_input_width": DEFAULT_ENCODER.combined_width,
+            "action_names": list(ACTIONS),
+            "temporal_config": asdict(config),
+            "dataset": None,
+            "sequence_count": 0,
+            "best_validation_loss": None,
+            "history": [],
+            "initialization": "fresh_random",
+        },
+        checkpoint,
+    )
+    return {
+        "checkpoint": str(checkpoint),
+        "device": "cpu",
+        "sequence_count": 0,
+        "sequence_length": config.sequence_length,
+        "initialization": "fresh_random",
+    }
+
+
 def train_temporal_policy(
     dataset: Path,
     checkpoint: Path,
@@ -225,8 +271,9 @@ def train_temporal_policy(
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
-    parser = argparse.ArgumentParser(description="Train the temporal neural Deltarune policy.")
-    parser.add_argument("dataset", type=Path)
+    parser = argparse.ArgumentParser(description="Train or initialize the temporal neural Deltarune policy.")
+    parser.add_argument("dataset", type=Path, nargs="?")
+    parser.add_argument("--fresh", action="store_true", help="create a fresh randomly initialized checkpoint without a dataset")
     parser.add_argument("--checkpoint", type=Path, default=Path("runs/neural-temporal-policy.pt"))
     parser.add_argument("--sequence-length", type=int, default=8)
     parser.add_argument("--epochs", type=int, default=10)
@@ -238,7 +285,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
-    report = train_temporal_policy(
+    if args.fresh:
+        if args.dataset is None:
+            checkpoint = args.checkpoint
+        else:
+            checkpoint = args.dataset
+        report = initialize_temporal_policy_checkpoint(
+            checkpoint,
+            config=NeuralTemporalConfig(
+                sequence_length=args.sequence_length,
+                epochs=args.epochs,
+                batch_size=args.batch_size,
+                learning_rate=args.learning_rate,
+                weight_decay=args.weight_decay,
+                validation_fraction=args.validation_fraction,
+                seed=args.seed,
+                device=args.device,
+            ),
+        )
+    else:
+        if args.dataset is None:
+            parser.error("dataset is required unless --fresh is used")
+        report = train_temporal_policy(
         args.dataset,
         args.checkpoint,
         config=NeuralTemporalConfig(
