@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 from .controller import KeyboardController
+from .actions import ACTIONS
 from .hierarchical_policy import HierarchicalPolicy
 from .observer import ScreenObserver
 from .perception import (
