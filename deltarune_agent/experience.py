@@ -72,6 +72,7 @@ class NeuralTransition:
             "available": list(self.available),
             "action": self.action,
             "reward": self.reward,
+            "reward_status": "unassigned",
             "next_observation": list(self.next_observation),
             "next_available": list(self.next_available),
             "done": self.done,
@@ -156,3 +157,29 @@ def read_transitions(path: Path) -> list[NeuralTransition]:
             except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
                 raise ValueError(f"invalid transition on line {line_number}") from exc
     return result
+
+
+class NeuralExperienceWriter:
+    """Append-only writer for telemetry-aligned neural transitions."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._handle = self.path.open("a", encoding="utf-8")
+        self.count = 0
+
+    def write(self, transition: NeuralTransition) -> None:
+        if self._handle.closed:
+            raise RuntimeError("experience writer is closed")
+        self._handle.write(json.dumps(
+            transition.as_dict(),
+            separators=(",", ":"),
+            allow_nan=False,
+        ) + "\\n")
+        self.count += 1
+        self._handle.flush()
+
+    def close(self) -> None:
+        if not self._handle.closed:
+            self._handle.flush()
+            self._handle.close()
