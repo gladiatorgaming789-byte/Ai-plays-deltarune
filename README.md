@@ -252,9 +252,13 @@ experiences** in the desktop run bar, or run a normal bounded episode with the
 opt-in collector:
 
 ```powershell
-python -m deltarune_agent run --steps 2000 --collect-neural-experiences
+python -m deltarune_agent run --live --steps 2000 --collect-neural-experiences
 ```
 
+Use `--live` only when you want the existing controller to actually
+execute its selected actions; without it, the run is a dry run and records
+proposed actions rather than actions sent to the game. In the GUI, enable both
+**Live input** and **Collect neural experiences** for executed-action samples.
 This writes append-only JSONL transitions to
 `runs/neural-experiences.jsonl` by default. Use
 `--neural-experiences PATH` to select another dataset file. Collection
