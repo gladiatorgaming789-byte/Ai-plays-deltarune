@@ -265,6 +265,16 @@ class OperatorWindow(QMainWindow):
         secondary.setSpacing(7)
         self.live_input = QCheckBox("Live input")
         primary.addWidget(self.live_input)
+        self.collect_neural = QCheckBox("Collect neural experiences")
+        self.collect_neural.setChecked(
+            str(self.settings.value("run/collect_neural", "false")).casefold()
+            in {"1", "true", "yes"}
+        )
+        self.collect_neural.setToolTip(
+            "Record numerical state/action/next-state samples for offline inspection. "
+            "Rewards remain unassigned; this does not give the neural agent control."
+        )
+        primary.addWidget(self.collect_neural)
         self.run_mode = QComboBox()
         self.run_mode.addItems(["Normal run", "Population training"])
         self.run_mode.setCurrentText(str(self.settings.value("run/mode", "Normal run")))
@@ -345,6 +355,9 @@ class OperatorWindow(QMainWindow):
         )
         self.training_chapter.setEnabled(
             mode == "Population training" and not self.controller.running
+        )
+        self.collect_neural.setEnabled(
+            mode != "Population training" and not self.controller.running
         )
 
     def _connect(self) -> None:
@@ -427,11 +440,13 @@ class OperatorWindow(QMainWindow):
             except (OSError, RuntimeError, ValueError) as exc:
                 QMessageBox.critical(self, "Could not apply game speed", str(exc))
                 return
+        self.settings.setValue("run/collect_neural", self.collect_neural.isChecked())
         self.controller.start_run(
             steps=self.steps.value(),
             game_window=self.game_window.text(),
             speed=self.speed.currentText(),
             live=self.live_input.isChecked(),
+            collect_neural_experiences=self.collect_neural.isChecked(),
             training=training,
             population_size=self.population_size.value(),
             chapter=self.training_chapter.currentIndex() + 1,
