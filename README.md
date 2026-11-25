@@ -481,3 +481,10 @@ The observation includes player position and foot position, horizontal/vertical 
 The encoder is deliberately pure Python and has no ML dependency yet. The next neural milestone can consume `NeuralObservation.combined()` directly, while a later recurrent model can stack these observations over time without changing the environment contract.
 
 Vision remains an optional future input channel rather than a prerequisite for the neural agent.
+
+
+## Neural experience interface
+
+The neural stack now has a transition/replay layer in `deltarune_agent/experience.py`. A `NeuralTransition` stores the numerical observation, action, reward, next observation, terminal flag, and telemetry sequence IDs. `NeuralReplayBuffer` provides bounded storage and deterministic sampling, while JSONL helpers make transitions portable for offline training.
+
+This layer intentionally does **not** calculate rewards or inject developer-only labels. Reward assignment remains an environment/controller responsibility. The next step is to connect this transition interface to live/shadow execution so real observations and actions can be recorded without giving the untrained neural policy control of the game.
