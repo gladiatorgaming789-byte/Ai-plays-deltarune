@@ -255,6 +255,13 @@ mod tests {
     }
 
     #[test]
+    fn room_bucket_matches_python_blake2b_digest_size_two() {
+        let sample = TelemetryInput { room_id: 7, room_name: "room_home".into(), ..TelemetryInput::default() };
+        let obs = encode(&sample, None, None);
+        assert!((obs.values[30] - (253.0 / 255.0)).abs() < 1e-15);
+    }
+
+    #[test]
     fn non_finite_optional_values_are_missing() {
         let mut sample = TelemetryInput::default();
         sample.hspeed = Some(f64::NAN);
