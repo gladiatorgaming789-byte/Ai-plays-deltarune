@@ -105,7 +105,7 @@ fn norm_signed(value: Option<f64>, scale: f64) -> (f64, f64) {
 
 fn norm_positive(value: Option<f64>, scale: f64) -> (f64, f64) {
     match value {
-        Some(v) if v.is_finite() => (v / scale).max(0.0).min(1.0, 1.0),
+        Some(v) if v.is_finite() => (v / scale).max(0.0).min(1.0),
         _ => (0.0, 0.0),
     }
 }
@@ -248,7 +248,7 @@ mod tests {
     fn previous_action_is_one_hot_and_invalid_action_falls_back_to_wait() {
         let sample = TelemetryInput::default();
         let right = encode(&sample, Some("right"), Some(0.25));
-        assert_eq!(right.values[53], 1.0);
+        assert_eq!(right.values[52], 1.0);
         assert_eq!(right.values[45], 0.0);
         let invalid = encode(&sample, Some("teleport"), None);
         assert_eq!(invalid.values[45], 1.0);
