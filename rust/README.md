@@ -47,3 +47,18 @@ names, packet sequence, and room metadata. The neural input remains
 This first milestone implements encoding only. It does not claim a speedup
 for model training, does not perform neural inference, and does not send game
 input. Performance decisions will be based on measured parity and benchmarks.
+
+
+## R1 parity benchmark
+
+From the repository root, after building the release binary:
+
+```powershell
+cargo build --release --manifest-path rust/deltarune_runtime/Cargo.toml --bin encode-observation
+python scripts/benchmark_neural_encoder.py --iterations 5000
+```
+
+The benchmark starts one persistent Rust JSONL process, checks the complete
+observation/mask/feature-name contract against the Python encoder, then reports
+throughput for both implementations. It is a reference benchmark, not a claim
+that Rust will improve end-to-end game learning speed.
