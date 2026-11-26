@@ -1,0 +1,26 @@
+name: Rust runtime
+
+on:
+  push:
+    branches: [development]
+    paths:
+      - "rust/deltarune_runtime/**"
+      - ".github/workflows/rust-runtime.yml"
+  pull_request:
+    paths:
+      - "rust/deltarune_runtime/**"
+      - ".github/workflows/rust-runtime.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run Rust tests
+        working-directory: rust/deltarune_runtime
+        run: cargo test --all-targets
+      - name: Build release encoder
+        working-directory: rust/deltarune_runtime
+        run: cargo build --release --bin encode-observation
