@@ -120,7 +120,7 @@ def main() -> int:
     request = rust_request(s)
     line = json.dumps(request, separators=(",", ":")) + "\n"
 
-    with binary.open() if False else subprocess.Popen(
+    with subprocess.Popen(
         [str(binary)],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
