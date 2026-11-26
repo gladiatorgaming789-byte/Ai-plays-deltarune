@@ -129,7 +129,7 @@ fn angle_components(direction: Option<f64>) -> (f64, f64, f64) {
 }
 
 fn one_hot(value: Option<&str>, order: &[&str]) -> Vec<f64> {
-    let normalized = value.unwrap_or("unknown").to_lowercase();
+    let normalized = value.filter(|v| !v.is_empty()).unwrap_or("unknown").to_lowercase();
     order.iter().map(|item| if normalized == *item { 1.0 } else { 0.0 }).collect()
 }
 
