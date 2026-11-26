@@ -709,3 +709,16 @@ The recurrent RL trainer never treats missing rewards as zero: transitions remai
 The current movement reward is deliberately only a bootstrap experiment. It does not mean that the AI has learned Deltarune's objectives. The next learning upgrade should replace it with validated outcome rewards based on events the gameplay agent is legitimately able to observe, while preserving the same numerical observation contract.
 
 Neural live control remains opt-in and vision-free by default. A recurrent checkpoint is not allowed to bypass the existing emergency stop, telemetry freshness checks, or input-release cleanup. The long-term goal is a genuinely learned agent whose competence comes from observations, actions, consequences, and training—not from a hidden route list or developer-provided progression answers.
+
+## Rust numerical runtime (Milestone R1)
+
+The first Rust runtime milestone lives in `rust/deltarune_runtime/`. It
+implements the same vision-free 55-feature observation vector and 55-value
+availability mask as `deltarune_agent/neural_env.py`, including normalization,
+action one-hot encoding, and the BLAKE2b room bucket. A JSON Lines CLI exposes
+the encoder for parity tests and future integration.
+
+Python remains the authoritative live implementation until the Rust crate has
+been built and cross-checked against representative Python telemetry samples.
+This milestone does not change live control, model checkpoints, datasets, or
+training. See `rust/README.md` for build, test, and CLI instructions.
